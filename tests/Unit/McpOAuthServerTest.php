@@ -37,6 +37,18 @@ it('treats an unreadable admin switch store as off', function (): void {
     expect($server->isEnabled())->toBeFalse();
 });
 
+it('treats a throwing admin switch as off (S11)', function (): void {
+    config()->set('mcp-oauth.enabled', true);
+    config()->set('mcp-oauth.mcp_enabled', true);
+
+    $server = new McpOAuthServer(
+        config(),
+        new FakeAdminSwitch(isEnabled: true, throwsOnRead: true),
+    );
+
+    expect($server->isEnabled())->toBeFalse();
+});
+
 it('treats a half-set env key pair as missing', function (): void {
     config()->set('passport.private_key', "-----BEGIN RSA PRIVATE KEY-----\nenv\n-----END RSA PRIVATE KEY-----");
     config()->set('passport.public_key', null);
@@ -79,10 +91,17 @@ it('builds issuer and resource from APP_URL, never the request Host', function (
     expect($server->issuer())->toBe('https://mcp-oauth.test')
         ->and($server->resourceIdentifier())->toBe('https://mcp-oauth.test/mcp')
         ->and($server->acceptsResource('https://mcp-oauth.test/mcp'))->toBeTrue()
+        ->and($server->acceptsResource('https://MCP-OAUTH.TEST/mcp'))->toBeTrue()
         ->and($server->acceptsResource('https://evil.example/mcp'))->toBeFalse()
         ->and($server->protectedResourceMetadataUrl())->toBe(
             'https://mcp-oauth.test/.well-known/oauth-protected-resource/mcp',
         );
+});
+
+it('normalises a trailing slash in mcp_path', function (): void {
+    config()->set('mcp-oauth.mcp_path', '/mcp/');
+
+    expect(makeServer(true, true)->resourceIdentifier())->toBe('https://mcp-oauth.test/mcp');
 });
 
 it('reports passport_keys only while OAuth is enabled', function (): void {
@@ -127,16 +146,21 @@ it('resolves mcp_enabled from a config key string or a closure', function (): vo
         ->and(makeServer(true, true, static fn (): bool => false)->isEnabled())->toBeFalse();
 });
 
-it('is ready only when enabled and keys exist', function (): void {
+it('is ready only when enabled, keys exist and app.url is absolute', function (): void {
     config()->set('passport.private_key', null);
     config()->set('passport.public_key', null);
     expect(makeServer(true, true)->isReady())->toBeFalse();
 
     config()->set('passport.private_key', "-----BEGIN RSA PRIVATE KEY-----\na\n-----END RSA PRIVATE KEY-----");
     config()->set('passport.public_key', "-----BEGIN PUBLIC KEY-----\nb\n-----END PUBLIC KEY-----");
-    expect(makeServer(true, true)->isReady())->toBeTrue()
+    $ready = makeServer(true, true);
+    expect($ready->isReady())->toBeTrue()
         ->and(makeServer(false, true)->isReady())->toBeFalse();
 
+    config()->set('app.url', 'mcp-oauth.test');
+    expect($ready->isReady())->toBeFalse();
+
+    config()->set('app.url', 'https://mcp-oauth.test');
     config()->set('passport.private_key', null);
     config()->set('passport.public_key', null);
 });

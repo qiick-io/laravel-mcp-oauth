@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `RedirectUriGuard` refuses hostless `http(s)` redirect URIs (`https:///…`,
+  `https:/…`, …) and canonicalises IPv6 / unmaps `::ffff:` so alternate
+  spellings hit the same block; non-dotted-decimal IPv4 forms are refused.
+- `McpOAuthServer`: a throwing `AdminSwitch` counts as OFF (S11); `isReady`
+  requires an absolute `app.url`; `mcp_path` trailing slashes normalised;
+  resource host comparison is case-insensitive.
+- `ClientThrottleKey` excludes `::/127` from IPv4-compatible unmapping and
+  unmaps `::ffff:0:a.b.c.d` plus `64:ff9b:1::/48`.
+
 ### Added
 
 - Core runtime services: `McpOAuthServer` (three gates, Passport key usability

@@ -94,6 +94,59 @@ it('refuses http without a usable host', function (): void {
         ->and($guard->isAllowedScheme('http://[not-an-ip]/cb'))->toBeFalse();
 });
 
+it('refuses hostless http(s) redirect URIs that browsers resolve onto the path host', function (string $uri): void {
+    $guard = new RedirectUriGuard(new BlockedHostCatalog(['evil.com']));
+
+    expect($guard->isAcceptableForRegistration($uri))->toBeFalse()
+        ->and($guard->isAllowedScheme($uri))->toBeFalse()
+        ->and(fn () => $guard->hostOf($uri))->toThrow(InvalidArgumentException::class);
+})->with([
+    'triple slash' => ['https:///evil.com/cb'],
+    'single slash' => ['https:/evil.com/cb'],
+    'scheme only' => ['https:evil.com/cb'],
+    'quadruple slash' => ['https:////evil.com/cb'],
+    'http triple slash' => ['http:///127.0.0.1/cb'],
+]);
+
+it('canonicalises IPv6 and unmaps ::ffff so alternate spellings hit the same block', function (): void {
+    $guard = new RedirectUriGuard(new BlockedHostCatalog(['2001:db8::1', '1.2.3.4']));
+
+    expect($guard->isHostBlocked('2001:0db8:0:0::1'))->toBeTrue()
+        ->and($guard->isHostBlocked('[2001:0db8:0:0::1]'))->toBeTrue()
+        ->and($guard->isHostBlocked('::ffff:1.2.3.4'))->toBeTrue()
+        ->and($guard->isHostBlocked('[::ffff:1.2.3.4]'))->toBeTrue()
+        ->and($guard->normalizeHost('2001:0db8:0:0::1'))->toBe('2001:db8::1')
+        ->and($guard->normalizeHost('::ffff:1.2.3.4'))->toBe('1.2.3.4');
+});
+
+it('refuses non-dotted-decimal IPv4 spellings that WHATWG would still parse', function (string $host): void {
+    $guard = new RedirectUriGuard(new BlockedHostCatalog(['1.2.3.4']));
+
+    expect(fn () => $guard->normalizeHost($host))->toThrow(InvalidArgumentException::class)
+        ->and($guard->isAcceptableForRegistration('https://'.$host.'/cb'))->toBeFalse()
+        ->and($guard->isHostBlocked($host))->toBeTrue();
+})->with([
+    'integer' => ['16909060'],
+    'octal octets' => ['01.02.03.04'],
+    'short form' => ['127.1'],
+    'hex' => ['0x7f000001'],
+]);
+
+it('flags clients whose stored redirect URIs fail registration rules', function (): void {
+    $guard = new RedirectUriGuard(new BlockedHostCatalog([]));
+    $backslash = new Client;
+    $backslash->setRawAttributes([
+        'redirect_uris' => json_encode(['https://evil.com\\@good.com/cb'], JSON_THROW_ON_ERROR),
+    ]);
+    $hostless = new Client;
+    $hostless->setRawAttributes([
+        'redirect_uris' => json_encode(['https:///evil.com/cb'], JSON_THROW_ON_ERROR),
+    ]);
+
+    expect($guard->clientHasBlockedRedirectHost($backslash))->toBeTrue()
+        ->and($guard->clientHasBlockedRedirectHost($hostless))->toBeTrue();
+});
+
 it('refuses registration for hosts that fail normalisation after ASCII check', function (): void {
     $guard = new RedirectUriGuard;
 
@@ -131,14 +184,15 @@ it('returns unwrap failure host from displayHostOf when normalisation throws on 
         ->and($guard->displayHostOf('http://localhost/cb'))->toBe('localhost');
 });
 
-it('hostOf returns null for empty host and throws on unparseable URIs', function (): void {
+it('hostOf returns null for empty host on private-use schemes and throws on unparseable URIs', function (): void {
     $guard = new RedirectUriGuard;
 
     expect($guard->hostOf('cursor://'))->toBeNull()
-        ->and(fn () => $guard->hostOf('not a uri'))->toThrow(InvalidArgumentException::class);
+        ->and(fn () => $guard->hostOf('not a uri'))->toThrow(InvalidArgumentException::class)
+        ->and(fn () => $guard->hostOf('https:///evil.com/cb'))->toThrow(InvalidArgumentException::class);
 });
 
-it('forbids parse_url anywhere under src', function (): void {
+it('forbids parse_url anywhere under src including string callables', function (): void {
     $sourceRoot = dirname(__DIR__, 2).'/src';
     $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($sourceRoot));
 
@@ -148,6 +202,8 @@ it('forbids parse_url anywhere under src', function (): void {
         }
 
         $contents = (string) file_get_contents($file->getPathname());
-        expect($contents)->not->toMatch('/\bparse_url\s*\(/');
+        expect($contents)->not->toMatch('/\bparse_url\s*\(/')
+            ->and($contents)->not->toContain("'parse_url'")
+            ->and($contents)->not->toContain('"parse_url"');
     }
 });

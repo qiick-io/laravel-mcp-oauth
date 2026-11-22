@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Config\Repository;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Testing\FakeAdminSwitch;
@@ -26,10 +27,17 @@ it('freezes the wire grant and challenge constants', function (): void {
 });
 
 it('treats a missing mcp-oauth.enabled config default as off', function (): void {
-    config()->set('mcp-oauth.mcp_enabled', true);
-    config()->offsetUnset('mcp-oauth.enabled');
+    // Never set the key: offsetUnset leaves null and does not exercise the default arg.
+    $config = new Repository([
+        'mcp-oauth' => [
+            'mcp_enabled' => true,
+        ],
+        'app' => [
+            'url' => 'https://mcp-oauth.test',
+        ],
+    ]);
 
-    expect((new McpOAuthServer(config(), new FakeAdminSwitch(true)))->isEnabled())->toBeFalse();
+    expect((new McpOAuthServer($config, new FakeAdminSwitch(true)))->isEnabled())->toBeFalse();
 });
 
 it('treats string zero enabled config as off via bool cast', function (): void {
@@ -219,9 +227,17 @@ it('floors TTLs at one and ignores non-integer config', function (): void {
 });
 
 it('reads a product MCP flag config key with a false default when the key is missing', function (): void {
-    config()->offsetUnset('product.missing.flag');
+    $config = new Repository([
+        'mcp-oauth' => [
+            'enabled' => true,
+            'mcp_enabled' => 'product.missing.flag',
+        ],
+        'app' => [
+            'url' => 'https://mcp-oauth.test',
+        ],
+    ]);
 
-    expect(mutationServer(mcpEnabled: 'product.missing.flag')->isEnabled())->toBeFalse();
+    expect((new McpOAuthServer($config, new FakeAdminSwitch(true)))->isEnabled())->toBeFalse();
 });
 
 it('casts closure and config-key results through bool', function (): void {

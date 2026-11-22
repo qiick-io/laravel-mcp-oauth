@@ -17,8 +17,19 @@ it('unmaps IPv4-mapped, IPv4-compatible and NAT64 addresses to the embedded IPv4
     expect(ClientThrottleKey::fromRequest($request))->toBe($expected);
 })->with([
     'mapped' => ['::ffff:203.0.113.10', '203.0.113.10'],
+    'translated' => ['::ffff:0:203.0.113.10', '203.0.113.10'],
     'compatible' => ['::203.0.113.10', '203.0.113.10'],
     'nat64' => ['64:ff9b::203.0.113.10', '203.0.113.10'],
+    'nat64 local /48' => ['64:ff9b:1::203.0.113.10', '203.0.113.10'],
+]);
+
+it('does not treat ::/127 as an IPv4-compatible address', function (string $address): void {
+    $request = Request::create('/', 'GET', server: ['REMOTE_ADDR' => $address]);
+
+    expect(ClientThrottleKey::fromRequest($request))->toStartWith('v6:');
+})->with([
+    'unspecified' => ['::'],
+    'loopback' => ['::1'],
 ]);
 
 it('keys other IPv6 by the exact /64 network prefix', function (): void {

@@ -8,7 +8,9 @@ use DateInterval;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Laravel\Mcp\Server\Registrar;
 use Laravel\Passport\Passport;
+use League\Uri\UriString;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
+use Throwable;
 
 /**
  * Whether OAuth for the product's MCP endpoint is on, ready, and which resource
@@ -38,7 +40,12 @@ final class McpOAuthServer
             return false;
         }
 
-        if (! $this->adminSwitch->enabled()) {
+        // Design §4.2 / S11: a throwing admin switch counts as OFF, never 500.
+        try {
+            if (! $this->adminSwitch->enabled()) {
+                return false;
+            }
+        } catch (Throwable) {
             return false;
         }
 
@@ -64,7 +71,13 @@ final class McpOAuthServer
 
     public function isReady(): bool
     {
-        return $this->isEnabled() && $this->hasPassportKeys();
+        if (! $this->isEnabled() || ! $this->hasPassportKeys()) {
+            return false;
+        }
+
+        $issuer = $this->issuer();
+
+        return $issuer !== '' && preg_match('#^https?://[^/]#i', $issuer) === 1;
     }
 
     public function issuer(): string
@@ -81,7 +94,35 @@ final class McpOAuthServer
 
     public function acceptsResource(mixed $resource): bool
     {
-        return is_string($resource) && rtrim($resource, '/') === $this->resourceIdentifier();
+        if (! is_string($resource)) {
+            return false;
+        }
+
+        $expected = $this->resourceIdentifier();
+        $candidate = rtrim($resource, '/');
+
+        if ($candidate === $expected) {
+            return true;
+        }
+
+        try {
+            $candidateParts = UriString::parse($candidate);
+            $expectedParts = UriString::parse($expected);
+        } catch (Throwable) {
+            return false;
+        }
+
+        $candidateHost = $candidateParts['host'] ?? null;
+        $expectedHost = $expectedParts['host'] ?? null;
+
+        if (! is_string($candidateHost) || ! is_string($expectedHost)) {
+            return false;
+        }
+
+        $candidateParts['host'] = strtolower($candidateHost);
+        $expectedParts['host'] = strtolower($expectedHost);
+
+        return rtrim(UriString::build($candidateParts), '/') === rtrim(UriString::build($expectedParts), '/');
     }
 
     public function protectedResourceMetadataUrl(): string
@@ -113,7 +154,7 @@ final class McpOAuthServer
     {
         $path = $this->config->get('mcp-oauth.mcp_path', 'mcp');
 
-        return ltrim(is_string($path) && $path !== '' ? $path : 'mcp', '/');
+        return trim(is_string($path) && $path !== '' ? $path : 'mcp', '/');
     }
 
     private function positiveConfigInt(string $key, int $default): int
