@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use LogicException;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
@@ -264,7 +265,7 @@ it('S4: oauth_consent_records Eloquent model refuses update and delete', functio
     ]);
 
     expect(fn () => $consent->update(['decision' => 'denied']))
-        ->toThrow(\LogicException::class)
+        ->toThrow(LogicException::class)
         ->and(fn () => $consent->delete())
-        ->toThrow(\LogicException::class);
+        ->toThrow(LogicException::class);
 });
