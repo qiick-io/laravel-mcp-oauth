@@ -25,6 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mcp_auth_failures_per_minute` kept as a raw env string and validated with
+  `BoundedPositiveInt` at boot (same digit-only fail-closed path as TTLs /
+  rate caps). Route `throttle:mcp-oauth-*` middleware is documented as a
+  follow-up when authorize / token / register / revoke routes land.
+- `FamilyRevokingRefreshTokenRepository` (design §8.4 / S56 / S57 / S59): atomic
+  `UPDATE … WHERE revoked = false` under `lockForUpdate`; CAS miss or a
+  concurrently revoked bound grant throws `invalid_grant` so League cannot
+  issue after family revoke; parallel League-order race on the default DB
+  (MySQL / PostgreSQL / SQLite WAL) asserts the loser persists no tokens;
+  enrolled in `mutate-per-class.sh` (MSI ≥95); `FakeGrantStore` for Testbench.
+
 - Passport boot (design §5.6): `Passport::ignoreRoutes()` and device grant off
   in `register()` (S4 / S19); access, refresh and auth-code TTLs from raw
   `mcp-oauth.*_ttl_*` env strings in `boot()`, fail-closed on non-digit /

@@ -22,7 +22,7 @@ it('merges the package defaults into the mcp-oauth config', function (): void {
     expect(config('mcp-oauth.spec_revision'))->toBe('2026-07-28');
     expect(config('mcp-oauth.cimd.enabled'))->toBeFalse();
     expect(config('mcp-oauth.cimd.max_document_bytes'))->toBe(65536);
-    expect(config('mcp-oauth.mcp_auth_failures_per_minute'))->toBe(20);
+    expect(config('mcp-oauth.mcp_auth_failures_per_minute'))->toBe('20');
     expect(config('mcp-oauth.host_block_chunk_size'))->toBe(100);
     expect(config('mcp-oauth.grant_binding_column'))->toBe('api_key_id');
     expect(config('mcp-oauth.user_model'))->toBeNull();

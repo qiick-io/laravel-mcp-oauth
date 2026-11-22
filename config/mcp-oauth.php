@@ -49,6 +49,12 @@ return [
      * token,revoke}. Per-IP via ClientThrottleKey; per-client when client_id
      * (or HTTP Basic user) is present. DCR is IP-only (no client yet). Raw
      * env strings; boot validates 1..10000. 429 responses include Retry-After.
+     *
+     * Follow-up when OAuth routes land: attach middleware
+     * `throttle:mcp-oauth-register` on DCR, `throttle:mcp-oauth-authorize` on
+     * authorize, `throttle:mcp-oauth-token` on token, `throttle:mcp-oauth-revoke`
+     * on RFC 7009 revoke. Re-assert HTTP 429 + Retry-After on those routes
+     * (limiter unit coverage already exists).
      */
     'registrations_per_minute' => env('MCP_OAUTH_REGISTRATIONS_PER_MINUTE', '10'),
 
@@ -73,7 +79,11 @@ return [
      */
     'revoked_retention_days' => (int) env('MCP_OAUTH_REVOKED_RETENTION_DAYS', 90),
 
-    'mcp_auth_failures_per_minute' => (int) env('MCP_OAUTH_MCP_AUTH_FAILURES_PER_MINUTE', 20),
+    /*
+     * /mcp Bearer auth-failure limiter (lands with the door). Raw env string;
+     * boot validates 1..10000 like the other per-minute caps (no (int) cast).
+     */
+    'mcp_auth_failures_per_minute' => env('MCP_OAUTH_MCP_AUTH_FAILURES_PER_MINUTE', '20'),
 
     'host_block_chunk_size' => 100,
 

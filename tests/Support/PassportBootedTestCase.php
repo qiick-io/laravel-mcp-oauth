@@ -6,7 +6,9 @@ namespace Qiick\McpOAuth\Tests\Support;
 
 use Illuminate\Foundation\Application;
 use Laravel\Passport\PassportServiceProvider;
+use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\McpOAuthServiceProvider;
+use Qiick\McpOAuth\Testing\FakeGrantStore;
 
 /**
  * Boots the package together with Passport so route registration and grant
@@ -24,5 +26,17 @@ class PassportBootedTestCase extends PackageTestCase
             McpOAuthServiceProvider::class,
             PassportServiceProvider::class,
         ];
+    }
+
+    /**
+     * @param  Application  $app
+     */
+    protected function defineEnvironment($app): void
+    {
+        parent::defineEnvironment($app);
+
+        // FamilyRevokingRefreshTokenRepository needs GrantStore when Passport
+        // resolves the AuthorizationServer.
+        $app->singleton(GrantStore::class, FakeGrantStore::class);
     }
 }
