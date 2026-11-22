@@ -9,6 +9,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 CLASSES=(
+  'Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository'
   'Qiick\McpOAuth\ClientThrottleKey'
   'Qiick\McpOAuth\McpOAuthReadiness'
   'Qiick\McpOAuth\McpOAuthServer'
