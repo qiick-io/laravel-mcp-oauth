@@ -22,11 +22,12 @@ use ReflectionProperty;
  * `extra.laravel.providers` in composer.json.
  *
  * Always calls `Passport::ignoreRoutes()` and turns the device grant off in
- * `register()` (design Resolved #3 / #4). Token TTLs come from config in
- * `boot()`. Rate limiters, default scope, bearer response type and fail-closed
- * adapter validation land with later feature PRs. While `mcp-oauth.enabled` is
- * false (the default), missing product adapters are allowed so products can
- * install before writing adapters.
+ * `register()` (design Resolved #3 / #4). Token TTLs and the wire scope
+ * (`tokensCan` / `defaultScopes`) come from config / `McpOAuthServer` in
+ * `boot()`. Rate limiters, bearer response type and fail-closed adapter
+ * validation land with later feature PRs. While `mcp-oauth.enabled` is false
+ * (the default), missing product adapters are allowed so products can install
+ * before writing adapters.
  *
  * @api
  */
@@ -69,6 +70,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
         }
 
         $this->configurePassportTokenLifetimes();
+        $this->configurePassportScopes();
 
         if ($this->app->runningInConsole()) {
             $this->publishes([
@@ -143,5 +145,17 @@ final class McpOAuthServiceProvider extends ServiceProvider
         if ($this->app->resolved(AuthorizationServer::class)) {
             $applyAuthCodeLifetime($this->app->make(AuthorizationServer::class));
         }
+    }
+
+    /**
+     * Registers the wire scope descriptions and default scope (design §5.6).
+     */
+    private function configurePassportScopes(): void
+    {
+        /** @var McpOAuthServer $server */
+        $server = $this->app->make(McpOAuthServer::class);
+
+        Passport::tokensCan($server->scopeDescriptions());
+        Passport::defaultScopes([McpOAuthServer::WIRE_SCOPE]);
     }
 }

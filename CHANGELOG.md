@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mcp-oauth.*_ttl_*` env strings in `boot()`, fail-closed on non-digit /
   signed / float / scientific / out-of-range values with documented maxima
   (access ≤1440 min, refresh ≤365 d, auth code ≤10 min).
+- Passport scopes (design §5.6): `tokensCan` from `McpOAuthServer::scopeDescriptions()`
+  and `defaultScopes([mcp:use])`; ClientCredentialsGrant disabled so Passport’s
+  hard-coded `*` scope cannot be issued for MCP.
 
 - Package migrations loaded via `loadMigrationsFrom` when
   `mcp-oauth.migrations.load` is true (default; publish tag
