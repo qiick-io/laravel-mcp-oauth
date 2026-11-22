@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -15,7 +16,12 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('oauth_blocked_redirect_hosts', function (Blueprint $table): void {
+        $userModelClass = config('mcp-oauth.user_model') ?: config('auth.providers.users.model');
+        $userTable = is_string($userModelClass) && is_a($userModelClass, Model::class, true)
+            ? (new $userModelClass)->getTable()
+            : 'users';
+
+        Schema::create('oauth_blocked_redirect_hosts', function (Blueprint $table) use ($userTable): void {
             $table->id();
             $table->uuid('public_id')->unique();
             $table->string('host')->unique();
@@ -25,7 +31,7 @@ return new class extends Migration
             $table->dateTime('expires_at')->nullable()->index();
             $table->json('metadata')->nullable();
             $table->unsignedSmallInteger('schema_version')->default(1);
-            $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignId('created_by')->nullable()->constrained($userTable)->nullOnDelete();
             $table->timestamps();
         });
     }

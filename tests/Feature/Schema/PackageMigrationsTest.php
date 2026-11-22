@@ -211,22 +211,60 @@ function tableNamesCreatedByMigrationsIn(string $directory): array
 }
 
 it('S9: no package table name collides with any Passport 13 table', function (): void {
-    $packageTables = tableNamesCreatedByMigrationsIn(
-        dirname(__DIR__, 3).'/database/migrations',
-    );
+    $packageMigrationsDirectory = dirname(__DIR__, 3).'/database/migrations';
+    $packageTables = tableNamesCreatedByMigrationsIn($packageMigrationsDirectory);
     $passportTables = tableNamesCreatedByMigrationsIn(
         dirname(__DIR__, 3).'/vendor/laravel/passport/database/migrations',
     );
+    $reservedPassportTables = array_values(array_unique([
+        ...$passportTables,
+        'oauth_personal_access_clients',
+    ]));
 
     expect($packageTables)->not->toBeEmpty()
         ->and($passportTables)->not->toBeEmpty()
-        ->and(array_intersect($packageTables, $passportTables))->toBe([]);
+        ->and(array_intersect($packageTables, $reservedPassportTables))->toBe([]);
 
     foreach ($packageTables as $table) {
         expect(Schema::hasTable($table))->toBeTrue();
     }
 
-    foreach ($passportTables as $table) {
+    foreach ($reservedPassportTables as $table) {
         expect(Schema::hasTable($table))->toBeFalse("must not create Passport table {$table}");
     }
+
+    $alteredPassportTables = [];
+
+    foreach (glob($packageMigrationsDirectory.'/*.php') ?: [] as $migrationFile) {
+        $source = file_get_contents($migrationFile) ?: '';
+
+        if (preg_match_all("/Schema::table\\('([^']+)'/", $source, $matches) === false) {
+            continue;
+        }
+
+        foreach ($matches[1] as $tableName) {
+            if (in_array($tableName, $reservedPassportTables, true)) {
+                $alteredPassportTables[] = $tableName;
+            }
+        }
+    }
+
+    expect($alteredPassportTables)->toBe([]);
+});
+
+it('S4: oauth_consent_records Eloquent model refuses update and delete', function (): void {
+    $consent = OAuthConsentRecord::query()->create([
+        'client_id' => (string) Str::uuid7(),
+        'user_identifier' => (string) Str::uuid7(),
+        'decision' => 'approved',
+        'redirect_uri' => 'https://app.example/cb',
+        'redirect_host' => 'app.example',
+        'requested_scopes' => ['mcp:use'],
+        'created_at' => now(),
+    ]);
+
+    expect(fn () => $consent->update(['decision' => 'denied']))
+        ->toThrow(\LogicException::class)
+        ->and(fn () => $consent->delete())
+        ->toThrow(\LogicException::class);
 });

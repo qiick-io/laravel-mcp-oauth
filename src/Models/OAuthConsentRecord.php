@@ -6,10 +6,12 @@ namespace Qiick\McpOAuth\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use LogicException;
 
 /**
- * Append-only consent evidence row (S4). No updated_at; retention_until is the
- * only field written after create.
+ * Append-only consent evidence row (S4). No updated_at; the model refuses
+ * update and delete so the audit trail stays immutable. Retention purge uses
+ * the query builder, not Eloquent delete.
  *
  * @internal
  */
@@ -24,7 +26,41 @@ final class OAuthConsentRecord extends Model
     /**
      * @var list<string>
      */
-    protected $guarded = [];
+    protected $fillable = [
+        'client_id',
+        'user_identifier',
+        'grant_id',
+        'decision',
+        'redirect_uri',
+        'redirect_host',
+        'resource',
+        'requested_scopes',
+        'granted_scopes',
+        'role',
+        'resources',
+        'all_resources',
+        'attributes',
+        'consent_version',
+        'locale',
+        'ip_address',
+        'user_agent',
+        'correlation_id',
+        'retention_until',
+        'metadata',
+        'schema_version',
+        'created_at',
+    ];
+
+    protected static function booted(): void
+    {
+        self::updating(static function (): never {
+            throw new LogicException('oauth_consent_records is append-only; updates are refused.');
+        });
+
+        self::deleting(static function (): never {
+            throw new LogicException('oauth_consent_records is append-only; deletes are refused.');
+        });
+    }
 
     /**
      * @return array<string, string>

@@ -8,13 +8,21 @@ Binding source: standards completeness review §2 (2026-11-22) and
 [[2026-11-22 Standard names in base packages]].
 
 Core migrations are auto-loaded when `mcp-oauth.migrations.load` is true
-(default); set it false when the app publishes and owns the files.
-Optional/future tables (PAR, DPoP) stay publish-only. Edited in place until
-`1.0.0`. Each table has its own `create_`
+(default). **If you publish the migrations while `load` is still true,
+`migrate` creates each table twice** (once from the package path, once from
+`database/migrations`). After `vendor:publish --tag=mcp-oauth-migrations`, set
+`mcp-oauth.migrations.load` to `false` (or `MCP_OAUTH_LOAD_MIGRATIONS=false`)
+so only the app-owned copies run. Optional/future tables (PAR, DPoP) stay
+publish-only. Edited in place until `1.0.0`. Each table has its own `create_`
 file so a product that already has `oauth_blocked_redirect_hosts` (externa) can
 publish and customise only what it needs. Passport’s tables are never altered;
-a schema test scrapes Passport 13 migration `Schema::create` names and asserts
-no package table collides with them.
+a schema test scrapes Passport 13 migration `Schema::create` names (plus the
+reserved `oauth_personal_access_clients`) and asserts no package
+`Schema::create` / `Schema::table` touches them.
+
+`oauth_blocked_redirect_hosts.created_by` references the table of
+`config('mcp-oauth.user_model')`, falling back to
+`config('auth.providers.users.model')` (default `users`).
 
 UTC is assumed (`app.timezone`). Past-event stamps use `timestamp`; future
 dates (`expires_at`, `retention_until`, `client_secret_expires_at`,
@@ -75,7 +83,7 @@ is nullable with **no** database default (registration writes the value).
 | `expires_at` | dateTime | yes | null | index |
 | `metadata` | json | yes | null | — |
 | `schema_version` | unsignedSmallInteger | no | 1 | — |
-| `created_by` | foreignId → users | yes | null | FK, null on delete |
+| `created_by` | foreignId → user model table | yes | null | FK via `mcp-oauth.user_model`, null on delete |
 | `created_at` / `updated_at` | timestamps | yes | — | — |
 
 ## `oauth_consent_records` (package, SHOULD for 1.0 / S4)

@@ -22,7 +22,17 @@ final class OAuthBlockedRedirectHost extends Model
     /**
      * @var list<string>
      */
-    protected $guarded = [];
+    protected $fillable = [
+        'public_id',
+        'host',
+        'host_original',
+        'match_mode',
+        'reason',
+        'expires_at',
+        'metadata',
+        'schema_version',
+        'created_by',
+    ];
 
     protected static function booted(): void
     {

@@ -22,7 +22,43 @@ final class OAuthClientMetadata extends Model
     /**
      * @var list<string>
      */
-    protected $guarded = [];
+    protected $fillable = [
+        'client_id',
+        'registration_source',
+        'spec_revision',
+        'application_type',
+        'client_uri',
+        'logo_uri',
+        'tos_uri',
+        'policy_uri',
+        'contacts',
+        'software_id',
+        'software_version',
+        'software_statement',
+        'token_endpoint_auth_method',
+        'jwks_uri',
+        'jwks',
+        'client_id_issued_at',
+        'client_secret_expires_at',
+        'registration_access_token_hash',
+        'registration_access_token_expires_at',
+        'metadata_document_url',
+        'metadata_document_url_sha256',
+        'metadata_document',
+        'metadata_document_sha256',
+        'metadata_document_etag',
+        'metadata_document_fetched_at',
+        'metadata_document_expires_at',
+        'metadata_document_status',
+        'metadata_document_error',
+        'require_pushed_authorization_requests',
+        'dpop_bound_access_tokens',
+        'revoked_at',
+        'revocation_reason',
+        'retention_until',
+        'metadata',
+        'schema_version',
+    ];
 
     /**
      * @return array<string, string>

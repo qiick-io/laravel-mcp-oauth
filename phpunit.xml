@@ -9,6 +9,7 @@
         <testsuite name="Test Suite">
             <directory>tests/Arch</directory>
             <directory>tests/Feature</directory>
+            <directory>tests/Isolated</directory>
             <directory>tests/Unit</directory>
             <directory>tests/Http</directory>
         </testsuite>
