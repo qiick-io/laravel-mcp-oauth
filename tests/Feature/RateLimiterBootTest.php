@@ -5,72 +5,116 @@ declare(strict_types=1);
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Route;
 use Qiick\McpOAuth\ClientThrottleKey;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\McpOAuthServiceProvider;
 
 /**
- * Design §5.6: mcp-oauth-register / mcp-oauth-token are keyed by ClientThrottleKey.
+ * Design §5.6: DCR / authorize / token / revoke limiters — per-IP and
+ * per-client, 429 with Retry-After.
  */
-it('registers mcp-oauth-register and mcp-oauth-token limiters', function (): void {
-    expect(RateLimiter::limiter('mcp-oauth-register'))->toBeInstanceOf(Closure::class)
-        ->and(RateLimiter::limiter('mcp-oauth-token'))->toBeInstanceOf(Closure::class);
+it('registers limiters for register, authorize, token and revoke', function (): void {
+    foreach (['mcp-oauth-register', 'mcp-oauth-authorize', 'mcp-oauth-token', 'mcp-oauth-revoke'] as $limiterName) {
+        expect(RateLimiter::limiter($limiterName))->toBeInstanceOf(Closure::class);
+    }
 });
 
-it('keys both limiters by ClientThrottleKey at the default per-minute caps', function (): void {
-    $request = Request::create('/', 'POST', server: ['REMOTE_ADDR' => '203.0.113.10']);
-    $expectedKey = ClientThrottleKey::fromRequest($request);
+it('applies IP limits by ClientThrottleKey and client limits when client_id is present', function (): void {
+    $request = Request::create('/oauth/token', 'POST', [
+        'client_id' => 'client-abc',
+    ], server: ['REMOTE_ADDR' => '203.0.113.10']);
 
-    /** @var Closure(Request): Limit $registerLimiter */
-    $registerLimiter = RateLimiter::limiter('mcp-oauth-register');
-    /** @var Closure(Request): Limit $tokenLimiter */
+    /** @var Closure(Request): list<Limit> $tokenLimiter */
     $tokenLimiter = RateLimiter::limiter('mcp-oauth-token');
+    $limits = $tokenLimiter($request);
 
-    $registerLimit = $registerLimiter($request);
-    $tokenLimit = $tokenLimiter($request);
-
-    expect($registerLimit)->toBeInstanceOf(Limit::class)
-        ->and($registerLimit->maxAttempts)->toBe(10)
-        ->and($registerLimit->decaySeconds)->toBe(60)
-        ->and($registerLimit->key)->toBe($expectedKey)
-        ->and($tokenLimit)->toBeInstanceOf(Limit::class)
-        ->and($tokenLimit->maxAttempts)->toBe(60)
-        ->and($tokenLimit->decaySeconds)->toBe(60)
-        ->and($tokenLimit->key)->toBe($expectedKey);
+    expect($limits)->toHaveCount(2)
+        ->and($limits[0]->maxAttempts)->toBe(60)
+        ->and($limits[0]->key)->toBe('token:ip:'.ClientThrottleKey::fromRequest($request))
+        ->and($limits[1]->maxAttempts)->toBe(30)
+        ->and($limits[1]->key)->toBe('token:client:client-abc');
 });
 
-it('honours overridden rate limit config after re-boot', function (): void {
+it('uses HTTP Basic username as the per-client key when client_id is absent', function (): void {
+    $request = Request::create('/oauth/token', 'POST', server: [
+        'REMOTE_ADDR' => '203.0.113.10',
+        'PHP_AUTH_USER' => 'basic-client',
+        'PHP_AUTH_PW' => 'secret',
+    ]);
+
+    /** @var Closure(Request): list<Limit> $tokenLimiter */
+    $tokenLimiter = RateLimiter::limiter('mcp-oauth-token');
+    $limits = $tokenLimiter($request);
+
+    expect($limits)->toHaveCount(2)
+        ->and($limits[1]->key)->toBe('token:client:basic-client');
+});
+
+it('keeps DCR IP-only because registration has no client yet', function (): void {
+    $request = Request::create('/oauth/register', 'POST', [
+        'client_id' => 'should-be-ignored',
+    ], server: ['REMOTE_ADDR' => '198.51.100.20']);
+
+    /** @var Closure(Request): list<Limit> $registerLimiter */
+    $registerLimiter = RateLimiter::limiter('mcp-oauth-register');
+    $limits = $registerLimiter($request);
+
+    expect($limits)->toHaveCount(1)
+        ->and($limits[0]->maxAttempts)->toBe(10)
+        ->and($limits[0]->key)->toBe('register:ip:'.ClientThrottleKey::fromRequest($request));
+});
+
+it('defaults authorize and revoke to prudent per-IP and per-client caps', function (): void {
+    $request = Request::create('/oauth/authorize', 'GET', [
+        'client_id' => 'client-xyz',
+    ], server: ['REMOTE_ADDR' => '203.0.113.50']);
+
+    /** @var Closure(Request): list<Limit> $authorizeLimiter */
+    $authorizeLimiter = RateLimiter::limiter('mcp-oauth-authorize');
+    /** @var Closure(Request): list<Limit> $revokeLimiter */
+    $revokeLimiter = RateLimiter::limiter('mcp-oauth-revoke');
+
+    expect($authorizeLimiter($request)[0]->maxAttempts)->toBe(30)
+        ->and($authorizeLimiter($request)[1]->maxAttempts)->toBe(20)
+        ->and($revokeLimiter($request)[0]->maxAttempts)->toBe(30)
+        ->and($revokeLimiter($request)[1]->maxAttempts)->toBe(20);
+});
+
+it('answers 429 with Retry-After when a limiter is exceeded', function (): void {
     config([
-        'mcp-oauth.registrations_per_minute' => '3',
-        'mcp-oauth.token_requests_per_minute' => '7',
+        'mcp-oauth.token_requests_per_minute' => '2',
+        'mcp-oauth.token_requests_per_client_per_minute' => '100',
     ]);
 
     (new McpOAuthServiceProvider($this->app))->boot();
 
-    $request = Request::create('/', 'POST', server: ['REMOTE_ADDR' => '198.51.100.20']);
+    Route::post('/_mcp-oauth-test/token', static fn () => response('ok'))
+        ->middleware('throttle:mcp-oauth-token');
 
-    /** @var Closure(Request): Limit $registerLimiter */
-    $registerLimiter = RateLimiter::limiter('mcp-oauth-register');
-    /** @var Closure(Request): Limit $tokenLimiter */
-    $tokenLimiter = RateLimiter::limiter('mcp-oauth-token');
+    $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.99']);
 
-    expect($registerLimiter($request)->maxAttempts)->toBe(3)
-        ->and($tokenLimiter($request)->maxAttempts)->toBe(7)
-        ->and($registerLimiter($request)->key)->toBe(ClientThrottleKey::fromRequest($request));
+    $this->post('/_mcp-oauth-test/token', ['client_id' => 'c1'])->assertOk();
+    $this->post('/_mcp-oauth-test/token', ['client_id' => 'c1'])->assertOk();
+
+    $this->post('/_mcp-oauth-test/token', ['client_id' => 'c1'])
+        ->assertStatus(429)
+        ->assertHeader('Retry-After')
+        ->assertJsonPath('error', 'temporarily_unavailable');
 });
 
 it('rejects invalid rate limit config at boot', function (): void {
-    config(['mcp-oauth.registrations_per_minute' => '1e3']);
+    config(['mcp-oauth.authorize_requests_per_minute' => '1e2']);
 
     expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
-        ->toThrow(InvalidMcpOAuthConfigException::class, 'registrations_per_minute');
+        ->toThrow(InvalidMcpOAuthConfigException::class, 'authorize_requests_per_minute');
 
     config([
-        'mcp-oauth.registrations_per_minute' => '10',
-        'mcp-oauth.token_requests_per_minute' => BoundedPositiveInt::RATE_LIMIT_PER_MINUTE_MAX + 1,
+        'mcp-oauth.authorize_requests_per_minute' => '30',
+        'mcp-oauth.revoke_requests_per_client_per_minute' => BoundedPositiveInt::RATE_LIMIT_PER_MINUTE_MAX + 1,
     ]);
 
     expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
-        ->toThrow(InvalidMcpOAuthConfigException::class, 'token_requests_per_minute');
+        ->toThrow(InvalidMcpOAuthConfigException::class, 'revoke_requests_per_client_per_minute');
 });
