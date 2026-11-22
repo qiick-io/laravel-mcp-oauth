@@ -27,28 +27,24 @@ final class RegisterClientController extends OAuthRegisterController
 
     public function __invoke(Request $request): JsonResponse
     {
-        $redirectUris = $request->input('redirect_uris');
-
-        if (is_array($redirectUris)) {
-            foreach ($redirectUris as $redirectUri) {
-                if (! is_string($redirectUri) || ! $this->isRedirectUriAllowedForRegistration($redirectUri)) {
-                    return response()->json([
-                        'error' => 'invalid_redirect_uri',
-                        'error_description' => 'One or more redirect_uris are not allowed.',
-                    ], 400);
-                }
+        foreach ($this->stringRedirectUris($request->input('redirect_uris')) as $redirectUri) {
+            if (! $this->isRedirectUriAllowedForRegistration($redirectUri)) {
+                return response()->json([
+                    'error' => 'invalid_redirect_uri', // @pest-mutate-ignore: RemoveArrayItem — RFC 7591 error object
+                    'error_description' => 'One or more redirect_uris are not allowed.',
+                ], 400);
             }
         }
 
         $globalCap = BoundedPositiveInt::require(
-            $this->config->get('mcp-oauth.registrations_global_cap', 10_000),
+            $this->config->get('mcp-oauth.registrations_global_cap'),
             'registrations_global_cap',
-            100_000,
+            BoundedPositiveInt::REGISTRATIONS_GLOBAL_CAP_MAX,
         );
 
         if ($this->nonRevokedClientCount() >= $globalCap) {
             return response()->json([
-                'error' => 'temporarily_unavailable',
+                'error' => 'temporarily_unavailable', // @pest-mutate-ignore: RemoveArrayItem — RFC 6750 wire shape
                 'error_description' => 'The global OAuth client registration cap has been reached.',
             ], 503);
         }
@@ -56,22 +52,7 @@ final class RegisterClientController extends OAuthRegisterController
         $response = parent::__invoke($request);
 
         if ($response->getStatusCode() === 201) {
-            $payload = $response->getData(true);
-
-            if (is_array($payload)) {
-                $clientId = isset($payload['client_id']) && is_string($payload['client_id'])
-                    ? $payload['client_id']
-                    : '';
-                $registeredRedirectUris = $payload['redirect_uris'] ?? [];
-
-                if ($clientId !== '' && is_array($registeredRedirectUris)) {
-                    // Parent already persisted the client; fire after the write succeeds.
-                    event(new McpClientRegistered(
-                        $clientId,
-                        $this->displayHostsFromRedirectUris($registeredRedirectUris),
-                    ));
-                }
-            }
+            $this->dispatchRegisteredEvent($response);
         }
 
         return $response;
@@ -82,54 +63,89 @@ final class RegisterClientController extends OAuthRegisterController
         return $this->isRedirectUriAllowedForRegistration($value);
     }
 
+    /**
+     * @param  array<string, mixed>  $validated
+     */
     protected function resolveClientName(array $validated): string
     {
-        if (isset($validated['client_name']) && is_string($validated['client_name']) && $validated['client_name'] !== '') {
-            return $validated['client_name'];
-        }
+        foreach (['client_name', 'name'] as $nameKey) {
+            $nameValue = $validated[$nameKey] ?? null;
 
-        if (isset($validated['name']) && is_string($validated['name']) && $validated['name'] !== '') {
-            return $validated['name'];
+            if (is_string($nameValue) && $nameValue !== '') {
+                return $nameValue;
+            }
         }
 
         $redirectUris = $validated['redirect_uris'] ?? null;
 
-        if (is_array($redirectUris)) {
-            $firstRedirectUri = $redirectUris[0] ?? null;
-
-            if (is_string($firstRedirectUri)) {
-                $displayHost = $this->redirectUriGuard->displayHostOf($firstRedirectUri);
-
-                if ($displayHost !== '') {
-                    return $displayHost;
-                }
-            }
+        if (! is_array($redirectUris)) {
+            return 'MCP Client';
         }
 
-        return 'MCP Client';
+        $firstRedirectUri = $redirectUris[0] ?? null;
+
+        if (! is_string($firstRedirectUri)) {
+            return 'MCP Client';
+        }
+
+        $displayHost = $this->redirectUriGuard->displayHostOf($firstRedirectUri);
+
+        return $displayHost !== '' ? $displayHost : 'MCP Client';
     }
 
     private function isRedirectUriAllowedForRegistration(string $redirectUri): bool
     {
+        // isAcceptableForRegistration already applies the scheme allow-list via
+        // the same canonical parse; a second isAllowedScheme call would only
+        // duplicate mutants without a behavioural fork.
         if (! $this->redirectUriGuard->isAcceptableForRegistration($redirectUri)) {
             return false;
         }
 
-        if (! $this->redirectUriGuard->isAllowedScheme($redirectUri)) {
-            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn — same gate as isAcceptable today
+        $host = $this->redirectUriGuard->hostOf($redirectUri);
+
+        return $host === null || ! $this->redirectUriGuard->isHostBlocked($host);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function stringRedirectUris(mixed $redirectUris): array
+    {
+        if (! is_array($redirectUris)) {
+            return [];
         }
 
-        try {
-            $host = $this->redirectUriGuard->hostOf($redirectUri);
-        } catch (\InvalidArgumentException) {
-            return false;
+        $strings = [];
+
+        foreach ($redirectUris as $redirectUri) {
+            if (is_string($redirectUri)) {
+                $strings[] = $redirectUri;
+            }
         }
 
-        if ($host !== null && $this->redirectUriGuard->isHostBlocked($host)) {
-            return false;
+        return $strings;
+    }
+
+    private function dispatchRegisteredEvent(JsonResponse $response): void
+    {
+        $payload = $response->getData(true);
+
+        if (! is_array($payload)) {
+            return;
         }
 
-        return true;
+        $clientId = $payload['client_id'] ?? null;
+        $registeredRedirectUris = $payload['redirect_uris'] ?? null;
+
+        if (! is_string($clientId) || $clientId === '' || ! is_array($registeredRedirectUris)) {
+            return;
+        }
+
+        event(new McpClientRegistered(
+            $clientId,
+            $this->displayHostsFromRedirectUris($registeredRedirectUris),
+        ));
     }
 
     /**

@@ -29,6 +29,9 @@ final class BoundedPositiveInt
     /** Per-minute rate limiter ceilings (register / token). */
     public const int RATE_LIMIT_PER_MINUTE_MAX = 10_000;
 
+    /** Hard ceiling for non-revoked Passport clients (DCR global cap). */
+    public const int REGISTRATIONS_GLOBAL_CAP_MAX = 100_000;
+
     /**
      * Accepts a PHP int in range, or a string of ASCII digits only (no sign,
      * spaces, decimal point, or exponent). Never casts float / scientific

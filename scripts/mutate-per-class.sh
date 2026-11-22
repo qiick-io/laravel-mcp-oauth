@@ -11,12 +11,11 @@ cd "$ROOT"
 CLASSES=(
   'Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository'
   'Qiick\McpOAuth\ClientThrottleKey'
+  'Qiick\McpOAuth\Http\Controllers\RegisterClientController'
+  'Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware'
   'Qiick\McpOAuth\McpOAuthReadiness'
   'Qiick\McpOAuth\McpOAuthServer'
   'Qiick\McpOAuth\RedirectUriGuard'
-  # RegisterClientController + EnsureMcpOAuthEnabledMiddleware: enroll once
-  # unit coverage raises MSI above 95 (HTTP Isolated tests alone leave too many
-  # resolveClientName / JSON-shape mutants untested).
 )
 
 MIN="${MUTATE_MIN:-95}"

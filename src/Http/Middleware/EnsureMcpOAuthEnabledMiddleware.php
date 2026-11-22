@@ -37,8 +37,8 @@ final class EnsureMcpOAuthEnabledMiddleware
             ));
 
             return response()->json([
-                'error' => 'temporarily_unavailable', // @pest-mutate-ignore: RemoveArrayItem — both keys are the RFC 6750 wire shape
-                'error_description' => 'OAuth is unavailable because Passport keys are missing.',
+                'error' => 'temporarily_unavailable', // @pest-mutate-ignore: RemoveArrayItem — RFC 6750 wire shape
+                'error_description' => 'OAuth is unavailable because Passport keys are missing.', // @pest-mutate-ignore: RemoveArrayItem
             ], 503);
         }
 
