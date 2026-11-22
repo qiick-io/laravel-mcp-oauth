@@ -78,3 +78,21 @@ it('canonical parse keeps scheme and host checks aligned for blocked hosts', fun
             }),
         ))->toBeTrue();
 });
+
+it('N7: registration and isAllowedScheme never disagree on the same URI', function (string $uri): void {
+    config()->set('mcp.custom_schemes', ['cursor']);
+    $guard = new RedirectUriGuard;
+
+    expect($guard->isAcceptableForRegistration($uri))->toBe($guard->isAllowedScheme($uri));
+})->with([
+    'https ok' => ['https://app.example/cb'],
+    'http loopback' => ['http://127.0.0.1/cb'],
+    'http non-loopback' => ['http://evil.example/cb'],
+    'fragment' => ['https://app.example/cb#x'],
+    'backslash' => ['https://evil.com\\@good.example/cb'],
+    'userinfo' => ['https://evil.com@good.example/cb'],
+    'hostless' => ['https:///evil.com/cb'],
+    'leading zero' => ['https://01.02.03.04/cb'],
+    'cursor opaque' => ['cursor:opaque'],
+    'unknown opaque' => ['other:opaque'],
+]);
