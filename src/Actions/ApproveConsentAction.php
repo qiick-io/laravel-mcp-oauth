@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\GrantStore;
+use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\PendingAuthorizationRequestData;
 use Qiick\McpOAuth\Events\McpConsentApproved;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
@@ -65,7 +66,8 @@ final class ApproveConsentAction
 
         $this->consentProvider->validate($request, $user, $decision);
 
-        $grant = $this->database->transaction(function () use ($request, $pendingAuthorizationRequest, $redirectUri, $decision, $clientInfo, $userIdentifier) {
+        /** @var GrantRecord $grant Laravel 12 types transaction() as mixed */
+        $grant = $this->database->transaction(function () use ($request, $pendingAuthorizationRequest, $redirectUri, $decision, $clientInfo, $userIdentifier): GrantRecord {
             $grant = $this->grantStore->replace($decision);
             $this->revokeEarlierCredentials($clientInfo->id, $userIdentifier);
             $this->recordConsentDecision->execute($request, $pendingAuthorizationRequest, $redirectUri, $decision, $grant);
