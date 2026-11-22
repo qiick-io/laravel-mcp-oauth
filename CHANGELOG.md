@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Design §3 / §5.5 public contracts (`AdminSwitch`, `GrantStore`, …), data
+  objects (`GrantRecord`, `AuthorizationDecision`, …), `RevocationReason`, and
+  immutable audit events. Ids on the wire stay UUID strings (S80).
+
 - Package scaffold: auto-discovered `McpOAuthServiceProvider`, publishable
   `config/mcp-oauth.php` (tag `mcp-oauth-config`), Pest + Testbench, Pint,
   PHPStan level max, qiick standards pack pinned to app-ui `v0.12.0`

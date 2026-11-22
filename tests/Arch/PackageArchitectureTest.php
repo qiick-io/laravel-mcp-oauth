@@ -5,9 +5,18 @@ declare(strict_types=1);
 /**
  * Package-only architecture rules. Naming, suffixes, strict types and readonly
  * DTOs are the shared qiick rules in NamingArchitectureTest.php (configured in
- * naming-architecture.php). Feature PRs add parse_url / Signaculum / @api
- * surface freezes from the design.
+ * naming-architecture.php).
  */
 arch('src never imports Illuminate Foundation types')
     ->expect('Qiick\McpOAuth')
     ->not->toUse('Illuminate\Foundation');
+
+arch('data transfer objects are readonly')
+    ->expect('Qiick\McpOAuth\Data')
+    ->classes()
+    ->toBeReadonly();
+
+arch('events are immutable')
+    ->expect('Qiick\McpOAuth\Events')
+    ->classes()
+    ->toBeReadonly();
