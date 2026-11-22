@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth;
 
 use Carbon\CarbonInterval;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Passport\Passport;
 use League\OAuth2\Server\AuthorizationServer;
@@ -24,11 +27,13 @@ use ReflectionProperty;
  *
  * Always calls `Passport::ignoreRoutes()` and turns the device grant off in
  * `register()` (design Resolved #3 / #4). Token TTLs, the wire scope
- * (`tokensCan` / `defaultScopes`), stripping ClientCredentialsGrant, and
- * `McpBearerTokenResponse` (adds `scope` to the token JSON) land in `boot()`.
- * Rate limiters and fail-closed adapter validation land with later feature
- * PRs. While `mcp-oauth.enabled` is false (the default), missing product
- * adapters are allowed so products can install before writing adapters.
+ * (`tokensCan` / `defaultScopes`), stripping ClientCredentialsGrant,
+ * `McpBearerTokenResponse`, and rate limiters for DCR / authorize / token /
+ * revoke (per-IP via ClientThrottleKey and per-client when known; 429 with
+ * Retry-After) land in `boot()`. Fail-closed adapter validation lands with
+ * later feature PRs. While `mcp-oauth.enabled` is false (the default),
+ * missing product adapters are allowed so products can install before
+ * writing adapters.
  *
  * @api
  */
@@ -73,6 +78,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->configurePassportTokenLifetimes();
         $this->configurePassportScopes();
         Passport::useAuthorizationServerResponseType(new McpBearerTokenResponse);
+        $this->configureRateLimiters();
 
         if ($this->app->runningInConsole()) {
             $this->publishes([
@@ -168,5 +174,107 @@ final class McpOAuthServiceProvider extends ServiceProvider
 
         Passport::tokensCan($server->scopeDescriptions());
         Passport::defaultScopes([McpOAuthServer::WIRE_SCOPE]);
+    }
+
+    /**
+     * Named limiters for DCR, authorize, token and revoke (design §5.6).
+     * Routes attach `throttle:mcp-oauth-*` when those endpoints land.
+     * Per-IP keys use ClientThrottleKey (S29 / S30); per-client keys use
+     * `client_id` or HTTP Basic username when present. Exceeded limits
+     * answer 429 with Retry-After.
+     */
+    private function configureRateLimiters(): void
+    {
+        /** @var ConfigRepository $config */
+        $config = $this->app->make(ConfigRepository::class);
+
+        $registrationsPerMinute = $this->rateLimitPerMinute($config, 'registrations_per_minute');
+        $authorizePerMinute = $this->rateLimitPerMinute($config, 'authorize_requests_per_minute');
+        $authorizePerClient = $this->rateLimitPerMinute($config, 'authorize_requests_per_client_per_minute');
+        $tokenPerMinute = $this->rateLimitPerMinute($config, 'token_requests_per_minute');
+        $tokenPerClient = $this->rateLimitPerMinute($config, 'token_requests_per_client_per_minute');
+        $revokePerMinute = $this->rateLimitPerMinute($config, 'revoke_requests_per_minute');
+        $revokePerClient = $this->rateLimitPerMinute($config, 'revoke_requests_per_client_per_minute');
+
+        RateLimiter::for('mcp-oauth-register', function (Request $request) use ($registrationsPerMinute): array {
+            // DCR has no client_id yet — IP only.
+            return $this->rateLimitsFor($request, 'register', $registrationsPerMinute, null);
+        });
+
+        RateLimiter::for('mcp-oauth-authorize', function (Request $request) use ($authorizePerMinute, $authorizePerClient): array {
+            return $this->rateLimitsFor($request, 'authorize', $authorizePerMinute, $authorizePerClient);
+        });
+
+        RateLimiter::for('mcp-oauth-token', function (Request $request) use ($tokenPerMinute, $tokenPerClient): array {
+            return $this->rateLimitsFor($request, 'token', $tokenPerMinute, $tokenPerClient);
+        });
+
+        RateLimiter::for('mcp-oauth-revoke', function (Request $request) use ($revokePerMinute, $revokePerClient): array {
+            return $this->rateLimitsFor($request, 'revoke', $revokePerMinute, $revokePerClient);
+        });
+    }
+
+    private function rateLimitPerMinute(ConfigRepository $config, string $configKey): int
+    {
+        return BoundedPositiveInt::require(
+            $config->get('mcp-oauth.'.$configKey),
+            $configKey,
+            BoundedPositiveInt::RATE_LIMIT_PER_MINUTE_MAX,
+        );
+    }
+
+    /**
+     * @return list<Limit>
+     */
+    private function rateLimitsFor(Request $request, string $bucket, int $perIp, ?int $perClient): array
+    {
+        $tooManyRequests = static function (Request $rateLimitedRequest, array $headers) {
+            return response()->json([
+                'error' => 'temporarily_unavailable',
+                'error_description' => 'Too many requests. Try again later.',
+            ], 429, $headers);
+        };
+
+        $limits = [
+            Limit::perMinute($perIp)
+                ->by($bucket.':ip:'.ClientThrottleKey::fromRequest($request))
+                ->response($tooManyRequests),
+        ];
+
+        if ($perClient === null) {
+            return $limits;
+        }
+
+        $clientId = self::oauthClientIdFromRequest($request);
+
+        if ($clientId === null) {
+            return $limits;
+        }
+
+        $limits[] = Limit::perMinute($perClient)
+            ->by($bucket.':client:'.$clientId)
+            ->response($tooManyRequests);
+
+        return $limits;
+    }
+
+    /**
+     * Client id from the OAuth body/query or HTTP Basic username (Passport).
+     */
+    private static function oauthClientIdFromRequest(Request $request): ?string
+    {
+        $clientId = $request->input('client_id');
+
+        if (is_string($clientId) && $clientId !== '') {
+            return $clientId;
+        }
+
+        $basicUser = $request->getUser();
+
+        if (is_string($basicUser) && $basicUser !== '') {
+            return $basicUser;
+        }
+
+        return null;
     }
 }

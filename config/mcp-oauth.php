@@ -44,7 +44,25 @@ return [
 
     'auth_code_ttl_minutes' => env('MCP_OAUTH_AUTH_CODE_TTL_MINUTES', '10'),
 
-    'registrations_per_minute' => (int) env('MCP_OAUTH_REGISTRATIONS_PER_MINUTE', 10),
+    /*
+     * Named rate limiters (design §5.6): throttle:mcp-oauth-{register,authorize,
+     * token,revoke}. Per-IP via ClientThrottleKey; per-client when client_id
+     * (or HTTP Basic user) is present. DCR is IP-only (no client yet). Raw
+     * env strings; boot validates 1..10000. 429 responses include Retry-After.
+     */
+    'registrations_per_minute' => env('MCP_OAUTH_REGISTRATIONS_PER_MINUTE', '10'),
+
+    'authorize_requests_per_minute' => env('MCP_OAUTH_AUTHORIZE_REQUESTS_PER_MINUTE', '30'),
+
+    'authorize_requests_per_client_per_minute' => env('MCP_OAUTH_AUTHORIZE_REQUESTS_PER_CLIENT_PER_MINUTE', '20'),
+
+    'token_requests_per_minute' => env('MCP_OAUTH_TOKEN_REQUESTS_PER_MINUTE', '60'),
+
+    'token_requests_per_client_per_minute' => env('MCP_OAUTH_TOKEN_REQUESTS_PER_CLIENT_PER_MINUTE', '30'),
+
+    'revoke_requests_per_minute' => env('MCP_OAUTH_REVOKE_REQUESTS_PER_MINUTE', '30'),
+
+    'revoke_requests_per_client_per_minute' => env('MCP_OAUTH_REVOKE_REQUESTS_PER_CLIENT_PER_MINUTE', '20'),
 
     'registrations_global_cap' => (int) env('MCP_OAUTH_REGISTRATIONS_GLOBAL_CAP', 10000),
 
@@ -54,8 +72,6 @@ return [
      * Days a revoked client or grant stays before mcp-oauth:purge-revoked.
      */
     'revoked_retention_days' => (int) env('MCP_OAUTH_REVOKED_RETENTION_DAYS', 90),
-
-    'token_requests_per_minute' => (int) env('MCP_OAUTH_TOKEN_REQUESTS_PER_MINUTE', 60),
 
     'mcp_auth_failures_per_minute' => (int) env('MCP_OAUTH_MCP_AUTH_FAILURES_PER_MINUTE', 20),
 
