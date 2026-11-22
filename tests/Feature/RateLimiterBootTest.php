@@ -118,3 +118,10 @@ it('rejects invalid rate limit config at boot', function (): void {
     expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
         ->toThrow(InvalidMcpOAuthConfigException::class, 'revoke_requests_per_client_per_minute');
 });
+
+it('rejects non-digit mcp_auth_failures_per_minute at boot', function (): void {
+    config(['mcp-oauth.mcp_auth_failures_per_minute' => '1e2']);
+
+    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
+        ->toThrow(InvalidMcpOAuthConfigException::class, 'mcp_auth_failures_per_minute');
+});

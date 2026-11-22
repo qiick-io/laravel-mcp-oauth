@@ -79,6 +79,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->configurePassportScopes();
         Passport::useAuthorizationServerResponseType(new McpBearerTokenResponse);
         $this->configureRateLimiters();
+        $this->validateMcpAuthFailuresPerMinute();
 
         if ($this->app->runningInConsole()) {
             $this->publishes([
@@ -221,6 +222,19 @@ final class McpOAuthServiceProvider extends ServiceProvider
             $configKey,
             BoundedPositiveInt::RATE_LIMIT_PER_MINUTE_MAX,
         );
+    }
+
+    /**
+     * Fail-closed digit-only check for the /mcp auth-failure cap. The named
+     * limiter itself lands with the Bearer door; validating early keeps a
+     * hostile env from shipping until then.
+     */
+    private function validateMcpAuthFailuresPerMinute(): void
+    {
+        /** @var ConfigRepository $config */
+        $config = $this->app->make(ConfigRepository::class);
+
+        $this->rateLimitPerMinute($config, 'mcp_auth_failures_per_minute');
     }
 
     /**
