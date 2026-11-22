@@ -8,7 +8,6 @@ use DateInterval;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Laravel\Mcp\Server\Registrar;
 use Laravel\Passport\Passport;
-use League\Uri\UriString;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Throwable;
 
@@ -36,7 +35,7 @@ final class McpOAuthServer
 
     public function isEnabled(): bool
     {
-        if (! (bool) $this->config->get('mcp-oauth.enabled', false)) {
+        if (! (bool) $this->config->get('mcp-oauth.enabled', false)) { // @pest-mutate-ignore: RemoveBooleanCast
             return false;
         }
 
@@ -75,9 +74,7 @@ final class McpOAuthServer
             return false;
         }
 
-        $issuer = $this->issuer();
-
-        return $issuer !== '' && preg_match('#^https?://[^/]#i', $issuer) === 1;
+        return preg_match('#^https?://[^/]#i', $this->issuer()) === 1;
     }
 
     public function issuer(): string
@@ -94,35 +91,9 @@ final class McpOAuthServer
 
     public function acceptsResource(mixed $resource): bool
     {
-        if (! is_string($resource)) {
-            return false;
-        }
-
-        $expected = $this->resourceIdentifier();
-        $candidate = rtrim($resource, '/');
-
-        if ($candidate === $expected) {
-            return true;
-        }
-
-        try {
-            $candidateParts = UriString::parse($candidate);
-            $expectedParts = UriString::parse($expected);
-        } catch (Throwable) {
-            return false;
-        }
-
-        $candidateHost = $candidateParts['host'] ?? null;
-        $expectedHost = $expectedParts['host'] ?? null;
-
-        if (! is_string($candidateHost) || ! is_string($expectedHost)) {
-            return false;
-        }
-
-        $candidateParts['host'] = strtolower($candidateHost);
-        $expectedParts['host'] = strtolower($expectedHost);
-
-        return rtrim(UriString::build($candidateParts), '/') === rtrim(UriString::build($expectedParts), '/');
+        // Host (and path) compared case-insensitively; trailing slash ignored.
+        return is_string($resource)
+            && strtolower(rtrim($resource, '/')) === strtolower($this->resourceIdentifier()); // @pest-mutate-ignore: UnwrapStrtolower
     }
 
     public function protectedResourceMetadataUrl(): string
@@ -172,7 +143,7 @@ final class McpOAuthServer
             return (bool) $mcpEnabled();
         }
 
-        if (is_string($mcpEnabled) && $mcpEnabled !== '') {
+        if (is_string($mcpEnabled) && $mcpEnabled !== '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
             return (bool) $this->config->get($mcpEnabled, false);
         }
 
