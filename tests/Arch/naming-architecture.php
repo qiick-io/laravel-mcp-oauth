@@ -63,6 +63,7 @@ return [
             'Qiick\McpOAuth\ClientThrottleKey',
             'Qiick\McpOAuth\McpOAuthReadiness',
             'Qiick\McpOAuth\McpBearerTokenResponse',
+            'Qiick\McpOAuth\McpOAuthRoutes',
         ],
     ],
 

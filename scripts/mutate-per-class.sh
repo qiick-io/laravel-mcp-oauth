@@ -11,7 +11,10 @@ cd "$ROOT"
 CLASSES=(
   'Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository'
   'Qiick\McpOAuth\ClientThrottleKey'
+  'Qiick\McpOAuth\Http\Controllers\RegisterClientController'
+  'Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware'
   'Qiick\McpOAuth\McpOAuthReadiness'
+  'Qiick\McpOAuth\McpOAuthRoutes'
   'Qiick\McpOAuth\McpOAuthServer'
   'Qiick\McpOAuth\RedirectUriGuard'
 )

@@ -15,8 +15,9 @@ use Throwable;
 /**
  * Redirect URI and blocked-host rules: League Uri only, ASCII registered hosts,
  * UTS #46 nontransitional STD3 for admin input, exact or subdomain block.
- * One canonical parse feeds registration, scheme, hostOf and blocklist checks
- * so those paths cannot diverge. Fragment, backslash and userinfo are refused.
+ * One canonical parse feeds registration, scheme, hostOf, blocklist and exact
+ * equality checks so those paths cannot diverge. Fragment, backslash and
+ * userinfo are refused.
  * http(s) always requires a non-empty authority host; IP hosts are canonicalised
  * (IPv6 via inet_pton/ntop, ::ffff: unmapped) and non-dotted-decimal IPv4 forms
  * are refused. Non-loopback http is refused (RFC 8252).
@@ -89,6 +90,48 @@ final class RedirectUriGuard
     public function hostOf(string $redirectUri): ?string
     {
         return $this->parseCanonical($redirectUri)->normalizedHost;
+    }
+
+    /**
+     * Exact match of two redirect URIs under the same canonical parse as
+     * registration (scheme and host case-folded / normalised, port / path /
+     * query compared as parsed). Unparsable either side is not equal.
+     */
+    public function areExactlyEqual(string $left, string $right): bool
+    {
+        try {
+            $parsedLeft = $this->parseCanonical($left);
+            $parsedRight = $this->parseCanonical($right);
+        } catch (InvalidArgumentException) {
+            return false;
+        }
+
+        return $parsedLeft->scheme === $parsedRight->scheme
+            && $parsedLeft->normalizedHost === $parsedRight->normalizedHost
+            && $parsedLeft->port === $parsedRight->port
+            && $parsedLeft->path === $parsedRight->path
+            && $parsedLeft->query === $parsedRight->query;
+    }
+
+    /**
+     * Whether any of the client's stored redirect_uris matches $redirectUri
+     * under {@see areExactlyEqual()}.
+     */
+    public function clientHasExactRedirectUri(Client $client, string $redirectUri): bool
+    {
+        $redirectUris = $client->getAttribute('redirect_uris');
+
+        if (! is_array($redirectUris)) {
+            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
+        }
+
+        foreach ($redirectUris as $registeredUri) {
+            if (is_string($registeredUri) && $this->areExactlyEqual($registeredUri, $redirectUri)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function displayHostOf(string $redirectUri): string
@@ -212,8 +255,13 @@ final class RedirectUriGuard
             throw new InvalidArgumentException('http(s) redirect URI requires a non-empty host.');
         }
 
+        $port = $this->canonicalPort($parts['port'] ?? null);
+        $path = is_string($parts['path'] ?? null) ? $parts['path'] : '';
+        $rawQuery = $parts['query'] ?? null;
+        $query = is_string($rawQuery) && $rawQuery !== '' ? $rawQuery : null;
+
         if (! $hasHost) {
-            return new ParsedRedirectUriData($normalizedScheme, null);
+            return new ParsedRedirectUriData($normalizedScheme, null, $port, $path, $query);
         }
 
         if (str_contains($rawHost, '%')) {
@@ -225,7 +273,24 @@ final class RedirectUriGuard
         return new ParsedRedirectUriData(
             $normalizedScheme,
             $this->normalizeHost($rawHost),
+            $port,
+            $path,
+            $query,
         );
+    }
+
+    private function canonicalPort(mixed $port): ?int
+    {
+        if (is_int($port)) {
+            return $port;
+        }
+
+        // League UriString may yield a digit string for the port.
+        if (is_string($port) && preg_match('/^\d+$/', $port) === 1) {
+            return (int) $port; // @pest-mutate-ignore: RemoveIntegerCast,RemoveEarlyReturn — digit string → int is the branch
+        }
+
+        return null;
     }
 
     private function isSchemeAllowedForParsed(ParsedRedirectUriData $parsed): bool
