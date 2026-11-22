@@ -24,12 +24,11 @@ use ReflectionProperty;
  *
  * Always calls `Passport::ignoreRoutes()` and turns the device grant off in
  * `register()` (design Resolved #3 / #4). Token TTLs, the wire scope
- * (`tokensCan` / `defaultScopes`), and stripping ClientCredentialsGrant
- * (MCP allows only authorization_code + refresh_token) land in `boot()`.
- * Rate limiters, bearer response type and fail-closed adapter validation
- * land with later feature PRs. While `mcp-oauth.enabled` is false (the
- * default), missing product adapters are allowed so products can install
- * before writing adapters.
+ * (`tokensCan` / `defaultScopes`), stripping ClientCredentialsGrant, and
+ * `McpBearerTokenResponse` (adds `scope` to the token JSON) land in `boot()`.
+ * Rate limiters and fail-closed adapter validation land with later feature
+ * PRs. While `mcp-oauth.enabled` is false (the default), missing product
+ * adapters are allowed so products can install before writing adapters.
  *
  * @api
  */
@@ -73,6 +72,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
 
         $this->configurePassportTokenLifetimes();
         $this->configurePassportScopes();
+        Passport::useAuthorizationServerResponseType(new McpBearerTokenResponse);
 
         if ($this->app->runningInConsole()) {
             $this->publishes([
