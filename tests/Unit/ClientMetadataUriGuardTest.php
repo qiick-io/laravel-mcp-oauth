@@ -50,3 +50,75 @@ it('refuses a backslash in the URI', function (): void {
 it('refuses a hostless https URI', function (): void {
     expect((new ClientMetadataUriGuard)->isAcceptable('https:///logo.png'))->toBeFalse();
 });
+
+it('refuses internal hostnames by name', function (string $uri): void {
+    expect((new ClientMetadataUriGuard)->isAcceptable($uri))->toBeFalse();
+})->with([
+    'localhost' => 'http://localhost/',
+    'localhost trailing dot' => 'https://localhost./x',
+    'localhost upper case with port' => 'http://LOCALHOST:6379/',
+    'localhost subdomain' => 'https://app.localhost/logo.png',
+    'gce metadata' => 'https://metadata.google.internal/',
+    'internal tld' => 'https://vault.corp.internal/logo.png',
+    'mdns local' => 'https://printer.local/logo.png',
+    'single label metadata' => 'https://metadata/',
+    'single label instance-data' => 'https://instance-data/',
+]);
+
+it('refuses every alternative IPv4 spelling of loopback', function (string $uri): void {
+    expect((new ClientMetadataUriGuard)->isAcceptable($uri))->toBeFalse();
+})->with([
+    'short form' => 'https://127.1/',
+    'integer' => 'https://2130706433/',
+    'hex integer' => 'https://0x7f000001/',
+    'octal octet' => 'https://0177.0.0.1/',
+    'octal integer' => 'https://017700000001/',
+]);
+
+it('refuses IPv6 literals that embed an IPv4 address', function (string $uri): void {
+    expect((new ClientMetadataUriGuard)->isAcceptable($uri))->toBeFalse();
+})->with([
+    'nat64 well-known to metadata' => 'https://[64:ff9b::a9fe:a9fe]/',
+    'nat64 local-use' => 'https://[64:ff9b:1::a00:1]/',
+    'ipv4-translated' => 'https://[::ffff:0:a00:1]/',
+    'ipv4-mapped loopback' => 'https://[::ffff:127.0.0.1]/',
+    'ipv4-mapped public' => 'https://[::ffff:8.8.8.8]/',
+    'nat64 public' => 'https://[64:ff9b::808:808]/',
+    '6to4 loopback' => 'https://[2002:7f00:1::]/',
+    '6to4 public' => 'https://[2002:808:808::1]/',
+]);
+
+it('refuses Unicode hosts that normalise to internal hosts', function (string $uri): void {
+    expect((new ClientMetadataUriGuard)->isAcceptable($uri))->toBeFalse();
+})->with([
+    'circled l' => 'https://ⓛocalhost/',
+    'fullwidth' => 'https://ｌｏｃａｌｈｏｓｔ/',
+    'ideographic dots' => 'https://127。0。0。1/',
+]);
+
+it('refuses shared, benchmarking, IETF and multicast ranges', function (string $uri): void {
+    expect((new ClientMetadataUriGuard)->isAcceptable($uri))->toBeFalse();
+})->with([
+    'cgnat low' => 'https://100.64.0.1/',
+    'cgnat high' => 'https://100.127.255.254/',
+    'benchmarking' => 'https://198.18.0.1/',
+    'benchmarking upper' => 'https://198.19.255.1/',
+    'ietf protocol assignments' => 'https://192.0.0.1/',
+    'ipv4 multicast' => 'https://224.0.0.1/',
+    'ipv4 multicast upper' => 'https://239.255.255.250/',
+    'ipv6 multicast' => 'https://[ff02::1]/',
+]);
+
+it('keeps accepting public addresses next to the refused ranges', function (string $uri): void {
+    expect((new ClientMetadataUriGuard)->isAcceptable($uri))->toBeTrue();
+})->with([
+    'below cgnat' => 'https://100.63.255.255/',
+    'above cgnat' => 'https://100.128.0.1/',
+    'below benchmarking' => 'https://198.17.255.255/',
+    'above benchmarking' => 'https://198.20.0.1/',
+    'next to ietf block' => 'https://192.0.1.1/',
+    'below multicast' => 'https://223.255.255.255/',
+    'public ipv6' => 'https://[2606:4700:4700::1111]/',
+    'two-label host' => 'https://example.com/',
+    'host ending in localhost-like label' => 'https://notlocalhost.example/',
+]);

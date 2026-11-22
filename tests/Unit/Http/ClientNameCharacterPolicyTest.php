@@ -53,3 +53,46 @@ it('still refuses bidi overrides and C0 controls', function (string $clientName)
     'tab' => "Bad\tName",
     'nul' => "Bad\0Name",
 ]);
+
+it('fails closed on client_name that is not valid UTF-8', function (string $clientName): void {
+    expect(clientNameIsDisallowed()($clientName))->toBeTrue();
+})->with([
+    'overlong nul' => "A\xC0\x80B",
+    'truncated sequence' => "A\xC3\x28B",
+    'lone continuation byte' => "A\x80B",
+]);
+
+it('refuses line and paragraph separators in client_name', function (string $clientName): void {
+    expect(clientNameIsDisallowed()($clientName))->toBeTrue();
+})->with([
+    'line separator' => "Good\u{2028}Name",
+    'paragraph separator' => "Good\u{2029}Name",
+]);
+
+it('refuses Hangul fillers in client_name', function (string $clientName): void {
+    expect(clientNameIsDisallowed()($clientName))->toBeTrue();
+})->with([
+    'hangul filler' => "Good\u{3164}Name",
+    'only hangul fillers' => "\u{3164}\u{3164}",
+    'halfwidth hangul filler' => "A\u{FFA0}B",
+    'choseong filler' => "A\u{115F}B",
+    'jungseong filler' => "A\u{1160}B",
+]);
+
+it('refuses a client_name with no visible character', function (string $clientName): void {
+    expect(clientNameIsDisallowed()($clientName))->toBeTrue();
+})->with([
+    'spaces' => '   ',
+    'no-break and ideographic spaces' => "\u{00A0}\u{3000}",
+    'combining grapheme joiner' => "\u{034F}",
+    'joiners only' => "\u{200D}\u{200C}",
+]);
+
+it('keeps accepting ordinary names with spaces and marks', function (string $clientName): void {
+    expect(clientNameIsDisallowed()($clientName))->toBeFalse();
+})->with([
+    'plain' => 'Claude Desktop',
+    'accented' => 'Café Désirée',
+    'korean' => '클로드',
+    'flag emoji' => "\u{1F3F3}\u{FE0F}\u{200D}\u{1F308}",
+]);
