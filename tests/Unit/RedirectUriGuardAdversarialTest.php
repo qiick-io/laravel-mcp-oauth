@@ -148,6 +148,32 @@ it('refuses non-dotted-decimal IPv4 spellings that WHATWG would still parse', fu
     'hex' => ['0x7f000001'],
 ]);
 
+it('refuses any host whose last label is numeric unless it is four decimal octets', function (string $host): void {
+    // WHATWG parses such hosts as IPv4 (0177 is octal 127), while inet_pton's
+    // answer differs between glibc and macOS; the rule must not depend on it.
+    $guard = new RedirectUriGuard(new BlockedHostCatalog(['127.0.0.1']));
+
+    expect(fn () => $guard->normalizeHost($host))->toThrow(InvalidArgumentException::class)
+        ->and($guard->isAcceptableForRegistration('https://'.$host.'/cb'))->toBeFalse()
+        ->and($guard->isHostBlocked($host))->toBeTrue();
+})->with([
+    'four-digit octal octet' => ['0177.0.0.1'],
+    'octet above 255' => ['256.0.0.1'],
+    'five parts' => ['1.2.3.4.5'],
+    'numeric top label' => ['example.123'],
+    'numeric top label after a name' => ['evil.test.1'],
+]);
+
+it('keeps four decimal octets and names with digits usable', function (string $host, string $normalizedHost): void {
+    expect((new RedirectUriGuard(new BlockedHostCatalog([])))->normalizeHost($host))->toBe($normalizedHost);
+})->with([
+    'dotted quad' => ['8.8.8.8', '8.8.8.8'],
+    'dotted quad with 255' => ['255.255.255.254', '255.255.255.254'],
+    'dotted quad with zero octets' => ['10.0.0.1', '10.0.0.1'],
+    'digits inside a label' => ['123.example', '123.example'],
+    'alphanumeric top label' => ['cdn.example1', 'cdn.example1'],
+]);
+
 it('refuses leading-zero IPv4 octets as forbidden notation (glibc-safe)', function (): void {
     $guard = new RedirectUriGuard;
 
