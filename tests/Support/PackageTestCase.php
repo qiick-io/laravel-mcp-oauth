@@ -51,23 +51,32 @@ abstract class PackageTestCase extends TestCase
             return;
         }
 
+        $isPgsql = $connection === 'pgsql';
+
         $app['config']->set('database.default', $connection);
         $app['config']->set("database.connections.{$connection}", [
             'driver' => $connection === 'mariadb' ? 'mysql' : $connection,
             'host' => getenv('DB_HOST') ?: '127.0.0.1',
-            'port' => getenv('DB_PORT') ?: ($connection === 'pgsql' ? '5432' : '3306'),
+            'port' => getenv('DB_PORT') ?: ($isPgsql ? '5432' : '3306'),
             'database' => getenv('DB_DATABASE') ?: 'mcp_oauth_test',
-            'username' => getenv('DB_USERNAME') ?: ($connection === 'pgsql' ? 'postgres' : 'root'),
+            'username' => getenv('DB_USERNAME') ?: ($isPgsql ? 'postgres' : 'root'),
             'password' => getenv('DB_PASSWORD') !== false ? (string) getenv('DB_PASSWORD') : '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_unicode_ci',
+            'charset' => $isPgsql ? 'utf8' : 'utf8mb4',
+            'collation' => $isPgsql ? null : 'utf8mb4_unicode_ci',
             'prefix' => '',
             'strict' => true,
+            'search_path' => 'public',
         ]);
     }
 
     protected function defineDatabaseMigrations(): void
     {
+        // Persistent engines keep tables across Pest cases; wipe before each boot.
+        Schema::dropIfExists('oauth_consent_records');
+        Schema::dropIfExists('oauth_blocked_redirect_hosts');
+        Schema::dropIfExists('oauth_client_metadata');
+        Schema::dropIfExists('users');
+
         Schema::create('users', function (Blueprint $table): void {
             $table->id();
             $table->timestamps();
