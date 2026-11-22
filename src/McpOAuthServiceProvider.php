@@ -9,9 +9,13 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Passport\Passport;
+use League\OAuth2\Server\AuthorizationServer;
+use League\OAuth2\Server\Grant\AuthCodeGrant;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Internal\BlockedHostCatalog;
+use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Internal\DisabledAdminSwitch;
+use ReflectionProperty;
 
 /**
  * Registers the package in a Laravel app. Auto-discovered through
@@ -78,38 +82,59 @@ final class McpOAuthServiceProvider extends ServiceProvider
     }
 
     /**
-     * Applies access and refresh TTLs from mcp-oauth config onto Passport
-     * (global per app; products that already own Passport as an IdP are out of
-     * scope for 1.x — design §3.3 Signaculum row).
+     * Applies access, refresh and auth-code TTLs from mcp-oauth config onto
+     * Passport (global per app; products that already own Passport as an IdP
+     * are out of scope for 1.x — design §3.3 Signaculum row). Invalid values
+     * fail closed at boot (design §6); they are never floored or replaced.
      */
     private function configurePassportTokenLifetimes(): void
     {
         /** @var ConfigRepository $config */
         $config = $this->app->make(ConfigRepository::class);
 
-        Passport::tokensExpireIn(CarbonInterval::minutes(
-            $this->positiveIntConfig($config, 'mcp-oauth.access_token_ttl_minutes', 60),
-        ));
-        Passport::refreshTokensExpireIn(CarbonInterval::days(
-            $this->positiveIntConfig($config, 'mcp-oauth.refresh_token_ttl_days', 30),
-        ));
+        $accessTokenTtlMinutes = BoundedPositiveInt::require(
+            $config->get('mcp-oauth.access_token_ttl_minutes'),
+            'access_token_ttl_minutes',
+            BoundedPositiveInt::ACCESS_TOKEN_TTL_MINUTES_MAX,
+        );
+        $refreshTokenTtlDays = BoundedPositiveInt::require(
+            $config->get('mcp-oauth.refresh_token_ttl_days'),
+            'refresh_token_ttl_days',
+            BoundedPositiveInt::REFRESH_TOKEN_TTL_DAYS_MAX,
+        );
+        $authCodeTtlMinutes = BoundedPositiveInt::require(
+            $config->get('mcp-oauth.auth_code_ttl_minutes'),
+            'auth_code_ttl_minutes',
+            BoundedPositiveInt::AUTH_CODE_TTL_MINUTES_MAX,
+        );
+
+        Passport::tokensExpireIn(CarbonInterval::minutes($accessTokenTtlMinutes));
+        Passport::refreshTokensExpireIn(CarbonInterval::days($refreshTokenTtlDays));
+        $this->applyAuthCodeLifetime($authCodeTtlMinutes);
     }
 
     /**
-     * Reads a positive integer from config; non-numeric values fall back.
+     * Passport hardcodes AuthCodeGrant at PT10M with no public setter; when
+     * the authorization server is present, overwrite the private TTL so the
+     * validated config is the single source of truth.
      */
-    private function positiveIntConfig(ConfigRepository $config, string $key, int $default): int
+    private function applyAuthCodeLifetime(int $authCodeTtlMinutes): void
     {
-        $configuredValue = $config->get($key, $default);
+        $authCodeInterval = CarbonInterval::minutes($authCodeTtlMinutes);
 
-        if (! is_int($configuredValue) && ! is_string($configuredValue)) {
-            return max(1, $default);
-        }
+        $this->app->afterResolving(AuthorizationServer::class, function (AuthorizationServer $authorizationServer) use ($authCodeInterval): void {
+            $enabledGrantTypesProperty = new ReflectionProperty($authorizationServer, 'enabledGrantTypes');
+            /** @var array<string, object> $enabledGrantTypes */
+            $enabledGrantTypes = $enabledGrantTypesProperty->getValue($authorizationServer);
 
-        if (is_string($configuredValue) && ! is_numeric($configuredValue)) {
-            return max(1, $default);
-        }
+            foreach ($enabledGrantTypes as $grant) {
+                if (! $grant instanceof AuthCodeGrant) {
+                    continue;
+                }
 
-        return max(1, (int) $configuredValue);
+                $authCodeTtlProperty = new ReflectionProperty(AuthCodeGrant::class, 'authCodeTTL');
+                $authCodeTtlProperty->setValue($grant, $authCodeInterval);
+            }
+        });
     }
 }

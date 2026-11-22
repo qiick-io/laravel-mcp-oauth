@@ -29,9 +29,20 @@ return [
      */
     'mcp_path' => 'mcp',
 
+    /*
+     * Token lifetimes. Boot fails closed on non-integer, < 1, or above the
+     * documented maximum (Internal\BoundedPositiveInt::*MAX). A typo’d env
+     * that casts to 0 via (int) is rejected the same way.
+     *
+     * access: 1..1440 minutes (default 60)
+     * refresh: 1..365 days (default 30)
+     * auth code: 1..10 minutes (default 10; Passport/league AuthCodeGrant)
+     */
     'access_token_ttl_minutes' => (int) env('MCP_OAUTH_ACCESS_TOKEN_TTL_MINUTES', 60),
 
     'refresh_token_ttl_days' => (int) env('MCP_OAUTH_REFRESH_TOKEN_TTL_DAYS', 30),
+
+    'auth_code_ttl_minutes' => (int) env('MCP_OAUTH_AUTH_CODE_TTL_MINUTES', 10),
 
     'registrations_per_minute' => (int) env('MCP_OAUTH_REGISTRATIONS_PER_MINUTE', 10),
 
