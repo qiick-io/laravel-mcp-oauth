@@ -21,6 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Package migrations loaded via `loadMigrationsFrom` when
+  `mcp-oauth.migrations.load` is true (default; publish tag
+  `mcp-oauth-migrations` kept for customise — set `load=false` after
+  publishing or tables are created twice): `oauth_client_metadata` (M3:
+  RFC 7591/7592 fields, CIMD cache, PAR/DPoP flags),
+  `oauth_blocked_redirect_hosts` (M6: `public_id`, `match_mode`, expiry;
+  `created_by` FK uses `mcp-oauth.user_model`), and `oauth_consent_records`
+  (S4; Eloquent refuses update/delete). Models use explicit `$fillable` and
+  mint UUID v7. CIMD runtime config defaults off. Reference schema and
+  four-engine schema tests name each MUST item. JSON / `software_statement`
+  size caps land in the DCR PR.
+
 - Core runtime services: `McpOAuthServer` (three gates, Passport key usability
   including half-set env and world-readable files), `RedirectUriGuard` (League
   Uri, ASCII hosts, scheme allowlist, host block, externa bypass dataset),

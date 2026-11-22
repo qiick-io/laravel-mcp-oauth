@@ -165,6 +165,8 @@ jobs:
 
   # Four engines wherever the package touches the database (design §11.3).
   # Scaffold keeps the job shape; migration PRs wire services and DB_CONNECTION.
+  # One engine per job so MySQL and MariaDB never share a runner (GHA services
+  # start every declared container on every matrix cell).
   databases:
     name: Databases (${{ matrix.engine }})
     runs-on: ubuntu-latest
@@ -172,15 +174,60 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        engine:
-          - sqlite
-          - pgsql
-          - mysql
-          - mariadb
+        include:
+          - engine: sqlite
+            db_connection: sqlite
+            db_port: ''
+            db_database: ':memory:'
+            db_username: ''
+            db_password: ''
+          - engine: pgsql
+            db_connection: pgsql
+            db_port: '5432'
+            db_database: mcp_oauth_test
+            db_username: postgres
+            db_password: postgres
+            image: postgres:16
+            health: pg_isready -U postgres
+            docker_env: '-e POSTGRES_DB=mcp_oauth_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres'
+          - engine: mysql
+            db_connection: mysql
+            db_port: '3306'
+            db_database: mcp_oauth_test
+            db_username: root
+            db_password: ''
+            image: mysql:8.4
+            health: mysqladmin ping -h 127.0.0.1 -uroot --silent
+            docker_env: '-e MYSQL_DATABASE=mcp_oauth_test -e MYSQL_ALLOW_EMPTY_PASSWORD=yes'
+          - engine: mariadb
+            db_connection: mariadb
+            db_port: '3306'
+            db_database: mcp_oauth_test
+            db_username: root
+            db_password: ''
+            image: mariadb:11.4
+            health: healthcheck.sh --connect --innodb_initialized
+            docker_env: '-e MYSQL_DATABASE=mcp_oauth_test -e MYSQL_ALLOW_EMPTY_PASSWORD=yes'
     steps:
       - name: Checkout
         # actions/checkout@v4.2.2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Start ${{ matrix.engine }}
+        if: matrix.engine != 'sqlite'
+        run: |
+          docker run -d --name mcp-oauth-db \
+            -p ${{ matrix.db_port }}:${{ matrix.db_port == '5432' && '5432' || '3306' }} \
+            ${{ matrix.docker_env }} \
+            ${{ matrix.image }}
+          for attempt in $(seq 1 30); do
+            if docker exec mcp-oauth-db ${{ matrix.health }}; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs mcp-oauth-db
+          exit 1
 
       - name: Setup PHP
         # shivammathur/setup-php@2.40.0
@@ -203,10 +250,15 @@ jobs:
             "illuminate/support:^13.0"
           composer update --no-interaction --prefer-dist --with-all-dependencies
 
-      - name: Pest (engine services land with migration / concurrency PRs)
-        run: |
-          echo "Engine=${{ matrix.engine }}: DB suites land in later PRs."
-          vendor/bin/pest
+      - name: Pest schema suite on ${{ matrix.engine }}
+        env:
+          DB_CONNECTION: ${{ matrix.db_connection }}
+          DB_HOST: 127.0.0.1
+          DB_PORT: ${{ matrix.db_port }}
+          DB_DATABASE: ${{ matrix.db_database }}
+          DB_USERNAME: ${{ matrix.db_username }}
+          DB_PASSWORD: ${{ matrix.db_password }}
+        run: vendor/bin/pest --filter=PackageMigrations
 
   # S81: installing without Inertia (suggest) boots; --no-dev proves that.
   no-dev-boot:
