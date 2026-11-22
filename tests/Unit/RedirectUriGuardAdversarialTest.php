@@ -126,11 +126,13 @@ it('canonicalises IPv6 and unmaps ::ffff so alternate spellings hit the same blo
         ->and($guard->isHostBlocked('[::ffff:0:1.2.3.4]'))->toBeTrue()
         ->and($guard->isHostBlocked('[::1.2.3.4]'))->toBeTrue()
         ->and($guard->isHostBlocked('[64:ff9b::1.2.3.4]'))->toBeTrue()
+        ->and($guard->isHostBlocked('[64:ff9b:1::1.2.3.4]'))->toBeTrue()
         ->and($guard->normalizeHost('2001:0db8:0:0::1'))->toBe('2001:db8::1')
         ->and($guard->normalizeHost('::ffff:1.2.3.4'))->toBe('1.2.3.4')
         ->and($guard->normalizeHost('::ffff:0:1.2.3.4'))->toBe('1.2.3.4')
         ->and($guard->normalizeHost('::1.2.3.4'))->toBe('1.2.3.4')
-        ->and($guard->normalizeHost('64:ff9b::1.2.3.4'))->toBe('1.2.3.4');
+        ->and($guard->normalizeHost('64:ff9b::1.2.3.4'))->toBe('1.2.3.4')
+        ->and($guard->normalizeHost('64:ff9b:1::1.2.3.4'))->toBe('1.2.3.4');
 });
 
 it('refuses non-dotted-decimal IPv4 spellings that WHATWG would still parse', function (string $host): void {

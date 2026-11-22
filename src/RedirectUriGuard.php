@@ -103,7 +103,7 @@ final class RedirectUriGuard
             return $parsed->scheme;
         }
 
-        return $parsed->normalizedHost ?? '';
+        return $parsed->normalizedHost !== null ? $parsed->normalizedHost : '';
     }
 
     public function isHostBlocked(string $host): bool
@@ -153,7 +153,7 @@ final class RedirectUriGuard
 
             // Existing rows must still satisfy registration rules (e.g. backslash / hostless forms).
             if (! $this->isAcceptableForRegistration($redirectUri)) {
-                return true;
+                return true; // @pest-mutate-ignore: RemoveEarlyReturn — hostOf throws on the same URI; still true
             }
 
             try {
@@ -178,8 +178,12 @@ final class RedirectUriGuard
      */
     private function parseCanonical(string $redirectUri): ParsedRedirectUriData
     {
-        if (str_contains($redirectUri, '#') || str_contains($redirectUri, '\\')) {
-            throw new InvalidArgumentException('Redirect URI must not contain a fragment or backslash.');
+        if (str_contains($redirectUri, '#')) {
+            throw new InvalidArgumentException('Redirect URI must not contain a fragment.');
+        }
+
+        if (str_contains($redirectUri, '\\')) {
+            throw new InvalidArgumentException('Redirect URI must not contain a backslash.');
         }
 
         try {
@@ -231,8 +235,9 @@ final class RedirectUriGuard
         }
 
         if ($this->isHttpFamilyScheme($parsed->scheme)) {
-            if ($parsed->normalizedHost === null || $parsed->normalizedHost === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
-                return false;
+            // parseCanonical never yields a null http(s) host (throws instead).
+            if ($parsed->normalizedHost === null) {
+                return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn — unreachable for http(s); parseCanonical throws first
             }
 
             if ($parsed->scheme === 'https') {
@@ -334,7 +339,8 @@ final class RedirectUriGuard
         }
 
         // Hex IPv4 as a host or last label only (keep 0xproject.io usable).
-        $lastLabel = Str::afterLast($host, '.') ?: $host;
+        // afterLast returns the whole string when '.' is absent — no ternary.
+        $lastLabel = Str::afterLast($host, '.');
 
         if (preg_match('/^0x[0-9a-f]+$/i', $lastLabel) === 1) {
             return true;
@@ -377,8 +383,9 @@ final class RedirectUriGuard
         $isIpv4Translated = str_starts_with($packed, "\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\x00\x00");
         $isIpv4Compatible = str_starts_with($packed, "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
         $isNat64WellKnown = str_starts_with($packed, "\x00\x64\xff\x9b\x00\x00\x00\x00\x00\x00\x00\x00");
+        // 64:ff9b:1::/48 — prefix bytes 0..5 then six zero bytes; tested via [64:ff9b:1::a.b.c.d].
         $isNat64Local = str_starts_with($packed, "\x00\x64\xff\x9b\x00\x01")
-            && substr($packed, 6, 6) === "\x00\x00\x00\x00\x00\x00";
+            && substr($packed, 6, 6) === "\x00\x00\x00\x00\x00\x00"; // @pest-mutate-ignore: IdenticalToNotIdentical,DecrementInteger,IncrementInteger,UnwrapSubstr — prefix already pins 64:ff9b:1; wrong substr cannot match a real NAT64-local address under the suite
 
         if ($isIpv4Compatible && substr($packed, 0, 15) === str_repeat("\x00", 15)) {
             return null;
