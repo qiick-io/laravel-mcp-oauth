@@ -18,8 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RedirectUriGuard` refuses every host whose last label is numeric unless it
   is four decimal octets of 0..255 (WHATWG reads `0177.0.0.1` as octal
   127.0.0.1); the rule no longer depends on glibc vs macOS `inet_pton`.
+- `ClientMetadataUriGuard` also refuses Teredo, documentation (`2001:db8::/32`,
+  TEST-NET-1/2/3), discard (`100::/64`) and the former 6to4 relay range, plus
+  `*.lan` and `home.arpa`. `RedirectUriGuard` refuses the unspecified
+  addresses `0.0.0.0` and `::` for every scheme; `parseCanonical()` is
+  `@internal` (parsing only, not validation).
 - DCR `client_name` fails closed on invalid UTF-8 or a PCRE error, and refuses
-  line / paragraph separators, Hangul fillers and names with no visible text.
+  line / paragraph separators, Hangul fillers and names that render as nothing
+  (spaces, combining marks or VS16 alone, U+2800); the `name` alias gets the
+  same policy.
 - `RedirectUriGuard` uses one canonical parse for registration, scheme, hostOf
   and blocklist (refuse fragment, backslash, userinfo); non-loopback `http` is
   refused at registration (RFC 8252); leading-zero IPv4 octets throw a

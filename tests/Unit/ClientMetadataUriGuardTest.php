@@ -176,3 +176,25 @@ it('keeps accepting public neighbours of the new ranges', function (string $uri)
     'arpa-like public name' => 'https://home.arpa.example/',
     'lan as a label' => 'https://lan.example.com/',
 ]);
+
+it('refuses the top of each documentation and transition range', function (string $uri): void {
+    expect((new ClientMetadataUriGuard)->isAcceptable($uri))->toBeFalse();
+})->with([
+    'teredo top' => 'https://[2001:0:ffff:ffff::1]/',
+    'ipv6 documentation top' => 'https://[2001:db8:ffff:ffff::1]/',
+    'ipv6 discard top' => 'https://[100::ffff:ffff:ffff:ffff]/',
+    'test-net-1 top' => 'https://192.0.2.255/',
+    'test-net-2 top' => 'https://198.51.100.255/',
+    'test-net-3 top' => 'https://203.0.113.255/',
+    'former relay top' => 'https://192.88.99.255/',
+]);
+
+it('accepts the block just below or beside each documentation and transition range', function (string $uri): void {
+    expect((new ClientMetadataUriGuard)->isAcceptable($uri))->toBeTrue();
+})->with([
+    'beside ipv6 discard' => 'https://[100:0:0:1::1]/',
+    'beside test-net-1' => 'https://192.0.3.1/',
+    'beside test-net-2' => 'https://198.51.101.1/',
+    'beside test-net-3' => 'https://203.0.112.1/',
+    'beside former relay' => 'https://192.88.98.1/',
+]);

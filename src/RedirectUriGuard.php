@@ -218,6 +218,14 @@ final class RedirectUriGuard
      * Refuses fragment, backslash, userinfo, hostless http(s), percent-encoded
      * hosts, non-ASCII hosts and non-dotted-decimal IPv4 forms.
      *
+     * Parsing only, not validation: it does not apply the scheme allow-list
+     * (dangerous schemes pass), the loopback-only rule for http, the
+     * unspecified-address rule or the blocklist. Use
+     * {@see isAcceptableForRegistration()} and {@see isHostBlocked()} to
+     * decide whether a URI is allowed.
+     *
+     * @internal public only so ClientMetadataUriGuard shares the same parse
+     *
      * @throws InvalidArgumentException
      */
     public function parseCanonical(string $redirectUri): ParsedRedirectUriData
@@ -298,6 +306,12 @@ final class RedirectUriGuard
     private function isSchemeAllowedForParsed(ParsedRedirectUriData $parsed): bool
     {
         if (in_array($parsed->scheme, $this->dangerousSchemes(), true)) {
+            return false;
+        }
+
+        // 0.0.0.0 and :: reach services on the user's own machine on Linux and
+        // macOS, so they are never a valid destination for any scheme.
+        if (in_array($parsed->normalizedHost, ['0.0.0.0', '::'], true)) {
             return false;
         }
 

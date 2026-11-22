@@ -159,11 +159,12 @@ final class RegisterClientController extends OAuthRegisterController
      */
     private function clientNameContainsDisallowedCharacters(Request $request): bool
     {
-        foreach (['client_name', 'name'] as $nameKey) { // @pest-mutate-ignore: RemoveArrayItem
+        // resolveClientName() falls back to `name`, so both keys are checked.
+        foreach (['client_name', 'name'] as $nameKey) {
             $nameValue = $request->input($nameKey);
 
             if (! is_string($nameValue) || $nameValue === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
-                continue; // @pest-mutate-ignore: ContinueToBreak
+                continue;
             }
 
             if (! mb_check_encoding($nameValue, 'UTF-8')) {
@@ -178,9 +179,10 @@ final class RegisterClientController extends OAuthRegisterController
                 return true;
             }
 
-            // A name made only of spaces, joiners or the combining grapheme
-            // joiner would render as nothing next to "wants access".
-            if (preg_match('/[^\p{Z}\x{034F}\x{200C}\x{200D}]/u', $nameValue) !== 1) {
+            // A name made only of spaces, combining marks (variation
+            // selectors, CGJ included), joiners or the blank braille pattern
+            // would render as nothing next to "wants access".
+            if (preg_match('/[^\p{Z}\p{M}\x{200C}\x{200D}\x{2800}]/u', $nameValue) !== 1) {
                 return true;
             }
         }

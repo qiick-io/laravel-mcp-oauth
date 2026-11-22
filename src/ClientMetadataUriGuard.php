@@ -18,13 +18,13 @@ use Qiick\McpOAuth\Internal\BlockedHostCatalog;
  * inside the operator's network is accepted:
  *
  * - internal names: single-label hosts, `localhost`, `*.localhost`,
- *   `*.local` and `*.internal` (cloud metadata such as
- *   `metadata.google.internal`);
+ *   `*.local`, `*.lan`, `home.arpa` (RFC 8375) and `*.internal` (cloud
+ *   metadata such as `metadata.google.internal`);
  * - IPv6 literals that embed an IPv4 address (mapped, translated, NAT64,
- *   6to4), whatever that address is: there is no honest reason to write a
+ *   6to4, Teredo), whatever that address is: there is no honest reason to write a
  *   public IPv4 that way;
- * - private, reserved, shared (CGNAT), benchmarking, IETF protocol and
- *   multicast IP literals.
+ * - private, reserved, shared (CGNAT), benchmarking, IETF protocol,
+ *   documentation, discard, former relay and multicast IP literals.
  *
  * DNS is never resolved: nothing fetches these URIs today, so a name that
  * resolves to an internal address (`127.0.0.1.nip.io`) stays a fetch-time
@@ -67,6 +67,10 @@ final class ClientMetadataUriGuard
     private function isPublicHostname(string $host): bool
     {
         if (! str_contains($host, '.')) {
+            return false;
+        }
+
+        if ($host === 'home.arpa' || str_ends_with($host, '.home.arpa')) {
             return false;
         }
 
@@ -134,6 +138,13 @@ final class ClientMetadataUriGuard
             ['224.0.0.0', 4], // IPv4 multicast
             ['ff00::', 8], // IPv6 multicast
             ['2002::', 16], // 6to4 embeds an IPv4 address, RFC 3056
+            ['2001::', 32], // Teredo embeds an obfuscated IPv4 address, RFC 4380
+            ['2001:db8::', 32], // IPv6 documentation, RFC 3849
+            ['100::', 64], // IPv6 discard-only, RFC 6666
+            ['192.0.2.0', 24], // TEST-NET-1, RFC 5737
+            ['198.51.100.0', 24], // TEST-NET-2, RFC 5737
+            ['203.0.113.0', 24], // TEST-NET-3, RFC 5737
+            ['192.88.99.0', 24], // former 6to4 relay anycast, RFC 7526
         ];
     }
 
@@ -148,6 +159,7 @@ final class ClientMetadataUriGuard
             'localhost',
             'local',
             'internal',
+            'lan',
         ];
     }
 }
