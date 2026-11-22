@@ -96,3 +96,43 @@ it('keeps accepting ordinary names with spaces and marks', function (string $cli
     'korean' => '클로드',
     'flag emoji' => "\u{1F3F3}\u{FE0F}\u{200D}\u{1F308}",
 ]);
+
+/**
+ * @param  array<string, mixed>  $registrationPayload
+ */
+function registrationNamesAreDisallowed(array $registrationPayload): bool
+{
+    $config = Mockery::mock(ConfigRepository::class);
+    $config->shouldReceive('get')->andReturn(10_000)->byDefault();
+    $controller = new RegisterClientController(
+        new RedirectUriGuard(new BlockedHostCatalog([])),
+        new ClientMetadataUriGuard,
+        $config,
+    );
+    $method = new ReflectionMethod($controller, 'clientNameContainsDisallowedCharacters');
+
+    return (bool) $method->invoke($controller, Request::create('/oauth/register', 'POST', $registrationPayload));
+}
+
+it('applies the policy to the name alias when client_name is absent or empty', function (array $registrationPayload): void {
+    // resolveClientName() falls back to `name`, so the consent screen would show it.
+    expect(registrationNamesAreDisallowed($registrationPayload))->toBeTrue();
+})->with([
+    'only name with bidi override' => [['name' => "Good\u{202E}lacitirC"]],
+    'empty client_name then bad name' => [['client_name' => '', 'name' => "Good\u{202E}lacitirC"]],
+    'non-string client_name then bad name' => [['client_name' => ['x'], 'name' => "A\u{2028}B"]],
+]);
+
+it('accepts a clean name alias', function (): void {
+    expect(registrationNamesAreDisallowed(['name' => 'Claude Desktop']))->toBeFalse();
+});
+
+it('refuses names that render as nothing', function (string $clientName): void {
+    expect(clientNameIsDisallowed()($clientName))->toBeTrue();
+})->with([
+    'blank braille pattern' => "\u{2800}",
+    'variation selector 16 alone' => "\u{FE0F}",
+    'lone combining mark' => "\u{0301}",
+    'khmer inherent vowel' => "\u{17B5}",
+    'spaces around blank braille' => " \u{2800} ",
+]);

@@ -266,3 +266,16 @@ it('forbids parse_url anywhere under src including string callables', function (
             ->and($contents)->not->toContain('"parse_url"');
     }
 });
+
+it('refuses redirect URIs to the unspecified address', function (string $redirectUri): void {
+    // 0.0.0.0 reaches local services on Linux and macOS ("0.0.0.0 day").
+    $guard = new RedirectUriGuard(new BlockedHostCatalog([]));
+
+    expect($guard->isAcceptableForRegistration($redirectUri))->toBeFalse()
+        ->and($guard->isAllowedScheme($redirectUri))->toBeFalse();
+})->with([
+    'ipv4 https' => ['https://0.0.0.0/cb'],
+    'ipv4 http with port' => ['http://0.0.0.0:8080/cb'],
+    'ipv6 https' => ['https://[::]/cb'],
+    'ipv4-mapped' => ['https://[::ffff:0.0.0.0]/cb'],
+]);

@@ -145,3 +145,34 @@ it('accepts the addresses just outside the IPv6 extra ranges', function (string 
     'below 6to4' => 'https://[2001:4860::8888]/',
     'above 6to4' => 'https://[2003::1]/',
 ]);
+
+it('refuses Teredo, documentation, discard and old relay ranges', function (string $uri): void {
+    expect((new ClientMetadataUriGuard)->isAcceptable($uri))->toBeFalse();
+})->with([
+    'teredo' => 'https://[2001::1]/',
+    'teredo with embedded address' => 'https://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/',
+    'ipv6 documentation' => 'https://[2001:db8::1]/',
+    'test-net-1' => 'https://192.0.2.10/',
+    'test-net-2' => 'https://198.51.100.10/',
+    'test-net-3' => 'https://203.0.113.10/',
+    'ipv6 discard' => 'https://[100::1]/',
+    'former 6to4 relay' => 'https://192.88.99.1/',
+]);
+
+it('refuses home-network names', function (string $uri): void {
+    expect((new ClientMetadataUriGuard)->isAcceptable($uri))->toBeFalse();
+})->with([
+    'lan' => 'https://router.lan/logo.png',
+    'home.arpa' => 'https://nas.home.arpa/logo.png',
+    'home.arpa itself' => 'https://home.arpa/',
+]);
+
+it('keeps accepting public neighbours of the new ranges', function (string $uri): void {
+    expect((new ClientMetadataUriGuard)->isAcceptable($uri))->toBeTrue();
+})->with([
+    'next to teredo' => 'https://[2001:1::1]/',
+    'next to documentation' => 'https://[2001:db9::1]/',
+    'next to test-net-3' => 'https://203.0.114.1/',
+    'arpa-like public name' => 'https://home.arpa.example/',
+    'lan as a label' => 'https://lan.example.com/',
+]);
