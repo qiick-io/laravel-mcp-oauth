@@ -214,12 +214,13 @@ final class RedirectUriGuard
     }
 
     /**
-     * Single parse for every guard check. Refuses fragment, backslash, userinfo,
-     * hostless http(s), percent-encoded hosts and non-ASCII registered hosts.
+     * Single parse for every guard check, shared with ClientMetadataUriGuard.
+     * Refuses fragment, backslash, userinfo, hostless http(s), percent-encoded
+     * hosts, non-ASCII hosts and non-dotted-decimal IPv4 forms.
      *
      * @throws InvalidArgumentException
      */
-    private function parseCanonical(string $redirectUri): ParsedRedirectUriData
+    public function parseCanonical(string $redirectUri): ParsedRedirectUriData
     {
         if (str_contains($redirectUri, '#')) {
             throw new InvalidArgumentException('Redirect URI must not contain a fragment.');
@@ -276,6 +277,7 @@ final class RedirectUriGuard
             $port,
             $path,
             $query,
+            isIpv6Literal: str_starts_with($rawHost, '['),
         );
     }
 

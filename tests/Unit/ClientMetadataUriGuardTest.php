@@ -122,3 +122,26 @@ it('keeps accepting public addresses next to the refused ranges', function (stri
     'two-label host' => 'https://example.com/',
     'host ending in localhost-like label' => 'https://notlocalhost.example/',
 ]);
+
+it('never matches an IPv4 address against an IPv6 range', function (string $uri): void {
+    // 32.2.x.x shares its first 16 bits with 2002::/16, 255.x with ff00::/8.
+    expect((new ClientMetadataUriGuard)->isAcceptable($uri))->toBeTrue();
+})->with([
+    'bits of 6to4 prefix' => 'https://32.2.1.1/',
+]);
+
+it('refuses the last address of each extra range', function (string $uri): void {
+    expect((new ClientMetadataUriGuard)->isAcceptable($uri))->toBeFalse();
+})->with([
+    'ietf block end' => 'https://192.0.0.255/',
+    'ipv6 multicast end' => 'https://[ffff::1]/',
+    '6to4 end' => 'https://[2002:ffff:ffff::1]/',
+]);
+
+it('accepts the addresses just outside the IPv6 extra ranges', function (string $uri): void {
+    expect((new ClientMetadataUriGuard)->isAcceptable($uri))->toBeTrue();
+})->with([
+    'below multicast' => 'https://[feff::1]/',
+    'below 6to4' => 'https://[2001:4860::8888]/',
+    'above 6to4' => 'https://[2003::1]/',
+]);

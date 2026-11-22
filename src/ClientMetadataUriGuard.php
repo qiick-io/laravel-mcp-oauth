@@ -6,110 +6,148 @@ namespace Qiick\McpOAuth;
 
 use Illuminate\Support\Str;
 use InvalidArgumentException;
-use League\Uri\UriString;
-use Throwable;
+use Qiick\McpOAuth\Internal\BlockedHostCatalog;
 
 /**
- * Validation for DCR logo_uri / client_uri only. Separate from
- * {@see RedirectUriGuard}: metadata URIs must be http(s) to a non-loopback,
- * non-private host (no custom schemes, no RFC 8252 loopback exception).
+ * Validation for DCR logo_uri / client_uri only: http(s) to a public host.
+ *
+ * Starts from {@see RedirectUriGuard::parseCanonical()}, so fragment,
+ * backslash, userinfo, percent-encoded or non-ASCII hosts and every
+ * non-dotted-decimal IPv4 spelling are refused exactly as for redirect URIs.
+ * On top of that, nothing a browser or a future server-side fetch could reach
+ * inside the operator's network is accepted:
+ *
+ * - internal names: single-label hosts, `localhost`, `*.localhost`,
+ *   `*.local` and `*.internal` (cloud metadata such as
+ *   `metadata.google.internal`);
+ * - IPv6 literals that embed an IPv4 address (mapped, translated, NAT64,
+ *   6to4), whatever that address is: there is no honest reason to write a
+ *   public IPv4 that way;
+ * - private, reserved, shared (CGNAT), benchmarking, IETF protocol and
+ *   multicast IP literals.
+ *
+ * DNS is never resolved: nothing fetches these URIs today, so a name that
+ * resolves to an internal address (`127.0.0.1.nip.io`) stays a fetch-time
+ * concern for whichever consumer starts fetching.
  *
  * @api
  */
 final class ClientMetadataUriGuard
 {
+    public function __construct(
+        private readonly RedirectUriGuard $redirectUriGuard = new RedirectUriGuard(new BlockedHostCatalog([])),
+    ) {}
+
     public function isAcceptable(string $uri): bool
     {
         try {
-            $parts = $this->parseHttpUri($uri);
+            $parsedUri = $this->redirectUriGuard->parseCanonical($uri);
         } catch (InvalidArgumentException) {
             return false;
         }
 
-        $host = $parts['host'];
-
-        if ($this->isIpLiteral($host)) {
-            return $this->isPublicIpLiteral($host);
+        if ($parsedUri->scheme !== 'http' && $parsedUri->scheme !== 'https') {
+            return false;
         }
 
-        return $host !== ''; // @pest-mutate-ignore: EmptyStringToNotEmpty — empty host already threw above
+        // parseCanonical guarantees a host for http(s); the cast only satisfies PHPStan.
+        $host = (string) $parsedUri->normalizedHost; // @pest-mutate-ignore: RemoveStringCast — never null for http(s)
+
+        if (filter_var($host, FILTER_VALIDATE_IP) === false) {
+            return $this->isPublicHostname($host);
+        }
+
+        if ($parsedUri->isIpv6Literal && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
+            return false;
+        }
+
+        return $this->isPublicIpLiteral($host);
+    }
+
+    private function isPublicHostname(string $host): bool
+    {
+        if (! str_contains($host, '.')) {
+            return false;
+        }
+
+        return ! in_array(Str::afterLast($host, '.'), $this->internalNameSuffixes(), true);
+    }
+
+    private function isPublicIpLiteral(string $ipAddress): bool
+    {
+        $isOutsidePrivateAndReservedRanges = filter_var(
+            $ipAddress,
+            FILTER_VALIDATE_IP,
+            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE,
+        ) !== false;
+
+        if (! $isOutsidePrivateAndReservedRanges) {
+            return false;
+        }
+
+        foreach ($this->extraRefusedIpRanges() as [$rangeStart, $prefixLength]) {
+            if ($this->isInRange($ipAddress, $rangeStart, $prefixLength)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
-     * @return array{scheme: string, host: string}
-     *
-     * @throws InvalidArgumentException
+     * Prefix match on the address bits; an IPv4 address never matches an IPv6
+     * range (and the reverse) because the bit lengths differ.
      */
-    private function parseHttpUri(string $uri): array
+    private function isInRange(string $ipAddress, string $rangeStart, int $prefixLength): bool
     {
-        if (str_contains($uri, '#') || str_contains($uri, '\\')) {
-            throw new InvalidArgumentException('Metadata URI must not contain a fragment or backslash.');
+        $addressBits = $this->bitsOf($ipAddress);
+        $rangeBits = $this->bitsOf($rangeStart);
+
+        return strlen($addressBits) === strlen($rangeBits)
+            && substr($addressBits, 0, $prefixLength) === substr($rangeBits, 0, $prefixLength);
+    }
+
+    private function bitsOf(string $ipAddress): string
+    {
+        $packedAddress = (string) inet_pton($ipAddress); // @pest-mutate-ignore: RemoveStringCast — callers pass validated IP literals
+
+        $bits = '';
+
+        foreach (str_split($packedAddress) as $packedByte) {
+            $bits .= sprintf('%08b', ord($packedByte));
         }
 
-        try {
-            $parts = UriString::parse($uri);
-        } catch (Throwable $exception) {
-            throw new InvalidArgumentException('Metadata URI could not be parsed.', 0, $exception); // @pest-mutate-ignore: DecrementInteger,IncrementInteger
-        }
+        return $bits;
+    }
 
-        $scheme = $parts['scheme'] ?? null;
-
-        if (! is_string($scheme) || $scheme === '') { // @pest-mutate-ignore: BooleanOrToBooleanAnd,EmptyStringToNotEmpty
-            throw new InvalidArgumentException('Metadata URI requires a scheme.');
-        }
-
-        $normalizedScheme = Str::lower($scheme);
-
-        if (! in_array($normalizedScheme, ['http', 'https'], true)) {
-            throw new InvalidArgumentException('Metadata URI must use http or https.');
-        }
-
-        if (($parts['user'] ?? null) !== null || ($parts['pass'] ?? null) !== null) { // @pest-mutate-ignore: BooleanOrToBooleanAnd,CoalesceRemoveLeft
-            throw new InvalidArgumentException('Metadata URI must not contain userinfo.');
-        }
-
-        $rawHost = $parts['host'] ?? null;
-
-        if (! is_string($rawHost) || $rawHost === '') { // @pest-mutate-ignore: BooleanOrToBooleanAnd,EmptyStringToNotEmpty
-            throw new InvalidArgumentException('Metadata URI requires a host.');
-        }
-
-        if (str_contains($rawHost, '%')) {
-            throw new InvalidArgumentException('Metadata host must not be percent-encoded.');
-        }
-
-        $host = Str::lower(rtrim(trim($this->unwrapIpv6Host($rawHost)), '.')); // @pest-mutate-ignore: UnwrapRtrim,UnwrapTrim
-
-        if ($host === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
-            throw new InvalidArgumentException('Metadata host is empty.');
-        }
-
+    /**
+     * IP ranges filter_var's private / reserved flags do not cover.
+     *
+     * @return list<array{0: string, 1: int}>
+     */
+    private function extraRefusedIpRanges(): array
+    {
         return [
-            'scheme' => $normalizedScheme, // @pest-mutate-ignore: RemoveArrayItem
-            'host' => $host,
+            ['100.64.0.0', 10], // shared address space (CGNAT), RFC 6598
+            ['192.0.0.0', 24], // IETF protocol assignments, RFC 6890
+            ['198.18.0.0', 15], // benchmarking, RFC 2544
+            ['224.0.0.0', 4], // IPv4 multicast
+            ['ff00::', 8], // IPv6 multicast
+            ['2002::', 16], // 6to4 embeds an IPv4 address, RFC 3056
         ];
     }
 
-    private function unwrapIpv6Host(string $host): string
+    /**
+     * Top-level labels that only resolve inside a host or a private network.
+     *
+     * @return list<string>
+     */
+    private function internalNameSuffixes(): array
     {
-        if (str_starts_with($host, '[') && str_ends_with($host, ']')) { // @pest-mutate-ignore: BooleanAndToBooleanOr
-            return substr($host, 1, -1); // @pest-mutate-ignore: DecrementInteger,IncrementInteger
-        }
-
-        return $host;
-    }
-
-    private function isIpLiteral(string $host): bool
-    {
-        return filter_var($host, FILTER_VALIDATE_IP) !== false;
-    }
-
-    private function isPublicIpLiteral(string $host): bool
-    {
-        return filter_var(
-            $host,
-            FILTER_VALIDATE_IP,
-            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE, // @pest-mutate-ignore: BitwiseOrToBitwiseAnd
-        ) !== false;
+        return [
+            'localhost',
+            'local',
+            'internal',
+        ];
     }
 }

@@ -52,7 +52,7 @@ final class RegisterClientController extends OAuthRegisterController
         if ($this->clientNameContainsDisallowedCharacters($request)) {
             return response()->json([
                 'error' => 'invalid_client_metadata', // @pest-mutate-ignore: RemoveArrayItem
-                'error_description' => 'client_name must not contain control or bidi formatting characters.', // @pest-mutate-ignore: RemoveArrayItem
+                'error_description' => 'client_name must be valid UTF-8 with visible text and no control, separator or formatting characters.', // @pest-mutate-ignore: RemoveArrayItem
             ], 400);
         }
 
@@ -151,6 +151,12 @@ final class RegisterClientController extends OAuthRegisterController
         return strlen($request->getContent()) > self::MAX_BODY_BYTES; // @pest-mutate-ignore: GreaterToGreaterOrEqual
     }
 
+    /**
+     * The client name is shown on the consent screen as the client's own
+     * claim, so nothing in it may reorder, hide or break the text around it.
+     * Fails closed: invalid UTF-8 (reachable through a form-encoded body) and
+     * any PCRE error count as disallowed.
+     */
     private function clientNameContainsDisallowedCharacters(Request $request): bool
     {
         foreach (['client_name', 'name'] as $nameKey) { // @pest-mutate-ignore: RemoveArrayItem
@@ -160,15 +166,21 @@ final class RegisterClientController extends OAuthRegisterController
                 continue; // @pest-mutate-ignore: ContinueToBreak
             }
 
-            // C0/C1 controls always refused. Format (Cf) refused except ZWNJ
-            // (U+200C, Persian) and ZWJ (U+200D, emoji sequences).
-            if (preg_match('/\p{Cc}/u', $nameValue) === 1) {
+            if (! mb_check_encoding($nameValue, 'UTF-8')) {
                 return true;
             }
 
-            $withoutAllowedFormatMarks = preg_replace('/[\x{200C}\x{200D}]/u', '', $nameValue) ?? $nameValue;
+            // Refused: C0/C1 controls (Cc), line and paragraph separators
+            // (Zl, Zp), Hangul fillers (blank letters, class Lo) and format
+            // characters (Cf) except ZWNJ (U+200C, Persian) and ZWJ (U+200D,
+            // emoji sequences). preg_match false (an error) is not 0: refused.
+            if (preg_match('/[\p{Cc}\p{Zl}\p{Zp}\x{115F}\x{1160}\x{3164}\x{FFA0}]|(?![\x{200C}\x{200D}])\p{Cf}/u', $nameValue) !== 0) {
+                return true;
+            }
 
-            if (preg_match('/\p{Cf}/u', $withoutAllowedFormatMarks) === 1) {
+            // A name made only of spaces, joiners or the combining grapheme
+            // joiner would render as nothing next to "wants access".
+            if (preg_match('/[^\p{Z}\x{034F}\x{200C}\x{200D}]/u', $nameValue) !== 1) {
                 return true;
             }
         }

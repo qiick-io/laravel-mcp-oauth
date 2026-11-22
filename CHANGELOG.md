@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `ClientMetadataUriGuard` starts from `RedirectUriGuard::parseCanonical()`
+  (now public) and refuses internal names (single-label, `localhost`,
+  `*.local`, `*.internal`), IPv6 literals embedding IPv4 (mapped, translated,
+  NAT64, 6to4), non-ASCII hosts, alternative IPv4 spellings, CGNAT,
+  benchmarking, IETF-protocol and multicast ranges.
+- DCR `client_name` fails closed on invalid UTF-8 or a PCRE error, and refuses
+  line / paragraph separators, Hangul fillers and names with no visible text.
 - `RedirectUriGuard` uses one canonical parse for registration, scheme, hostOf
   and blocklist (refuse fragment, backslash, userinfo); non-loopback `http` is
   refused at registration (RFC 8252); leading-zero IPv4 octets throw a
