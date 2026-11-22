@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Passport scopes (design §5.6): `tokensCan` from `McpOAuthServer::scopeDescriptions()`
   and `defaultScopes([mcp:use])`; ClientCredentialsGrant disabled so Passport’s
   hard-coded `*` scope cannot be issued for MCP.
+- `McpBearerTokenResponse` (S21): token endpoint JSON includes `scope` via
+  `Passport::useAuthorizationServerResponseType`.
 
 - Package migrations loaded via `loadMigrationsFrom` when
   `mcp-oauth.migrations.load` is true (default; publish tag

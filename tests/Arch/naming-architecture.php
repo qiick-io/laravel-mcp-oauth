@@ -62,6 +62,7 @@ return [
             'Qiick\McpOAuth\RedirectUriGuard',
             'Qiick\McpOAuth\ClientThrottleKey',
             'Qiick\McpOAuth\McpOAuthReadiness',
+            'Qiick\McpOAuth\McpBearerTokenResponse',
         ],
     ],
 
