@@ -206,11 +206,11 @@ it('ignores non-string redirect URIs then still detects a later blocked host', f
         ->and($guard->clientHasBlockedRedirectHost($notArray))->toBeFalse();
 });
 
-it('returns unwrap failure host from displayHostOf when normalisation throws on http(s)', function (): void {
+it('displayHostOf returns empty when the canonical parse refuses the URI', function (): void {
     $guard = new RedirectUriGuard;
 
-    expect($guard->displayHostOf('https://Évil.com/cb'))->not->toBe('')
-        ->and($guard->displayHostOf('https://Évil.com/cb'))->toContain('vil')
+    expect($guard->displayHostOf('https://Évil.com/cb'))->toBe('')
+        ->and($guard->displayHostOf('https://user@evil.com/cb'))->toBe('')
         ->and($guard->displayHostOf('http://127.0.0.1/cb'))->toBe('127.0.0.1')
         ->and($guard->displayHostOf('http://localhost/cb'))->toBe('localhost');
 });

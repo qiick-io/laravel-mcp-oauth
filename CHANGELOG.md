@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `RedirectUriGuard` uses one canonical parse for registration, scheme, hostOf
+  and blocklist (refuse fragment, backslash, userinfo); non-loopback `http` is
+  refused at registration (RFC 8252); leading-zero IPv4 octets throw a
+  glibc-independent message.
 - `RedirectUriGuard` refuses hostless `http(s)` redirect URIs (`https:///…`,
   `https:/…`, …) and canonicalises IPv6 / unmaps `::ffff:` so alternate
   spellings hit the same block; non-dotted-decimal IPv4 forms are refused.
