@@ -88,15 +88,30 @@ beforeEach(function (): void {
     RateLimiter::clear('mcp-oauth-register');
 });
 
-it('answers 404 on POST oauth/register while OAuth is off', function (): void {
+it('with OAuth off matches an unregistered /oauth/register byte-for-byte on every method', function (string $method): void {
+    config()->set('app.debug', false);
     config()->set('mcp-oauth.enabled', false);
+
+    $server = ['HTTP_ACCEPT' => 'application/json'];
+
+    // Baseline: the path was never registered (true router 404).
+    $unregisteredResponse = $this->call($method, '/oauth/register', server: $server);
+
     McpOAuthRoutes::register();
 
-    $this->postJson('/oauth/register', [
-        'client_name' => 'Off Client',
-        'redirect_uris' => ['https://app.example/callback'],
-    ])->assertNotFound();
-});
+    // Gated registration must be indistinguishable from that baseline.
+    $gatedResponse = $this->call($method, '/oauth/register', server: $server);
+
+    expect($gatedResponse->getStatusCode())->toBe($unregisteredResponse->getStatusCode())
+        ->and($gatedResponse->headers->get('Allow'))->toBe($unregisteredResponse->headers->get('Allow'));
+
+    // HEAD must not carry a body; Laravel's missing-route HEAD still echoes JSON
+    // in some versions, so compare the body only for methods that keep one.
+    if ($method !== 'HEAD') {
+        expect($gatedResponse->getContent())->toBe($unregisteredResponse->getContent())
+            ->and($gatedResponse->headers->get('Content-Type'))->toBe($unregisteredResponse->headers->get('Content-Type'));
+    }
+})->with(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
 
 it('answers 503 temporarily_unavailable when Passport keys are missing', function (): void {
     Event::fake([McpPassportKeysMissing::class]);
@@ -242,4 +257,93 @@ it('throws when a foreign passport route already exists', function (): void {
 
     expect(fn () => McpOAuthRoutes::register())
         ->toThrow(LogicException::class, 'passport.token');
+});
+
+it('allows register beside a non-passport named route', function (): void {
+    Route::get('health', fn () => 'ok')->name('health.check');
+
+    expect(fn () => McpOAuthRoutes::register())->not->toThrow(LogicException::class);
+    expect(Route::has('mcp.oauth.register'))->toBeTrue();
+});
+
+it('answers 405 with Allow POST for non-POST methods when OAuth is on', function (string $method): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $this->call($method, '/oauth/register', server: ['HTTP_ACCEPT' => 'application/json'])
+        ->assertStatus(405)
+        ->assertHeader('Allow', 'POST');
+})->with(['GET', 'HEAD', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
+
+it('still detects a passport route registered after a non-passport name', function (): void {
+    Route::get('first', fn () => 'ok')->name('app.first');
+    Route::get('second', fn () => 'ok')->name('passport.authorizations.approve');
+
+    expect(fn () => McpOAuthRoutes::register())
+        ->toThrow(LogicException::class, 'passport.authorizations.approve');
+});
+
+it('refuses redirect_uris sent as a JSON object', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $this->postJson('/oauth/register', [
+        'client_name' => 'Object Uris',
+        'redirect_uris' => ['x' => 'https://app.example/callback'],
+    ])->assertStatus(400)
+        ->assertJsonPath('error', 'invalid_redirect_uri');
+
+    expect(Client::query()->count())->toBe(0);
+});
+
+it('refuses client_name with bidi or control characters', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $this->postJson('/oauth/register', [
+        'client_name' => "Good\u{202E}lacitirC",
+        'redirect_uris' => ['https://app.example/callback'],
+    ])->assertStatus(400)
+        ->assertJsonPath('error', 'invalid_client_metadata');
+
+    expect(Client::query()->count())->toBe(0);
+});
+
+it('refuses logo_uri that fails the redirect guard', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $this->postJson('/oauth/register', [
+        'client_name' => 'Logo',
+        'redirect_uris' => ['https://app.example/callback'],
+        'logo_uri' => 'javascript:alert(1)',
+    ])->assertStatus(400)
+        ->assertJsonPath('error', 'invalid_client_metadata');
+
+    expect(Client::query()->count())->toBe(0);
+});
+
+it('refuses an oversized registration body with 413', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $oversizedPayload = json_encode([
+        'client_name' => 'Huge',
+        'redirect_uris' => ['https://app.example/callback'],
+        'padding' => str_repeat('a', 70_000),
+    ], JSON_THROW_ON_ERROR);
+
+    $this->call(
+        'POST',
+        '/oauth/register',
+        content: $oversizedPayload,
+        server: [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_ACCEPT' => 'application/json',
+            'CONTENT_LENGTH' => (string) strlen($oversizedPayload),
+        ],
+    )->assertStatus(413)
+        ->assertJsonPath('error', 'invalid_request');
+
+    expect(Client::query()->count())->toBe(0);
 });

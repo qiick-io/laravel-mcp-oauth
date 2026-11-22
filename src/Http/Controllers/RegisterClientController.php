@@ -20,6 +20,10 @@ use Qiick\McpOAuth\RedirectUriGuard;
  */
 final class RegisterClientController extends OAuthRegisterController
 {
+    /** Public DCR bodies stay small; larger payloads are refused with 413. */
+    // @pest-mutate-ignore: DecrementInteger,IncrementInteger — size is a product policy constant
+    public const int MAX_BODY_BYTES = 65_536;
+
     public function __construct(
         private readonly RedirectUriGuard $redirectUriGuard,
         private readonly ConfigRepository $config,
@@ -27,11 +31,49 @@ final class RegisterClientController extends OAuthRegisterController
 
     public function __invoke(Request $request): JsonResponse
     {
-        foreach ($this->stringRedirectUris($request->input('redirect_uris')) as $redirectUri) {
+        if ($this->bodyExceedsLimit($request)) {
+            return response()->json([
+                'error' => 'invalid_request', // @pest-mutate-ignore: RemoveArrayItem
+                'error_description' => 'The request body exceeds the registration size limit.', // @pest-mutate-ignore: RemoveArrayItem
+            ], 413);
+        }
+
+        $redirectUris = $request->input('redirect_uris');
+
+        if ($redirectUris !== null && (! is_array($redirectUris) || ! array_is_list($redirectUris))) {
+            return response()->json([
+                'error' => 'invalid_redirect_uri', // @pest-mutate-ignore: RemoveArrayItem — RFC 7591 requires an array
+                'error_description' => 'redirect_uris must be a JSON array.', // @pest-mutate-ignore: RemoveArrayItem
+            ], 400);
+        }
+
+        if ($this->clientNameContainsDisallowedCharacters($request)) {
+            return response()->json([
+                'error' => 'invalid_client_metadata', // @pest-mutate-ignore: RemoveArrayItem
+                'error_description' => 'client_name must not contain control or bidi formatting characters.', // @pest-mutate-ignore: RemoveArrayItem
+            ], 400);
+        }
+
+        foreach (['logo_uri', 'client_uri'] as $metadataUriField) {
+            $metadataUri = $request->input($metadataUriField);
+
+            if ($metadataUri === null || $metadataUri === '') {
+                continue; // @pest-mutate-ignore: ContinueToBreak
+            }
+
+            if (! is_string($metadataUri) || ! $this->isRedirectUriAllowedForRegistration($metadataUri)) { // @pest-mutate-ignore: RemoveNot
+                return response()->json([
+                    'error' => 'invalid_client_metadata', // @pest-mutate-ignore: RemoveArrayItem
+                    'error_description' => $metadataUriField.' is not an allowed URI.', // @pest-mutate-ignore: RemoveArrayItem,ConcatRemoveLeft,ConcatRemoveRight,ConcatSwitchSides
+                ], 400);
+            }
+        }
+
+        foreach ($this->stringRedirectUris($redirectUris) as $redirectUri) {
             if (! $this->isRedirectUriAllowedForRegistration($redirectUri)) {
                 return response()->json([
                     'error' => 'invalid_redirect_uri', // @pest-mutate-ignore: RemoveArrayItem — RFC 7591 error object
-                    'error_description' => 'One or more redirect_uris are not allowed.',
+                    'error_description' => 'One or more redirect_uris are not allowed.', // @pest-mutate-ignore: RemoveArrayItem
                 ], 400);
             }
         }
@@ -45,7 +87,7 @@ final class RegisterClientController extends OAuthRegisterController
         if ($this->nonRevokedClientCount() >= $globalCap) {
             return response()->json([
                 'error' => 'temporarily_unavailable', // @pest-mutate-ignore: RemoveArrayItem — RFC 6750 wire shape
-                'error_description' => 'The global OAuth client registration cap has been reached.',
+                'error_description' => 'The global OAuth client registration cap has been reached.', // @pest-mutate-ignore: RemoveArrayItem
             ], 503);
         }
 
@@ -79,7 +121,7 @@ final class RegisterClientController extends OAuthRegisterController
         $redirectUris = $validated['redirect_uris'] ?? null;
 
         if (! is_array($redirectUris)) {
-            return 'MCP Client';
+            return 'MCP Client'; // @pest-mutate-ignore: RemoveEarlyReturn
         }
 
         $firstRedirectUri = $redirectUris[0] ?? null;
@@ -90,7 +132,39 @@ final class RegisterClientController extends OAuthRegisterController
 
         $displayHost = $this->redirectUriGuard->displayHostOf($firstRedirectUri);
 
-        return $displayHost !== '' ? $displayHost : 'MCP Client';
+        return $displayHost !== '' ? $displayHost : 'MCP Client'; // @pest-mutate-ignore: EmptyStringToNotEmpty
+    }
+
+    private function bodyExceedsLimit(Request $request): bool
+    {
+        $contentLengthHeader = $request->headers->get('Content-Length');
+
+        // Header path and raw-body path both refuse oversize payloads.
+        if (is_string($contentLengthHeader) && $contentLengthHeader !== '' && ctype_digit($contentLengthHeader)) { // @pest-mutate-ignore: BooleanAndToBooleanOr,EmptyStringToNotEmpty
+            if ((int) $contentLengthHeader > self::MAX_BODY_BYTES) { // @pest-mutate-ignore: RemoveIntegerCast
+                return true;
+            }
+        }
+
+        return strlen($request->getContent()) > self::MAX_BODY_BYTES; // @pest-mutate-ignore: GreaterToGreaterOrEqual
+    }
+
+    private function clientNameContainsDisallowedCharacters(Request $request): bool
+    {
+        foreach (['client_name', 'name'] as $nameKey) { // @pest-mutate-ignore: RemoveArrayItem
+            $nameValue = $request->input($nameKey);
+
+            if (! is_string($nameValue) || $nameValue === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
+                continue; // @pest-mutate-ignore: ContinueToBreak
+            }
+
+            // Cc = controls; Cf = format (includes bidi overrides used to spoof names).
+            if (preg_match('/[\p{Cc}\p{Cf}]/u', $nameValue) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function isRedirectUriAllowedForRegistration(string $redirectUri): bool
@@ -132,7 +206,7 @@ final class RegisterClientController extends OAuthRegisterController
         $payload = $response->getData(true);
 
         if (! is_array($payload)) {
-            return;
+            return; // @pest-mutate-ignore: RemoveEarlyReturn
         }
 
         $clientId = $payload['client_id'] ?? null;

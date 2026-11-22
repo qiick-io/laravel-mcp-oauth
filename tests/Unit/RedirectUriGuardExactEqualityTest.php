@@ -14,7 +14,26 @@ it('treats scheme and host case as equal under the canonical parse', function ()
     ))->toBeTrue();
 });
 
-it('refuses equality when the path differs', function (): void {
+it('refuses equality when only the host differs', function (): void {
+    $guard = new RedirectUriGuard;
+
+    // Survives BooleanAndToBooleanOr on the host conjunct (evil ≈ app).
+    expect($guard->areExactlyEqual(
+        'https://app.example/callback',
+        'https://evil.example/callback',
+    ))->toBeFalse();
+});
+
+it('refuses equality when only the scheme differs', function (): void {
+    $guard = new RedirectUriGuard;
+
+    expect($guard->areExactlyEqual(
+        'http://localhost/callback',
+        'https://localhost/callback',
+    ))->toBeFalse();
+});
+
+it('refuses equality when only the path differs', function (): void {
     $guard = new RedirectUriGuard;
 
     expect($guard->areExactlyEqual(
@@ -32,7 +51,7 @@ it('refuses equality when the query string differs', function (): void {
     ))->toBeFalse();
 });
 
-it('refuses equality when the port differs', function (): void {
+it('refuses equality when only the port differs', function (): void {
     $guard = new RedirectUriGuard;
 
     expect($guard->areExactlyEqual(

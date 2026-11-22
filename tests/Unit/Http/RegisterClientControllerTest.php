@@ -129,16 +129,105 @@ it('returns 503 when the global registration cap is reached', function (): void 
         ]);
 });
 
-it('skips the pre-check loop when redirect_uris is not an array', function (): void {
+it('refuses redirect_uris that are not a JSON array list', function (): void {
     [$controller] = makeRegisterClientController();
 
-    // Falls through to parent validation (invalid_client_metadata / invalid_redirect_uri).
     $response = $controller(Request::create('/oauth/register', 'POST', [
-        'client_name' => 'No Uris',
-        'redirect_uris' => 'https://app.example/callback',
+        'client_name' => 'Object',
+        'redirect_uris' => ['x' => 'https://app.example/callback'],
     ]));
 
-    expect($response->getStatusCode())->toBe(400);
+    expect($response->getStatusCode())->toBe(400)
+        ->and($response->getData(true)['error'])->toBe('invalid_redirect_uri');
+});
+
+it('refuses client_name with a bidi override', function (): void {
+    [$controller] = makeRegisterClientController();
+
+    $response = $controller(Request::create('/oauth/register', 'POST', [
+        'client_name' => "Good\u{202E}lacitirC",
+        'redirect_uris' => ['https://app.example/callback'],
+    ]));
+
+    expect($response->getStatusCode())->toBe(400)
+        ->and($response->getData(true)['error'])->toBe('invalid_client_metadata');
+});
+
+it('refuses logo_uri that fails the guard', function (): void {
+    [$controller] = makeRegisterClientController();
+
+    $response = $controller(Request::create('/oauth/register', 'POST', [
+        'client_name' => 'Logo',
+        'redirect_uris' => ['https://app.example/callback'],
+        'logo_uri' => 'http://169.254.169.254/latest',
+    ]));
+
+    expect($response->getStatusCode())->toBe(400)
+        ->and($response->getData(true)['error'])->toBe('invalid_client_metadata');
+});
+
+it('refuses an oversized body via Content-Length', function (): void {
+    [$controller] = makeRegisterClientController();
+
+    $request = Request::create('/oauth/register', 'POST', [
+        'client_name' => 'Huge',
+        'redirect_uris' => ['https://app.example/callback'],
+    ]);
+    $request->headers->set('Content-Length', (string) (RegisterClientController::MAX_BODY_BYTES + 1));
+
+    $response = $controller($request);
+
+    expect($response->getStatusCode())->toBe(413)
+        ->and($response->getData(true))->toBe([
+            'error' => 'invalid_request',
+            'error_description' => 'The request body exceeds the registration size limit.',
+        ]);
+});
+
+it('treats a Content-Length equal to the limit as within bounds', function (): void {
+    [$controller] = makeRegisterClientController();
+
+    expect(invokeRegisterClientControllerMethod(
+        $controller,
+        'bodyExceedsLimit',
+        [Request::create('/oauth/register', 'POST', server: [
+            'CONTENT_LENGTH' => (string) RegisterClientController::MAX_BODY_BYTES,
+        ])],
+    ))->toBeFalse()
+        ->and(invokeRegisterClientControllerMethod(
+            $controller,
+            'bodyExceedsLimit',
+            [Request::create('/oauth/register', 'POST', server: [
+                'CONTENT_LENGTH' => (string) (RegisterClientController::MAX_BODY_BYTES + 1),
+            ])],
+        ))->toBeTrue();
+});
+
+it('refuses client_uri that fails the guard', function (): void {
+    [$controller] = makeRegisterClientController();
+
+    $response = $controller(Request::create('/oauth/register', 'POST', [
+        'client_name' => 'Client Uri',
+        'redirect_uris' => ['https://app.example/callback'],
+        'client_uri' => 'javascript:alert(1)',
+    ]));
+
+    expect($response->getStatusCode())->toBe(400)
+        ->and($response->getData(true)['error'])->toBe('invalid_client_metadata');
+});
+
+it('accepts a blank logo_uri without treating it as present', function (): void {
+    [$controller] = makeRegisterClientController();
+
+    // Empty string is ignored; fragment redirect still fails later.
+    $response = $controller(Request::create('/oauth/register', 'POST', [
+        'client_name' => 'Empty Logo',
+        'redirect_uris' => ['https://app.example/callback#frag'],
+        'logo_uri' => '',
+    ]));
+
+    expect($response->getStatusCode())->toBe(400)
+        ->and($response->getData(true)['error'])->toBe('invalid_redirect_uri');
 });
 
 it('isValidRedirectUri delegates to the guard', function (): void {

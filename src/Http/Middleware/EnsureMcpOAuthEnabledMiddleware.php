@@ -9,10 +9,12 @@ use Illuminate\Http\Request;
 use Qiick\McpOAuth\Events\McpPassportKeysMissing;
 use Qiick\McpOAuth\McpOAuthServer;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
  * Per-request gate for package OAuth routes (design Resolved #3 / S1–S3 / S7).
- * Off → 404. On without usable Passport keys → 503 temporarily_unavailable
+ * Off → the same 404 the router would emit for an unknown path (status, body
+ * and Allow). On without usable Passport keys → 503 temporarily_unavailable
  * and {@see McpPassportKeysMissing}.
  */
 final class EnsureMcpOAuthEnabledMiddleware
@@ -27,7 +29,12 @@ final class EnsureMcpOAuthEnabledMiddleware
     public function handle(Request $request, Closure $next): Response
     {
         if (! $this->mcpOAuthServer->isEnabled()) {
-            abort(404);
+            // Match Illuminate\Routing\AbstractRouteCollection::handleMatchedRoute
+            // so scanners cannot tell a gated route from a missing one.
+            throw new NotFoundHttpException(sprintf(
+                'The route %s could not be found.',
+                $request->path(),
+            ));
         }
 
         if (! $this->mcpOAuthServer->hasPassportKeys()) {
