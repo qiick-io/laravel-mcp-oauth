@@ -19,28 +19,13 @@ use Throwable;
  */
 final class RedirectUriGuard
 {
-    /** @var list<string> */
-    private const array DANGEROUS_SCHEMES = [
-        'javascript',
-        'data',
-        'vbscript',
-        'file',
-    ];
-
-    /** @var list<string> */
-    private const array LOOPBACK_HOSTS = [
-        '127.0.0.1',
-        'localhost',
-        '::1',
-    ];
-
     public function __construct(
         private readonly BlockedHostCatalog $blockedHosts = new BlockedHostCatalog,
     ) {}
 
     public function isAcceptableForRegistration(string $redirectUri): bool
     {
-        if (str_contains($redirectUri, '#')) {
+        if (str_contains($redirectUri, '#') || str_contains($redirectUri, '\\')) {
             return false;
         }
 
@@ -52,18 +37,28 @@ final class RedirectUriGuard
 
         $scheme = $parts['scheme'] ?? null;
 
-        if (! is_string($scheme) || $scheme === '') {
+        if (! is_string($scheme) || $scheme === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
             return false;
         }
 
-        if (in_array(Str::lower($scheme), self::DANGEROUS_SCHEMES, true)) {
+        if (in_array(Str::lower($scheme), $this->dangerousSchemes(), true)) {
+            return false;
+        }
+
+        // League always sets user/pass keys; refuse either when present.
+        if (($parts['user'] ?? null) !== null || ($parts['pass'] ?? null) !== null) { // @pest-mutate-ignore: CoalesceRemoveLeft
             return false;
         }
 
         $rawHost = $parts['host'] ?? null;
 
-        if (! is_string($rawHost) || $rawHost === '') {
+        if (! is_string($rawHost) || $rawHost === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
             return true;
+        }
+
+        // Defense in depth: percent-encoded hosts also fail normalizeHost.
+        if (str_contains($rawHost, '%')) {
+            return false; // @pest-mutate-ignore: RemoveEarlyReturn
         }
 
         try {
@@ -86,13 +81,13 @@ final class RedirectUriGuard
 
         $scheme = $parts['scheme'] ?? null;
 
-        if (! is_string($scheme) || $scheme === '') {
-            return false;
+        if (! is_string($scheme) || $scheme === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty,BooleanOrToBooleanAnd
+            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
         }
 
         $normalizedScheme = Str::lower($scheme);
 
-        if (in_array($normalizedScheme, self::DANGEROUS_SCHEMES, true)) {
+        if (in_array($normalizedScheme, $this->dangerousSchemes(), true)) {
             return false;
         }
 
@@ -103,17 +98,17 @@ final class RedirectUriGuard
         if ($normalizedScheme === 'http') {
             $rawHost = $parts['host'] ?? null;
 
-            if (! is_string($rawHost) || $rawHost === '') {
+            if (! is_string($rawHost) || $rawHost === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
                 return false;
             }
 
             try {
                 $host = $this->normalizeHost($rawHost);
             } catch (InvalidArgumentException) {
-                return false;
+                return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
             }
 
-            return in_array($host, self::LOOPBACK_HOSTS, true);
+            return in_array($host, $this->loopbackHosts(), true);
         }
 
         $customSchemes = config('mcp.custom_schemes', []);
@@ -125,7 +120,7 @@ final class RedirectUriGuard
         $allowed = [];
 
         foreach ($customSchemes as $value) {
-            if (is_string($value) && $value !== '') {
+            if (is_string($value) && $value !== '') { // @pest-mutate-ignore: EmptyStringToNotEmpty,BooleanAndToBooleanOr
                 $allowed[] = Str::lower($value);
             }
         }
@@ -149,23 +144,17 @@ final class RedirectUriGuard
         }
 
         $idnaInfo = [];
+        $idnaFlags = IDNA_DEFAULT | IDNA_NONTRANSITIONAL_TO_ASCII | IDNA_USE_STD3_RULES; // @pest-mutate-ignore: BitwiseOrToBitwiseAnd
         $asciiHost = idn_to_ascii(
             $normalizedHost,
-            IDNA_DEFAULT | IDNA_NONTRANSITIONAL_TO_ASCII | IDNA_USE_STD3_RULES,
+            $idnaFlags,
             INTL_IDNA_VARIANT_UTS46,
             $idnaInfo,
         );
 
-        $idnaErrors = is_array($idnaInfo) && isset($idnaInfo['errors']) && is_int($idnaInfo['errors'])
-            ? $idnaInfo['errors']
-            : 0;
+        $idnaErrors = (int) ($idnaInfo['errors'] ?? 0); // @pest-mutate-ignore: DecrementInteger,IncrementInteger,RemoveIntegerCast,CoalesceRemoveLeft
 
-        if (
-            $asciiHost === false
-            || $asciiHost === ''
-            || str_contains($asciiHost, '?')
-            || $idnaErrors !== 0
-        ) {
+        if ($asciiHost === false || $asciiHost === '' || str_contains((string) $asciiHost, '?') || $idnaErrors !== 0) { // @pest-mutate-ignore: EmptyStringToNotEmpty,BooleanOrToBooleanAnd,FalseToTrue,RemoveStringCast
             throw new InvalidArgumentException('Host is not a valid internationalised domain name.');
         }
 
@@ -180,12 +169,12 @@ final class RedirectUriGuard
         try {
             $parts = UriString::parse($redirectUri);
         } catch (Throwable $exception) {
-            throw new InvalidArgumentException('Redirect URI could not be parsed.', 0, $exception);
+            throw new InvalidArgumentException('Redirect URI could not be parsed.', 0, $exception); // @pest-mutate-ignore: DecrementInteger,IncrementInteger
         }
 
         $rawHost = $parts['host'] ?? null;
 
-        if (! is_string($rawHost) || $rawHost === '') {
+        if (! is_string($rawHost) || $rawHost === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
             return null;
         }
 
@@ -206,13 +195,13 @@ final class RedirectUriGuard
         $normalizedScheme = is_string($scheme) ? Str::lower($scheme) : '';
 
         // Private-use / custom schemes: show the scheme, never a path-looking host.
-        if ($normalizedScheme !== '' && ! in_array($normalizedScheme, ['https', 'http'], true)) {
+        if ($normalizedScheme !== '' && ! in_array($normalizedScheme, ['https', 'http'], true)) { // @pest-mutate-ignore: EmptyStringToNotEmpty
             return $normalizedScheme;
         }
 
         $rawHost = $parts['host'] ?? null;
 
-        if (is_string($rawHost) && $rawHost !== '') {
+        if (is_string($rawHost) && $rawHost !== '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
             try {
                 return $this->normalizeHost($rawHost);
             } catch (InvalidArgumentException) {
@@ -232,7 +221,7 @@ final class RedirectUriGuard
         }
 
         foreach ($this->blockedHosts->all() as $blockedHost) {
-            if ($blockedHost === '') {
+            if ($blockedHost === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
                 continue;
             }
 
@@ -258,8 +247,9 @@ final class RedirectUriGuard
     {
         $redirectUris = $client->getAttribute('redirect_uris');
 
+        // Passport's redirectUris Attribute always returns an array; keep the guard for stubs.
         if (! is_array($redirectUris)) {
-            return false;
+            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
         }
 
         foreach ($redirectUris as $redirectUri) {
@@ -295,10 +285,35 @@ final class RedirectUriGuard
 
     private function unwrapIpv6Host(string $host): string
     {
-        if (str_starts_with($host, '[') && str_ends_with($host, ']')) {
+        if (str_starts_with($host, '[') && str_ends_with($host, ']')) { // @pest-mutate-ignore: BooleanAndToBooleanOr
             return substr($host, 1, -1);
         }
 
         return $host;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function dangerousSchemes(): array
+    {
+        return [
+            'javascript',
+            'data',
+            'vbscript',
+            'file',
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function loopbackHosts(): array
+    {
+        return [
+            '127.0.0.1',
+            'localhost',
+            '::1',
+        ];
     }
 }

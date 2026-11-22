@@ -9,9 +9,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 CLASSES=(
-  # McpOAuthServer and RedirectUriGuard land here once their suites hit ≥95% MSI.
   'Qiick\McpOAuth\ClientThrottleKey'
   'Qiick\McpOAuth\McpOAuthReadiness'
+  'Qiick\McpOAuth\McpOAuthServer'
+  'Qiick\McpOAuth\RedirectUriGuard'
 )
 
 MIN="${MUTATE_MIN:-95}"

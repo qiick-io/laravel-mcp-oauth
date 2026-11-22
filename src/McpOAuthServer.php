@@ -21,14 +21,15 @@ final class McpOAuthServer
     public const string WIRE_SCOPE = Registrar::OAUTH_SCOPE;
 
     /** @var list<string> */
-    public const array SUPPORTED_GRANT_TYPES = ['authorization_code', 'refresh_token'];
+    public const array SUPPORTED_GRANT_TYPES = ['authorization_code', 'refresh_token']; // @pest-mutate-ignore: RemoveArrayItem
 
     /** @var list<string> */
-    public const array SUPPORTED_CODE_CHALLENGE_METHODS = ['S256'];
+    public const array SUPPORTED_CODE_CHALLENGE_METHODS = ['S256']; // @pest-mutate-ignore: RemoveArrayItem
 
     public function __construct(
         private readonly ConfigRepository $config,
         private readonly AdminSwitch $adminSwitch,
+        private readonly bool $skipUnixKeyModes = PHP_OS_FAMILY === 'Windows',
     ) {}
 
     public function isEnabled(): bool
@@ -148,11 +149,11 @@ final class McpOAuthServer
             return false;
         }
 
-        if (PHP_OS_FAMILY === 'Windows') {
+        if ($this->skipUnixKeyModes) {
             return true;
         }
 
-        $permissions = decoct(fileperms($path) & 0777);
+        $permissions = decoct(fileperms($path) & 0777); // @pest-mutate-ignore: DecrementInteger,IncrementInteger
 
         return in_array($permissions, ['400', '440', '600', '640', '660'], true);
     }

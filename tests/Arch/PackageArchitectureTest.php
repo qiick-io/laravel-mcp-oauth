@@ -25,3 +25,7 @@ arch('test doubles shipped for apps start with Fake')
     ->expect('Qiick\McpOAuth\Testing')
     ->classes()
     ->toHavePrefix('Fake');
+
+arch('src never calls parse_url')
+    ->expect('parse_url')
+    ->not->toBeUsed();
