@@ -177,6 +177,44 @@ jobs:
           - pgsql
           - mysql
           - mariadb
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: mcp_oauth_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: mcp_oauth_test
+          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot --silent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MYSQL_DATABASE: mcp_oauth_test
+          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot --silent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         # actions/checkout@v4.2.2
@@ -203,10 +241,15 @@ jobs:
             "illuminate/support:^13.0"
           composer update --no-interaction --prefer-dist --with-all-dependencies
 
-      - name: Pest (engine services land with migration / concurrency PRs)
-        run: |
-          echo "Engine=${{ matrix.engine }}: DB suites land in later PRs."
-          vendor/bin/pest
+      - name: Pest schema suite on ${{ matrix.engine }}
+        env:
+          DB_CONNECTION: ${{ matrix.engine == 'sqlite' && 'sqlite' || matrix.engine }}
+          DB_HOST: 127.0.0.1
+          DB_PORT: ${{ matrix.engine == 'pgsql' && '5432' || matrix.engine == 'mariadb' && '3307' || '3306' }}
+          DB_DATABASE: ${{ matrix.engine == 'sqlite' && ':memory:' || 'mcp_oauth_test' }}
+          DB_USERNAME: ${{ matrix.engine == 'pgsql' && 'postgres' || 'root' }}
+          DB_PASSWORD: ${{ matrix.engine == 'pgsql' && 'postgres' || '' }}
+        run: vendor/bin/pest --filter=PackageMigrations
 
   # S81: installing without Inertia (suggest) boots; --no-dev proves that.
   no-dev-boot:

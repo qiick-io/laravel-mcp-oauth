@@ -39,11 +39,33 @@ return [
 
     'unused_client_retention_hours' => (int) env('MCP_OAUTH_UNUSED_CLIENT_RETENTION_HOURS', 24),
 
+    /*
+     * Days a revoked client or grant stays before mcp-oauth:purge-revoked.
+     */
+    'revoked_retention_days' => (int) env('MCP_OAUTH_REVOKED_RETENTION_DAYS', 90),
+
     'token_requests_per_minute' => (int) env('MCP_OAUTH_TOKEN_REQUESTS_PER_MINUTE', 60),
 
     'mcp_auth_failures_per_minute' => (int) env('MCP_OAUTH_MCP_AUTH_FAILURES_PER_MINUTE', 20),
 
     'host_block_chunk_size' => 100,
+
+    /*
+     * MCP authorization spec revision pinned for new registrations (M8).
+     */
+    'spec_revision' => env('MCP_OAUTH_SPEC_REVISION', '2026-07-28'),
+
+    /*
+     * Client ID Metadata Documents (S2). Runtime off by default; schema cache
+     * columns ship in oauth_client_metadata regardless.
+     */
+    'cimd' => [
+        'enabled' => (bool) env('MCP_OAUTH_CIMD_ENABLED', false),
+        'max_document_bytes' => (int) env('MCP_OAUTH_CIMD_MAX_DOCUMENT_BYTES', 65536),
+        'timeout_seconds' => (int) env('MCP_OAUTH_CIMD_TIMEOUT_SECONDS', 5),
+        'cache_min_seconds' => (int) env('MCP_OAUTH_CIMD_CACHE_MIN_SECONDS', 60),
+        'cache_max_seconds' => (int) env('MCP_OAUTH_CIMD_CACHE_MAX_SECONDS', 86400),
+    ],
 
     /*
      * Column on oauth_access_tokens holding GrantStore::bindingKey().
