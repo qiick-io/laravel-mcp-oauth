@@ -22,10 +22,10 @@ final class McpOAuthServer
     public const string WIRE_SCOPE = Registrar::OAUTH_SCOPE;
 
     /** @var list<string> */
-    public const array SUPPORTED_GRANT_TYPES = ['authorization_code', 'refresh_token']; // @pest-mutate-ignore: RemoveArrayItem
+    public const array SUPPORTED_GRANT_TYPES = ['authorization_code', 'refresh_token'];
 
     /** @var list<string> */
-    public const array SUPPORTED_CODE_CHALLENGE_METHODS = ['S256']; // @pest-mutate-ignore: RemoveArrayItem
+    public const array SUPPORTED_CODE_CHALLENGE_METHODS = ['S256'];
 
     public function __construct(
         private readonly ConfigRepository $config,
@@ -165,7 +165,7 @@ final class McpOAuthServer
             return true;
         }
 
-        $permissions = decoct(fileperms($path) & 0777); // @pest-mutate-ignore: DecrementInteger,IncrementInteger
+        $permissions = decoct(fileperms($path) & 0777);
 
         return in_array($permissions, ['400', '440', '600', '640', '660'], true);
     }
