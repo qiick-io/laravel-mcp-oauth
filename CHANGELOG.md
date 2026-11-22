@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Core runtime services: `McpOAuthServer` (three gates, Passport key usability
   including half-set env and world-readable files), `RedirectUriGuard` (League
-  Uri, ASCII hosts, scheme allowlist, host block), `ClientThrottleKey`,
-  `McpOAuthReadiness`, and `MissingPassportKeysException`. Mutation targets
-  registered for these classes.
+  Uri, ASCII hosts, scheme allowlist, host block, externa bypass dataset),
+  `ClientThrottleKey`, `McpOAuthReadiness`, and `MissingPassportKeysException`.
+  Per-class mutation ≥95% enrolled for `McpOAuthServer` and `RedirectUriGuard`
+  (with `ClientThrottleKey` and `McpOAuthReadiness`). Architecture test forbids
+  `parse_url` in `src/`.
 
 - Design §3 / §5.5 public contracts (`AdminSwitch`, `GrantStore`, …), data
   objects (`GrantRecord`, `AuthorizationDecision`, …), `RevocationReason`, and

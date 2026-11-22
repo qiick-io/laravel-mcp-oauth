@@ -143,18 +143,15 @@ final class RedirectUriGuard
             return $normalizedHost;
         }
 
-        $idnaInfo = [];
-        $idnaFlags = IDNA_DEFAULT | IDNA_NONTRANSITIONAL_TO_ASCII | IDNA_USE_STD3_RULES; // @pest-mutate-ignore: BitwiseOrToBitwiseAnd
+        // IDNA_DEFAULT already includes NONTRANSITIONAL_TO_ASCII; OR STD3 so underscores fail.
         $asciiHost = idn_to_ascii(
             $normalizedHost,
-            $idnaFlags,
+            IDNA_DEFAULT | IDNA_USE_STD3_RULES, // @pest-mutate-ignore: BitwiseOrToBitwiseAnd
             INTL_IDNA_VARIANT_UTS46,
-            $idnaInfo,
         );
 
-        $idnaErrors = (int) ($idnaInfo['errors'] ?? 0); // @pest-mutate-ignore: DecrementInteger,IncrementInteger,RemoveIntegerCast,CoalesceRemoveLeft
-
-        if ($asciiHost === false || $asciiHost === '' || str_contains((string) $asciiHost, '?') || $idnaErrors !== 0) { // @pest-mutate-ignore: EmptyStringToNotEmpty,BooleanOrToBooleanAnd,FalseToTrue,RemoveStringCast
+        // idn_to_ascii returns false on STD3/IDNA failure; '?' is the legacy soft failure.
+        if ($asciiHost === false || $asciiHost === '' || str_contains($asciiHost, '?')) { // @pest-mutate-ignore: EmptyStringToNotEmpty
             throw new InvalidArgumentException('Host is not a valid internationalised domain name.');
         }
 
