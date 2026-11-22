@@ -64,9 +64,16 @@ it('M3: token_endpoint_auth_method is nullable with no database default', functi
     $column = collect(Schema::getColumns('oauth_client_metadata'))
         ->firstWhere('name', 'token_endpoint_auth_method');
 
+    // MariaDB reports the SQL NULL default as the string "NULL".
+    $default = $column['default'] ?? null;
+
+    if (is_string($default) && strtoupper($default) === 'NULL') {
+        $default = null;
+    }
+
     expect($column)->not->toBeNull()
         ->and($column['nullable'] ?? null)->toBeTrue()
-        ->and($column['default'] ?? null)->toBeNull();
+        ->and($default)->toBeNull();
 });
 
 it('M3: PAR and DPoP per-client flags default to false', function (): void {
