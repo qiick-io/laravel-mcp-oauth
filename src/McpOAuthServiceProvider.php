@@ -11,6 +11,7 @@ use Illuminate\Support\ServiceProvider;
 use Laravel\Passport\Passport;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Grant\AuthCodeGrant;
+use League\OAuth2\Server\Grant\ClientCredentialsGrant;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Internal\BlockedHostCatalog;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
@@ -22,11 +23,12 @@ use ReflectionProperty;
  * `extra.laravel.providers` in composer.json.
  *
  * Always calls `Passport::ignoreRoutes()` and turns the device grant off in
- * `register()` (design Resolved #3 / #4). Token TTLs and the wire scope
- * (`tokensCan` / `defaultScopes`) come from config / `McpOAuthServer` in
- * `boot()`. Rate limiters, bearer response type and fail-closed adapter
- * validation land with later feature PRs. While `mcp-oauth.enabled` is false
- * (the default), missing product adapters are allowed so products can install
+ * `register()` (design Resolved #3 / #4). Token TTLs, the wire scope
+ * (`tokensCan` / `defaultScopes`), and stripping ClientCredentialsGrant
+ * (MCP allows only authorization_code + refresh_token) land in `boot()`.
+ * Rate limiters, bearer response type and fail-closed adapter validation
+ * land with later feature PRs. While `mcp-oauth.enabled` is false (the
+ * default), missing product adapters are allowed so products can install
  * before writing adapters.
  *
  * @api
@@ -112,25 +114,32 @@ final class McpOAuthServiceProvider extends ServiceProvider
 
         Passport::tokensExpireIn(CarbonInterval::minutes($accessTokenTtlMinutes));
         Passport::refreshTokensExpireIn(CarbonInterval::days($refreshTokenTtlDays));
-        $this->applyAuthCodeLifetime($authCodeTtlMinutes);
+        $this->hardenAuthorizationServer($authCodeTtlMinutes);
     }
 
     /**
-     * Passport hardcodes AuthCodeGrant at PT10M with no public setter; when
-     * the authorization server is present, overwrite the private TTL so the
-     * validated config is the single source of truth. Retrofits an already
-     * resolved singleton (afterResolving alone would skip it).
+     * Passport hardcodes AuthCodeGrant at PT10M and always enables
+     * ClientCredentialsGrant. Patch the live AuthorizationServer: set the
+     * validated auth-code TTL, and drop client_credentials so Passport’s
+     * hard-coded `*` scope cannot be issued for MCP (design: auth code +
+     * refresh only). Retrofits an already-resolved singleton.
      */
-    private function applyAuthCodeLifetime(int $authCodeTtlMinutes): void
+    private function hardenAuthorizationServer(int $authCodeTtlMinutes): void
     {
         $authCodeInterval = CarbonInterval::minutes($authCodeTtlMinutes);
 
-        $applyAuthCodeLifetime = function (AuthorizationServer $authorizationServer) use ($authCodeInterval): void {
+        $harden = function (AuthorizationServer $authorizationServer) use ($authCodeInterval): void {
             $enabledGrantTypesProperty = new ReflectionProperty($authorizationServer, 'enabledGrantTypes');
             /** @var array<string, object> $enabledGrantTypes */
             $enabledGrantTypes = $enabledGrantTypesProperty->getValue($authorizationServer);
 
-            foreach ($enabledGrantTypes as $grant) {
+            foreach ($enabledGrantTypes as $grantIdentifier => $grant) {
+                if ($grant instanceof ClientCredentialsGrant) {
+                    unset($enabledGrantTypes[$grantIdentifier]);
+
+                    continue;
+                }
+
                 if (! $grant instanceof AuthCodeGrant) {
                     continue;
                 }
@@ -138,12 +147,14 @@ final class McpOAuthServiceProvider extends ServiceProvider
                 $authCodeTtlProperty = new ReflectionProperty(AuthCodeGrant::class, 'authCodeTTL');
                 $authCodeTtlProperty->setValue($grant, $authCodeInterval);
             }
+
+            $enabledGrantTypesProperty->setValue($authorizationServer, $enabledGrantTypes);
         };
 
-        $this->app->afterResolving(AuthorizationServer::class, $applyAuthCodeLifetime);
+        $this->app->afterResolving(AuthorizationServer::class, $harden);
 
         if ($this->app->resolved(AuthorizationServer::class)) {
-            $applyAuthCodeLifetime($this->app->make(AuthorizationServer::class));
+            $harden($this->app->make(AuthorizationServer::class));
         }
     }
 

@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Carbon\CarbonInterval;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Grant\AuthCodeGrant;
+use League\OAuth2\Server\Grant\ClientCredentialsGrant;
+use League\OAuth2\Server\Grant\RefreshTokenGrant;
 use Qiick\McpOAuth\McpOAuthServiceProvider;
 use Qiick\McpOAuth\Tests\Support\PassportBootedTestCase;
 use ReflectionProperty;
@@ -100,4 +102,30 @@ it('retrofits auth_code_ttl when AuthorizationServer was already resolved', func
     (new McpOAuthServiceProvider($this->app))->boot();
 
     expect(authCodeTtlMinutesFromServer($authorizationServer))->toBe(3.0);
+});
+
+it('disables ClientCredentialsGrant so Passport star scope cannot be issued', function (): void {
+    config([
+        'passport.private_key' => passportTestKeyContents('oauth-private.key'),
+        'passport.public_key' => passportTestKeyContents('oauth-public.key'),
+    ]);
+
+    (new McpOAuthServiceProvider($this->app))->boot();
+    $this->app->forgetInstance(AuthorizationServer::class);
+
+    $enabledGrantTypesProperty = new ReflectionProperty(
+        $this->app->make(AuthorizationServer::class),
+        'enabledGrantTypes',
+    );
+    /** @var array<string, object> $enabledGrantTypes */
+    $enabledGrantTypes = $enabledGrantTypesProperty->getValue($this->app->make(AuthorizationServer::class));
+    $grantClasses = array_map(
+        static fn (object $grant): string => $grant::class,
+        $enabledGrantTypes,
+    );
+
+    expect($grantClasses)->not->toContain(ClientCredentialsGrant::class)
+        ->and($grantClasses)->toContain(AuthCodeGrant::class)
+        ->and($grantClasses)->toContain(RefreshTokenGrant::class)
+        ->and(array_keys($enabledGrantTypes))->not->toContain('client_credentials');
 });

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Laravel\Passport\Bridge\ScopeRepository;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\McpOAuthServer;
 
@@ -17,5 +18,14 @@ it('registers mcp:use via tokensCan from McpOAuthServer scope descriptions', fun
 });
 
 it('sets mcp:use as the only default Passport scope', function (): void {
-    expect(Passport::defaultScopes())->toBe([McpOAuthServer::WIRE_SCOPE]);
+    expect(Passport::defaultScopes())->toBe([McpOAuthServer::WIRE_SCOPE])
+        ->and(Passport::scopes()->pluck('id')->all())->toBe([McpOAuthServer::WIRE_SCOPE]);
+});
+
+it('returns null for unknown scopes so league rejects invalid_scope', function (): void {
+    /** @var ScopeRepository $scopeRepository */
+    $scopeRepository = $this->app->make(ScopeRepository::class);
+
+    expect($scopeRepository->getScopeEntityByIdentifier('nope'))->toBeNull()
+        ->and($scopeRepository->getScopeEntityByIdentifier(McpOAuthServer::WIRE_SCOPE))->not->toBeNull();
 });
