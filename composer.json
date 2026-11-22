@@ -1,0 +1,82 @@
+{
+    "$schema": "https://getcomposer.org/schema.json",
+    "name": "qiick/laravel-mcp-oauth",
+    "description": "OAuth authorization server for laravel/mcp endpoints in qiick Laravel products.",
+    "type": "library",
+    "keywords": [
+        "qiick",
+        "laravel",
+        "mcp",
+        "oauth",
+        "passport"
+    ],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Qiick",
+            "homepage": "https://qiick.io"
+        }
+    ],
+    "homepage": "https://github.com/qiick-io/laravel-mcp-oauth",
+    "support": {
+        "issues": "https://github.com/qiick-io/laravel-mcp-oauth/issues",
+        "source": "https://github.com/qiick-io/laravel-mcp-oauth"
+    },
+    "require": {
+        "php": "^8.3",
+        "ext-intl": "*",
+        "ext-openssl": "*",
+        "illuminate/console": "^12.41.1 || ^13.0",
+        "illuminate/contracts": "^12.41.1 || ^13.0",
+        "illuminate/database": "^12.41.1 || ^13.0",
+        "illuminate/http": "^12.41.1 || ^13.0",
+        "illuminate/routing": "^12.41.1 || ^13.0",
+        "illuminate/support": "^12.41.1 || ^13.0",
+        "laravel/mcp": "^1.2",
+        "laravel/passport": "^13.12",
+        "league/uri": "^7.8"
+    },
+    "require-dev": {
+        "inertiajs/inertia-laravel": "^3.0",
+        "larastan/larastan": "^3.3",
+        "laravel/pint": "^1.30",
+        "nunomaduro/collision": "^8.5",
+        "orchestra/testbench": "^10.0 || ^11.0",
+        "pestphp/pest": "^4.0",
+        "pestphp/pest-plugin-mutate": "^4.0",
+        "phpstan/phpstan": "^2.1"
+    },
+    "suggest": {
+        "inertiajs/inertia-laravel": "Default ConsentView (^3.0)"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Qiick\\McpOAuth\\McpOAuthServiceProvider"
+            ]
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "Qiick\\McpOAuth\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Qiick\\McpOAuth\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "pest",
+        "lint": "pint --test",
+        "analyse": "phpstan analyse --memory-limit=1G"
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        },
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
