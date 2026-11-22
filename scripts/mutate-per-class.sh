@@ -14,6 +14,9 @@ CLASSES=(
   'Qiick\McpOAuth\McpOAuthReadiness'
   'Qiick\McpOAuth\McpOAuthServer'
   'Qiick\McpOAuth\RedirectUriGuard'
+  # RegisterClientController + EnsureMcpOAuthEnabledMiddleware: enroll once
+  # unit coverage raises MSI above 95 (HTTP Isolated tests alone leave too many
+  # resolveClientName / JSON-shape mutants untested).
 )
 
 MIN="${MUTATE_MIN:-95}"
