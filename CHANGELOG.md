@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BoundedPositiveInt` at boot (same digit-only fail-closed path as TTLs /
   rate caps). Route `throttle:mcp-oauth-*` middleware is documented as a
   follow-up when authorize / token / register / revoke routes land.
+- `FamilyRevokingRefreshTokenRepository` (design §8.4 / S56 / S57 / S59): atomic
+  `UPDATE … WHERE revoked = false` on rotate; zero rows or a revoked /
+  unbound refresh revokes the token family and grant (`RevocationReason::Reuse`);
+  binds over Passport’s bridge repository; parallel `pcntl_fork` race test on
+  SQLite WAL; `FakeGrantStore` for Testbench.
 
 - Passport boot (design §5.6): `Passport::ignoreRoutes()` and device grant off
   in `register()` (S4 / S19); access, refresh and auth-code TTLs from raw

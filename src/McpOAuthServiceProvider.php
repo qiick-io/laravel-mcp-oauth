@@ -7,15 +7,19 @@ namespace Qiick\McpOAuth;
 use Carbon\CarbonInterval;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Passport\Bridge\RefreshTokenRepository as PassportRefreshTokenRepository;
 use Laravel\Passport\Passport;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Grant\AuthCodeGrant;
 use League\OAuth2\Server\Grant\ClientCredentialsGrant;
+use Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
+use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Internal\BlockedHostCatalog;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Internal\DisabledAdminSwitch;
@@ -28,9 +32,10 @@ use ReflectionProperty;
  * Always calls `Passport::ignoreRoutes()` and turns the device grant off in
  * `register()` (design Resolved #3 / #4). Token TTLs, the wire scope
  * (`tokensCan` / `defaultScopes`), stripping ClientCredentialsGrant,
- * `McpBearerTokenResponse`, and rate limiters for DCR / authorize / token /
+ * `McpBearerTokenResponse`, rate limiters for DCR / authorize / token /
  * revoke (per-IP via ClientThrottleKey and per-client when known; 429 with
- * Retry-After) land in `boot()`. Fail-closed adapter validation lands with
+ * Retry-After), and the family-revoking refresh-token repository binding
+ * land in `register()` / `boot()`. Fail-closed adapter validation lands with
  * later feature PRs. While `mcp-oauth.enabled` is false (the default),
  * missing product adapters are allowed so products can install before
  * writing adapters.
@@ -48,6 +53,16 @@ final class McpOAuthServiceProvider extends ServiceProvider
         Passport::$deviceCodeGrantEnabled = false;
 
         $this->app->singletonIf(AdminSwitch::class, DisabledAdminSwitch::class);
+
+        // Design §5.6: Passport resolves this concrete; products must bind GrantStore
+        // before the AuthorizationServer is first resolved.
+        $this->app->bind(PassportRefreshTokenRepository::class, function (Application $app): FamilyRevokingRefreshTokenRepository {
+            return new FamilyRevokingRefreshTokenRepository(
+                $app->make(Dispatcher::class),
+                $app->make(GrantStore::class),
+                $app->make(ConfigRepository::class),
+            );
+        });
 
         $this->app->singleton(BlockedHostCatalog::class, static fn (): BlockedHostCatalog => new BlockedHostCatalog);
 
