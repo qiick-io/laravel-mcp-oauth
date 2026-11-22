@@ -20,3 +20,12 @@ arch('events are immutable')
     ->expect('Qiick\McpOAuth\Events')
     ->classes()
     ->toBeReadonly();
+
+arch('test doubles shipped for apps start with Fake')
+    ->expect('Qiick\McpOAuth\Testing')
+    ->classes()
+    ->toHavePrefix('Fake');
+
+arch('src never calls parse_url')
+    ->expect('parse_url')
+    ->not->toBeUsed();

@@ -56,6 +56,13 @@ return [
             'Qiick\McpOAuth\Events\McpUnusedClientsPruned',
             'Qiick\McpOAuth\Events\McpPassportKeysMissing',
         ],
+        // Root @api services use design names (not Services\*Service).
+        'Services' => [
+            'Qiick\McpOAuth\McpOAuthServer',
+            'Qiick\McpOAuth\RedirectUriGuard',
+            'Qiick\McpOAuth\ClientThrottleKey',
+            'Qiick\McpOAuth\McpOAuthReadiness',
+        ],
     ],
 
     'suffixes' => [],
