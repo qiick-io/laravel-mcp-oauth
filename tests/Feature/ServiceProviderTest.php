@@ -6,8 +6,9 @@ it('merges the package defaults into the mcp-oauth config', function (): void {
     expect(config('mcp-oauth.enabled'))->toBeFalse();
     expect(config('mcp-oauth.mcp_enabled'))->toBeNull();
     expect(config('mcp-oauth.mcp_path'))->toBe('mcp');
-    expect(config('mcp-oauth.access_token_ttl_minutes'))->toBe(60);
-    expect(config('mcp-oauth.refresh_token_ttl_days'))->toBe(30);
+    expect(config('mcp-oauth.access_token_ttl_minutes'))->toBe('60');
+    expect(config('mcp-oauth.refresh_token_ttl_days'))->toBe('30');
+    expect(config('mcp-oauth.auth_code_ttl_minutes'))->toBe('10');
     expect(config('mcp-oauth.registrations_per_minute'))->toBe(10);
     expect(config('mcp-oauth.registrations_global_cap'))->toBe(10000);
     expect(config('mcp-oauth.unused_client_retention_hours'))->toBe(24);

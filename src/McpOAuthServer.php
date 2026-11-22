@@ -9,6 +9,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Laravel\Mcp\Server\Registrar;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
+use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Throwable;
 
 /**
@@ -113,12 +114,26 @@ final class McpOAuthServer
 
     public function accessTokenLifetime(): DateInterval
     {
-        return new DateInterval(sprintf('PT%dM', $this->positiveConfigInt('mcp-oauth.access_token_ttl_minutes', 60)));
+        return new DateInterval(sprintf(
+            'PT%dM',
+            BoundedPositiveInt::require(
+                $this->config->get('mcp-oauth.access_token_ttl_minutes'),
+                'access_token_ttl_minutes',
+                BoundedPositiveInt::ACCESS_TOKEN_TTL_MINUTES_MAX,
+            ),
+        ));
     }
 
     public function refreshTokenLifetime(): DateInterval
     {
-        return new DateInterval(sprintf('P%dD', $this->positiveConfigInt('mcp-oauth.refresh_token_ttl_days', 30)));
+        return new DateInterval(sprintf(
+            'P%dD',
+            BoundedPositiveInt::require(
+                $this->config->get('mcp-oauth.refresh_token_ttl_days'),
+                'refresh_token_ttl_days',
+                BoundedPositiveInt::REFRESH_TOKEN_TTL_DAYS_MAX,
+            ),
+        ));
     }
 
     private function mcpPath(): string
@@ -126,13 +141,6 @@ final class McpOAuthServer
         $path = $this->config->get('mcp-oauth.mcp_path', 'mcp');
 
         return trim(is_string($path) && $path !== '' ? $path : 'mcp', '/');
-    }
-
-    private function positiveConfigInt(string $key, int $default): int
-    {
-        $value = $this->config->get($key, $default);
-
-        return max(1, is_int($value) ? $value : $default);
     }
 
     private function productMcpEnabled(): bool

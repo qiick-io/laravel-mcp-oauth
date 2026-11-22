@@ -4,21 +4,29 @@ declare(strict_types=1);
 
 namespace Qiick\McpOAuth;
 
+use Carbon\CarbonInterval;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Passport\Passport;
+use League\OAuth2\Server\AuthorizationServer;
+use League\OAuth2\Server\Grant\AuthCodeGrant;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Internal\BlockedHostCatalog;
+use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Internal\DisabledAdminSwitch;
+use ReflectionProperty;
 
 /**
  * Registers the package in a Laravel app. Auto-discovered through
  * `extra.laravel.providers` in composer.json.
  *
- * Passport ignoreRoutes, device-grant off, rate limiters and fail-closed boot
- * validation when enabled land with later feature PRs. While
- * `mcp-oauth.enabled` is false (the default), missing product adapters are
- * allowed so products can install before writing adapters.
+ * Always calls `Passport::ignoreRoutes()` and turns the device grant off in
+ * `register()` (design Resolved #3 / #4). Token TTLs come from config in
+ * `boot()`. Rate limiters, default scope, bearer response type and fail-closed
+ * adapter validation land with later feature PRs. While `mcp-oauth.enabled` is
+ * false (the default), missing product adapters are allowed so products can
+ * install before writing adapters.
  *
  * @api
  */
@@ -27,6 +35,10 @@ final class McpOAuthServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/mcp-oauth.php', 'mcp-oauth');
+
+        // Always: Passport must not register its own /oauth/* (S4).
+        Passport::ignoreRoutes();
+        Passport::$deviceCodeGrantEnabled = false;
 
         $this->app->singletonIf(AdminSwitch::class, DisabledAdminSwitch::class);
 
@@ -56,6 +68,8 @@ final class McpOAuthServiceProvider extends ServiceProvider
             $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
         }
 
+        $this->configurePassportTokenLifetimes();
+
         if ($this->app->runningInConsole()) {
             $this->publishes([
                 __DIR__.'/../config/mcp-oauth.php' => config_path('mcp-oauth.php'),
@@ -64,6 +78,70 @@ final class McpOAuthServiceProvider extends ServiceProvider
             $this->publishesMigrations([
                 __DIR__.'/../database/migrations' => database_path('migrations'),
             ], 'mcp-oauth-migrations');
+        }
+    }
+
+    /**
+     * Applies access, refresh and auth-code TTLs from mcp-oauth config onto
+     * Passport (global per app; products that already own Passport as an IdP
+     * are out of scope for 1.x — design §3.3 Signaculum row). Invalid values
+     * fail closed at boot (design §6); they are never floored or replaced.
+     */
+    private function configurePassportTokenLifetimes(): void
+    {
+        /** @var ConfigRepository $config */
+        $config = $this->app->make(ConfigRepository::class);
+
+        $accessTokenTtlMinutes = BoundedPositiveInt::require(
+            $config->get('mcp-oauth.access_token_ttl_minutes'),
+            'access_token_ttl_minutes',
+            BoundedPositiveInt::ACCESS_TOKEN_TTL_MINUTES_MAX,
+        );
+        $refreshTokenTtlDays = BoundedPositiveInt::require(
+            $config->get('mcp-oauth.refresh_token_ttl_days'),
+            'refresh_token_ttl_days',
+            BoundedPositiveInt::REFRESH_TOKEN_TTL_DAYS_MAX,
+        );
+        $authCodeTtlMinutes = BoundedPositiveInt::require(
+            $config->get('mcp-oauth.auth_code_ttl_minutes'),
+            'auth_code_ttl_minutes',
+            BoundedPositiveInt::AUTH_CODE_TTL_MINUTES_MAX,
+        );
+
+        Passport::tokensExpireIn(CarbonInterval::minutes($accessTokenTtlMinutes));
+        Passport::refreshTokensExpireIn(CarbonInterval::days($refreshTokenTtlDays));
+        $this->applyAuthCodeLifetime($authCodeTtlMinutes);
+    }
+
+    /**
+     * Passport hardcodes AuthCodeGrant at PT10M with no public setter; when
+     * the authorization server is present, overwrite the private TTL so the
+     * validated config is the single source of truth. Retrofits an already
+     * resolved singleton (afterResolving alone would skip it).
+     */
+    private function applyAuthCodeLifetime(int $authCodeTtlMinutes): void
+    {
+        $authCodeInterval = CarbonInterval::minutes($authCodeTtlMinutes);
+
+        $applyAuthCodeLifetime = function (AuthorizationServer $authorizationServer) use ($authCodeInterval): void {
+            $enabledGrantTypesProperty = new ReflectionProperty($authorizationServer, 'enabledGrantTypes');
+            /** @var array<string, object> $enabledGrantTypes */
+            $enabledGrantTypes = $enabledGrantTypesProperty->getValue($authorizationServer);
+
+            foreach ($enabledGrantTypes as $grant) {
+                if (! $grant instanceof AuthCodeGrant) {
+                    continue;
+                }
+
+                $authCodeTtlProperty = new ReflectionProperty(AuthCodeGrant::class, 'authCodeTTL');
+                $authCodeTtlProperty->setValue($grant, $authCodeInterval);
+            }
+        };
+
+        $this->app->afterResolving(AuthorizationServer::class, $applyAuthCodeLifetime);
+
+        if ($this->app->resolved(AuthorizationServer::class)) {
+            $applyAuthCodeLifetime($this->app->make(AuthorizationServer::class));
         }
     }
 }

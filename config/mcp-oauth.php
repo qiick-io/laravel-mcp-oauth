@@ -29,9 +29,20 @@ return [
      */
     'mcp_path' => 'mcp',
 
-    'access_token_ttl_minutes' => (int) env('MCP_OAUTH_ACCESS_TOKEN_TTL_MINUTES', 60),
+    /*
+     * Token lifetimes. Kept as raw env strings (or missing → default string)
+     * so BoundedPositiveInt can reject float / scientific / signed forms
+     * before any (int) cast. Boot fails closed outside 1..MAX.
+     *
+     * access: 1..1440 minutes (default 60)
+     * refresh: 1..365 days (default 30)
+     * auth code: 1..10 minutes (default 10; Passport/league AuthCodeGrant)
+     */
+    'access_token_ttl_minutes' => env('MCP_OAUTH_ACCESS_TOKEN_TTL_MINUTES', '60'),
 
-    'refresh_token_ttl_days' => (int) env('MCP_OAUTH_REFRESH_TOKEN_TTL_DAYS', 30),
+    'refresh_token_ttl_days' => env('MCP_OAUTH_REFRESH_TOKEN_TTL_DAYS', '30'),
+
+    'auth_code_ttl_minutes' => env('MCP_OAUTH_AUTH_CODE_TTL_MINUTES', '10'),
 
     'registrations_per_minute' => (int) env('MCP_OAUTH_REGISTRATIONS_PER_MINUTE', 10),
 

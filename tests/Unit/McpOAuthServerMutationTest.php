@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Config\Repository;
 use Laravel\Passport\Passport;
+use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Testing\FakeAdminSwitch;
 
@@ -238,18 +239,16 @@ it('falls back mcp_path when empty or non-string and strips leading slashes', fu
     config()->set('mcp-oauth.mcp_path', 'mcp');
 });
 
-it('floors TTLs at one and ignores non-integer config', function (): void {
-    config()->set('mcp-oauth.access_token_ttl_minutes', 0);
-    config()->set('mcp-oauth.refresh_token_ttl_days', 0);
-    $zeroed = mutationServer();
-    expect($zeroed->accessTokenLifetime()->format('%i'))->toBe('1')
-        ->and($zeroed->refreshTokenLifetime()->format('%d'))->toBe('1');
-
+it('reads string integer TTLs and rejects non-positive values', function (): void {
     config()->set('mcp-oauth.access_token_ttl_minutes', '60');
     config()->set('mcp-oauth.refresh_token_ttl_days', '30');
     $strings = mutationServer();
     expect($strings->accessTokenLifetime()->format('%i'))->toBe('60')
         ->and($strings->refreshTokenLifetime()->format('%d'))->toBe('30');
+
+    config()->set('mcp-oauth.access_token_ttl_minutes', 0);
+    expect(fn () => mutationServer()->accessTokenLifetime())
+        ->toThrow(InvalidMcpOAuthConfigException::class);
 
     config()->set('mcp-oauth.access_token_ttl_minutes', 60);
     config()->set('mcp-oauth.refresh_token_ttl_days', 30);

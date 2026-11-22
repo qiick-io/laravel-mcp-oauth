@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Passport boot (design §5.6): `Passport::ignoreRoutes()` and device grant off
+  in `register()` (S4 / S19); access, refresh and auth-code TTLs from raw
+  `mcp-oauth.*_ttl_*` env strings in `boot()`, fail-closed on non-digit /
+  signed / float / scientific / out-of-range values with documented maxima
+  (access ≤1440 min, refresh ≤365 d, auth code ≤10 min).
+
 - Package migrations loaded via `loadMigrationsFrom` when
   `mcp-oauth.migrations.load` is true (default; publish tag
   `mcp-oauth-migrations` kept for customise — set `load=false` after
