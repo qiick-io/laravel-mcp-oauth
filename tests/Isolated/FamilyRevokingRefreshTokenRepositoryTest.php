@@ -266,7 +266,7 @@ it('S59: refuses refresh when the access token is revoked but the grant is still
         ->and($grantStore->find($family['grant']->id)?->revoked)->toBeTrue();
 });
 
-it('throws invalid_grant with the invalid_grant error type on CAS miss', function (): void {
+it('throws opaque invalid_grant with League wording on CAS miss', function (): void {
     /** @var FakeGrantStore $grantStore */
     $grantStore = app(GrantStore::class);
     $family = seedBoundFamily($grantStore);
@@ -279,20 +279,17 @@ it('throws invalid_grant with the invalid_grant error type on CAS miss', functio
         expect(false)->toBeTrue('expected OAuthServerException');
     } catch (OAuthServerException $exception) {
         expect($exception->getErrorType())->toBe('invalid_grant')
-            ->and($exception->getHint())->toBe('Refresh token reuse detected');
+            ->and($exception->getHint())->toBe('Token has been revoked');
     }
 });
 
-it('throws invalid_grant when CAS wins but the bound grant was already reuse-revoked', function (): void {
+it('throws the same opaque invalid_grant hint when CAS wins but the grant was already revoked', function (): void {
     /** @var FakeGrantStore $grantStore */
     $grantStore = app(GrantStore::class);
     $family = seedBoundFamily($grantStore);
     $repository = app(FamilyRevokingRefreshTokenRepository::class);
 
-    // Simulate League: old AT revoked before revokeRefreshToken.
     Passport::token()->newQuery()->whereKey($family['accessTokenId'])->update(['revoked' => true]);
-
-    // Concurrent loser already wiped the grant (family revoke) before the CAS winner returns.
     $grantStore->revoke($family['grant']->id, null, RevocationReason::Reuse);
 
     try {
@@ -300,7 +297,7 @@ it('throws invalid_grant when CAS wins but the bound grant was already reuse-rev
         expect(false)->toBeTrue('expected OAuthServerException');
     } catch (OAuthServerException $exception) {
         expect($exception->getErrorType())->toBe('invalid_grant')
-            ->and($exception->getHint())->toBe('Refresh token family has been revoked')
+            ->and($exception->getHint())->toBe('Token has been revoked')
             ->and(Passport::refreshToken()->newQuery()->whereKey($family['refreshTokenId'])->value('revoked'))->toBeTrue();
     }
 });
