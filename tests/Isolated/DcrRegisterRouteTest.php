@@ -309,7 +309,7 @@ it('refuses client_name with bidi or control characters', function (): void {
     expect(Client::query()->count())->toBe(0);
 });
 
-it('refuses logo_uri that fails the redirect guard', function (): void {
+it('refuses logo_uri that fails the metadata URI guard', function (): void {
     enableMcpOAuthWithKeys();
     McpOAuthRoutes::register();
 
@@ -321,6 +321,30 @@ it('refuses logo_uri that fails the redirect guard', function (): void {
         ->assertJsonPath('error', 'invalid_client_metadata');
 
     expect(Client::query()->count())->toBe(0);
+});
+
+it('refuses logo_uri pointing at a private or loopback IP', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $this->postJson('/oauth/register', [
+        'client_name' => 'Private Logo',
+        'redirect_uris' => ['https://app.example/callback'],
+        'logo_uri' => 'https://169.254.169.254/latest',
+    ])->assertStatus(400)
+        ->assertJsonPath('error', 'invalid_client_metadata');
+
+    expect(Client::query()->count())->toBe(0);
+});
+
+it('accepts client_name with emoji ZWJ and Persian ZWNJ', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $this->postJson('/oauth/register', [
+        'client_name' => "Team \u{1F468}\u{200D}\u{1F469} می\u{200C}خواهم",
+        'redirect_uris' => ['https://app.example/callback'],
+    ])->assertCreated();
 });
 
 it('refuses an oversized registration body with 413', function (): void {

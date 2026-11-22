@@ -9,6 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Laravel\Mcp\Server\Http\Controllers\OAuthRegisterController;
 use Laravel\Passport\Client;
+use Qiick\McpOAuth\ClientMetadataUriGuard;
 use Qiick\McpOAuth\Events\McpClientRegistered;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\RedirectUriGuard;
@@ -26,6 +27,7 @@ final class RegisterClientController extends OAuthRegisterController
 
     public function __construct(
         private readonly RedirectUriGuard $redirectUriGuard,
+        private readonly ClientMetadataUriGuard $clientMetadataUriGuard,
         private readonly ConfigRepository $config,
     ) {}
 
@@ -61,7 +63,7 @@ final class RegisterClientController extends OAuthRegisterController
                 continue; // @pest-mutate-ignore: ContinueToBreak
             }
 
-            if (! is_string($metadataUri) || ! $this->isRedirectUriAllowedForRegistration($metadataUri)) { // @pest-mutate-ignore: RemoveNot
+            if (! is_string($metadataUri) || ! $this->clientMetadataUriGuard->isAcceptable($metadataUri)) { // @pest-mutate-ignore: RemoveNot
                 return response()->json([
                     'error' => 'invalid_client_metadata', // @pest-mutate-ignore: RemoveArrayItem
                     'error_description' => $metadataUriField.' is not an allowed URI.', // @pest-mutate-ignore: RemoveArrayItem,ConcatRemoveLeft,ConcatRemoveRight,ConcatSwitchSides
@@ -158,8 +160,15 @@ final class RegisterClientController extends OAuthRegisterController
                 continue; // @pest-mutate-ignore: ContinueToBreak
             }
 
-            // Cc = controls; Cf = format (includes bidi overrides used to spoof names).
-            if (preg_match('/[\p{Cc}\p{Cf}]/u', $nameValue) === 1) {
+            // C0/C1 controls always refused. Format (Cf) refused except ZWNJ
+            // (U+200C, Persian) and ZWJ (U+200D, emoji sequences).
+            if (preg_match('/\p{Cc}/u', $nameValue) === 1) {
+                return true;
+            }
+
+            $withoutAllowedFormatMarks = preg_replace('/[\x{200C}\x{200D}]/u', '', $nameValue) ?? $nameValue;
+
+            if (preg_match('/\p{Cf}/u', $withoutAllowedFormatMarks) === 1) {
                 return true;
             }
         }

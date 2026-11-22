@@ -60,6 +60,7 @@ return [
         'Services' => [
             'Qiick\McpOAuth\McpOAuthServer',
             'Qiick\McpOAuth\RedirectUriGuard',
+            'Qiick\McpOAuth\ClientMetadataUriGuard',
             'Qiick\McpOAuth\ClientThrottleKey',
             'Qiick\McpOAuth\McpOAuthReadiness',
             'Qiick\McpOAuth\McpBearerTokenResponse',

@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
+use Qiick\McpOAuth\ClientMetadataUriGuard;
 use Qiick\McpOAuth\Events\McpClientRegistered;
 use Qiick\McpOAuth\Http\Controllers\RegisterClientController;
 use Qiick\McpOAuth\Internal\BlockedHostCatalog;
@@ -43,7 +44,7 @@ function makeRegisterClientController(?BlockedHostCatalog $blockedHosts = null):
         ->andReturn(10_000)
         ->byDefault();
 
-    return [new RegisterClientController($guard, $config), $guard];
+    return [new RegisterClientController($guard, new ClientMetadataUriGuard, $config), $guard];
 }
 
 /**
@@ -116,7 +117,7 @@ it('returns 503 when the global registration cap is reached', function (): void 
         'revoked' => false,
     ]);
 
-    $controller = new RegisterClientController($guard, $config);
+    $controller = new RegisterClientController($guard, new ClientMetadataUriGuard, $config);
     $response = $controller(Request::create('/oauth/register', 'POST', [
         'client_name' => 'Over Cap',
         'redirect_uris' => ['https://app.example/callback'],
@@ -153,7 +154,7 @@ it('refuses client_name with a bidi override', function (): void {
         ->and($response->getData(true)['error'])->toBe('invalid_client_metadata');
 });
 
-it('refuses logo_uri that fails the guard', function (): void {
+it('refuses logo_uri that fails the metadata URI guard', function (): void {
     [$controller] = makeRegisterClientController();
 
     $response = $controller(Request::create('/oauth/register', 'POST', [
@@ -164,6 +165,20 @@ it('refuses logo_uri that fails the guard', function (): void {
 
     expect($response->getStatusCode())->toBe(400)
         ->and($response->getData(true)['error'])->toBe('invalid_client_metadata');
+});
+
+it('allows https logo_uri to a public host while still guarding redirects separately', function (): void {
+    [$controller] = makeRegisterClientController();
+
+    // Public logo is fine; fragment redirect still fails the redirect guard.
+    $response = $controller(Request::create('/oauth/register', 'POST', [
+        'client_name' => 'Public Logo',
+        'redirect_uris' => ['https://app.example/callback#frag'],
+        'logo_uri' => 'https://cdn.example.com/logo.png',
+    ]));
+
+    expect($response->getStatusCode())->toBe(400)
+        ->and($response->getData(true)['error'])->toBe('invalid_redirect_uri');
 });
 
 it('refuses an oversized body via Content-Length', function (): void {
