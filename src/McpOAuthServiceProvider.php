@@ -50,13 +50,16 @@ final class McpOAuthServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Core side tables load with the package (same pattern as laravel-oidc).
+        // The publish tag remains for apps that customise the migrations.
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+
         if ($this->app->runningInConsole()) {
             $this->publishes([
                 __DIR__.'/../config/mcp-oauth.php' => config_path('mcp-oauth.php'),
             ], 'mcp-oauth-config');
 
-            // Published, never auto-loaded (standards review §2).
-            $this->publishes([
+            $this->publishesMigrations([
                 __DIR__.'/../database/migrations' => database_path('migrations'),
             ], 'mcp-oauth-migrations');
         }

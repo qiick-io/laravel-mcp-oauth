@@ -170,33 +170,58 @@ it('S2: CIMD runtime is off by default while schema columns exist', function ():
         ->and(Schema::hasColumn('oauth_client_metadata', 'metadata_document_url_sha256'))->toBeTrue();
 });
 
-it('publish tag mcp-oauth-migrations is registered and migrations are not auto-loaded by the provider', function (): void {
+it('loads core migrations and keeps the mcp-oauth-migrations publish tag for customise', function (): void {
     $providerSource = file_get_contents(
         dirname(__DIR__, 3).'/src/McpOAuthServiceProvider.php',
     );
 
-    expect($providerSource)->toContain("'mcp-oauth-migrations'")
-        ->and($providerSource)->not->toContain('loadMigrationsFrom');
+    expect($providerSource)->toContain('loadMigrationsFrom')
+        ->and($providerSource)->toContain("'mcp-oauth-migrations'")
+        ->and($providerSource)->toContain('publishesMigrations');
+
+    $migrator = app('migrator');
+    $packageMigrationsPath = realpath(dirname(__DIR__, 3).'/database/migrations');
+
+    expect($packageMigrationsPath)->not->toBeFalse()
+        ->and(collect($migrator->paths())->map(realpath(...))->contains($packageMigrationsPath))->toBeTrue();
 });
 
-it('S9: package table names are standard OAuth names and never Passport tables', function (): void {
-    $passportTables = [
-        'oauth_auth_codes',
-        'oauth_access_tokens',
-        'oauth_refresh_tokens',
-        'oauth_clients',
-        'oauth_device_codes',
-        'oauth_personal_access_clients',
-    ];
-    $packageTables = [
-        'oauth_client_metadata',
-        'oauth_blocked_redirect_hosts',
-        'oauth_consent_records',
-    ];
+/**
+ * @return list<string>
+ */
+function tableNamesCreatedByMigrationsIn(string $directory): array
+{
+    $tableNames = [];
+
+    foreach (glob($directory.'/*.php') ?: [] as $migrationFile) {
+        $source = file_get_contents($migrationFile) ?: '';
+
+        if (preg_match_all("/Schema::create\\('([^']+)'/", $source, $matches) === false) {
+            continue;
+        }
+
+        foreach ($matches[1] as $tableName) {
+            $tableNames[] = $tableName;
+        }
+    }
+
+    return array_values(array_unique($tableNames));
+}
+
+it('S9: no package table name collides with any Passport 13 table', function (): void {
+    $packageTables = tableNamesCreatedByMigrationsIn(
+        dirname(__DIR__, 3).'/database/migrations',
+    );
+    $passportTables = tableNamesCreatedByMigrationsIn(
+        dirname(__DIR__, 3).'/vendor/laravel/passport/database/migrations',
+    );
+
+    expect($packageTables)->not->toBeEmpty()
+        ->and($passportTables)->not->toBeEmpty()
+        ->and(array_intersect($packageTables, $passportTables))->toBe([]);
 
     foreach ($packageTables as $table) {
         expect(Schema::hasTable($table))->toBeTrue();
-        expect(in_array($table, $passportTables, true))->toBeFalse();
     }
 
     foreach ($passportTables as $table) {

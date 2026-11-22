@@ -21,12 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Package migrations (publish tag `mcp-oauth-migrations`, never auto-loaded):
-  `oauth_client_metadata` (M3: RFC 7591/7592 fields, CIMD cache, PAR/DPoP
-  flags), `oauth_blocked_redirect_hosts` (M6: `public_id`, `match_mode`,
-  expiry), and `oauth_consent_records` (S4). Eloquent models mint UUID v7.
-  CIMD runtime config defaults off (`mcp-oauth.cimd.enabled`). Reference
-  schema and four-engine schema tests name each MUST item.
+- Package migrations loaded via `loadMigrationsFrom` (publish tag
+  `mcp-oauth-migrations` kept for customise): `oauth_client_metadata` (M3:
+  RFC 7591/7592 fields, CIMD cache, PAR/DPoP flags),
+  `oauth_blocked_redirect_hosts` (M6: `public_id`, `match_mode`, expiry), and
+  `oauth_consent_records` (S4). Eloquent models mint UUID v7. CIMD runtime
+  config defaults off (`mcp-oauth.cimd.enabled`). Reference schema and
+  four-engine schema tests name each MUST item.
 
 - Core runtime services: `McpOAuthServer` (three gates, Passport key usability
   including half-set env and world-readable files), `RedirectUriGuard` (League

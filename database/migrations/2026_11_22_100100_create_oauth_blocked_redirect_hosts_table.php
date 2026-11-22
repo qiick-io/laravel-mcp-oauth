@@ -8,8 +8,8 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * Admin-blocked redirect hosts for DCR and authorize/token checks (M6 / §2.3).
- * Publish tag mcp-oauth-migrations; products that already have the table publish
- * nothing and add columns with their own additive migration.
+ * Loaded by the package; publish tag mcp-oauth-migrations is for apps that
+ * customise the schema and add further columns with their own migrations.
  */
 return new class extends Migration
 {

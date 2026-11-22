@@ -1,17 +1,18 @@
 # Reference schema
 
-Column types, indexes and FK actions for the package-owned tables published
-under tag `mcp-oauth-migrations`, and for the product-owned grant binding
-columns on `oauth_access_tokens`. Verified on SQLite, PostgreSQL, MySQL and
-MariaDB. Binding source: standards completeness review §2 (2026-11-22) and
+Column types, indexes and FK actions for the package-owned tables the provider
+loads via `loadMigrationsFrom` (publish tag `mcp-oauth-migrations` remains for
+apps that customise them), and for the product-owned grant binding columns on
+`oauth_access_tokens`. Verified on SQLite, PostgreSQL, MySQL and MariaDB.
+Binding source: standards completeness review §2 (2026-11-22) and
 [[2026-11-22 Standard names in base packages]].
 
-Migrations are published, never auto-loaded, and edited in place until `1.0.0`.
-Each table has its own `create_` file so a product that already has
-`oauth_blocked_redirect_hosts` (externa) publishes only the files it lacks.
-Passport’s tables are never altered; no package table collides with
-`oauth_auth_codes`, `oauth_access_tokens`, `oauth_refresh_tokens`,
-`oauth_clients`, `oauth_device_codes` or reserved `oauth_personal_access_clients`.
+Core migrations are auto-loaded; optional/future tables (PAR, DPoP) stay
+publish-only. Edited in place until `1.0.0`. Each table has its own `create_`
+file so a product that already has `oauth_blocked_redirect_hosts` (externa) can
+publish and customise only what it needs. Passport’s tables are never altered;
+a schema test scrapes Passport 13 migration `Schema::create` names and asserts
+no package table collides with them.
 
 UTC is assumed (`app.timezone`). Past-event stamps use `timestamp`; future
 dates (`expires_at`, `retention_until`, `client_secret_expires_at`,
