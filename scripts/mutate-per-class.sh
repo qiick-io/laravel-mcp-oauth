@@ -9,14 +9,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 CLASSES=(
-  # Populated by feature PRs, e.g.:
-  # 'Qiick\McpOAuth\McpOAuthServer'
-  # 'Qiick\McpOAuth\RedirectUriGuard'
-  # 'Qiick\McpOAuth\ClientThrottleKey'
-  # 'Qiick\McpOAuth\AccessTokenAuthenticator'
-  # 'Qiick\McpOAuth\FamilyRevokingRefreshTokenRepository'
-  # 'Qiick\McpOAuth\McpBearerDoor'
-  # 'Qiick\McpOAuth\McpOAuthReadiness'
+  # McpOAuthServer and RedirectUriGuard land here once their suites hit ≥95% MSI.
+  'Qiick\McpOAuth\ClientThrottleKey'
+  'Qiick\McpOAuth\McpOAuthReadiness'
 )
 
 MIN="${MUTATE_MIN:-95}"

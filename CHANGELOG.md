@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Core runtime services: `McpOAuthServer` (three gates, Passport key usability
+  including half-set env and world-readable files), `RedirectUriGuard` (League
+  Uri, ASCII hosts, scheme allowlist, host block), `ClientThrottleKey`,
+  `McpOAuthReadiness`, and `MissingPassportKeysException`. Mutation targets
+  registered for these classes.
+
 - Design §3 / §5.5 public contracts (`AdminSwitch`, `GrantStore`, …), data
   objects (`GrantRecord`, `AuthorizationDecision`, …), `RevocationReason`, and
   immutable audit events. Ids on the wire stay UUID strings (S80).
