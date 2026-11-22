@@ -27,13 +27,17 @@ final class BoundedPositiveInt
     public const int AUTH_CODE_TTL_MINUTES_MAX = 10;
 
     /**
+     * Accepts a PHP int in range, or a string of ASCII digits only (no sign,
+     * spaces, decimal point, or exponent). Never casts float / scientific
+     * env strings the way `(int) env(...)` would.
+     *
      * @throws InvalidMcpOAuthConfigException
      */
     public static function require(mixed $configuredValue, string $configKey, int $maximum): int
     {
         if (is_int($configuredValue)) {
             $integerValue = $configuredValue;
-        } elseif (is_string($configuredValue) && preg_match('/^-?\d+$/', $configuredValue) === 1) {
+        } elseif (is_string($configuredValue) && preg_match('/^\d+$/', $configuredValue) === 1) {
             $integerValue = (int) $configuredValue;
         } else {
             throw InvalidMcpOAuthConfigException::invalidInteger($configKey, $maximum);

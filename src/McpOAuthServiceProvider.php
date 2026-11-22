@@ -116,13 +116,14 @@ final class McpOAuthServiceProvider extends ServiceProvider
     /**
      * Passport hardcodes AuthCodeGrant at PT10M with no public setter; when
      * the authorization server is present, overwrite the private TTL so the
-     * validated config is the single source of truth.
+     * validated config is the single source of truth. Retrofits an already
+     * resolved singleton (afterResolving alone would skip it).
      */
     private function applyAuthCodeLifetime(int $authCodeTtlMinutes): void
     {
         $authCodeInterval = CarbonInterval::minutes($authCodeTtlMinutes);
 
-        $this->app->afterResolving(AuthorizationServer::class, function (AuthorizationServer $authorizationServer) use ($authCodeInterval): void {
+        $applyAuthCodeLifetime = function (AuthorizationServer $authorizationServer) use ($authCodeInterval): void {
             $enabledGrantTypesProperty = new ReflectionProperty($authorizationServer, 'enabledGrantTypes');
             /** @var array<string, object> $enabledGrantTypes */
             $enabledGrantTypes = $enabledGrantTypesProperty->getValue($authorizationServer);
@@ -135,6 +136,12 @@ final class McpOAuthServiceProvider extends ServiceProvider
                 $authCodeTtlProperty = new ReflectionProperty(AuthCodeGrant::class, 'authCodeTTL');
                 $authCodeTtlProperty->setValue($grant, $authCodeInterval);
             }
-        });
+        };
+
+        $this->app->afterResolving(AuthorizationServer::class, $applyAuthCodeLifetime);
+
+        if ($this->app->resolved(AuthorizationServer::class)) {
+            $applyAuthCodeLifetime($this->app->make(AuthorizationServer::class));
+        }
     }
 }

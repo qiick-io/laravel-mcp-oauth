@@ -38,55 +38,35 @@ it('honours overridden access and refresh TTLs from config', function (): void {
         ->and(CarbonInterval::instance(Passport::refreshTokensExpireIn())->totalDays)->toBe(7.0);
 });
 
-it('rejects negative access token TTLs at boot', function (): void {
-    config(['mcp-oauth.access_token_ttl_minutes' => -5]);
-
-    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
-        ->toThrow(InvalidMcpOAuthConfigException::class, 'access_token_ttl_minutes');
-});
-
-it('rejects zero TTLs at boot (env cast typo)', function (): void {
+it('accepts digit-string TTL overrides from raw env-shaped config', function (): void {
     config([
-        'mcp-oauth.access_token_ttl_minutes' => 0,
-        'mcp-oauth.refresh_token_ttl_days' => 30,
-        'mcp-oauth.auth_code_ttl_minutes' => 10,
+        'mcp-oauth.access_token_ttl_minutes' => '90',
+        'mcp-oauth.refresh_token_ttl_days' => '14',
+        'mcp-oauth.auth_code_ttl_minutes' => '8',
     ]);
 
-    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
-        ->toThrow(InvalidMcpOAuthConfigException::class, 'access_token_ttl_minutes');
+    (new McpOAuthServiceProvider($this->app))->boot();
+
+    expect(CarbonInterval::instance(Passport::tokensExpireIn())->totalMinutes)->toBe(90.0)
+        ->and(CarbonInterval::instance(Passport::refreshTokensExpireIn())->totalDays)->toBe(14.0);
 });
 
-it('rejects non-numeric refresh token TTLs at boot', function (): void {
-    config(['mcp-oauth.refresh_token_ttl_days' => 'nope']);
+dataset('boot_rejected_ttl_config', [
+    'negative int' => ['access_token_ttl_minutes', -5],
+    'zero' => ['access_token_ttl_minutes', 0],
+    'non-numeric' => ['refresh_token_ttl_days', 'nope'],
+    'float string' => ['access_token_ttl_minutes', '1.5'],
+    'scientific' => ['access_token_ttl_minutes', '1e3'],
+    'leading plus' => ['access_token_ttl_minutes', '+60'],
+    'float value' => ['access_token_ttl_minutes', 1.5],
+    'auth code over max' => ['auth_code_ttl_minutes', BoundedPositiveInt::AUTH_CODE_TTL_MINUTES_MAX + 1],
+    'access over max' => ['access_token_ttl_minutes', BoundedPositiveInt::ACCESS_TOKEN_TTL_MINUTES_MAX + 1],
+    'refresh over max' => ['refresh_token_ttl_days', BoundedPositiveInt::REFRESH_TOKEN_TTL_DAYS_MAX + 1],
+]);
+
+it('rejects invalid TTL config at boot', function (string $configKey, mixed $value): void {
+    config(["mcp-oauth.{$configKey}" => $value]);
 
     expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
-        ->toThrow(InvalidMcpOAuthConfigException::class, 'refresh_token_ttl_days');
-});
-
-it('rejects auth code TTLs above the documented maximum at boot', function (): void {
-    config(['mcp-oauth.auth_code_ttl_minutes' => BoundedPositiveInt::AUTH_CODE_TTL_MINUTES_MAX + 1]);
-
-    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
-        ->toThrow(InvalidMcpOAuthConfigException::class, 'auth_code_ttl_minutes');
-});
-
-it('rejects access token TTLs above the documented maximum at boot', function (): void {
-    config(['mcp-oauth.access_token_ttl_minutes' => BoundedPositiveInt::ACCESS_TOKEN_TTL_MINUTES_MAX + 1]);
-
-    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
-        ->toThrow(InvalidMcpOAuthConfigException::class, 'access_token_ttl_minutes');
-});
-
-it('rejects refresh token TTLs above the documented maximum at boot', function (): void {
-    config(['mcp-oauth.refresh_token_ttl_days' => BoundedPositiveInt::REFRESH_TOKEN_TTL_DAYS_MAX + 1]);
-
-    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
-        ->toThrow(InvalidMcpOAuthConfigException::class, 'refresh_token_ttl_days');
-});
-
-it('rejects float TTL values at boot', function (): void {
-    config(['mcp-oauth.access_token_ttl_minutes' => 1.5]);
-
-    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
-        ->toThrow(InvalidMcpOAuthConfigException::class, 'access_token_ttl_minutes');
-});
+        ->toThrow(InvalidMcpOAuthConfigException::class, $configKey);
+})->with('boot_rejected_ttl_config');
