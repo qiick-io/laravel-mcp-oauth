@@ -7,6 +7,7 @@ use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Grant\AuthCodeGrant;
 use Qiick\McpOAuth\McpOAuthServiceProvider;
 use Qiick\McpOAuth\Tests\Support\PassportBootedTestCase;
+use ReflectionProperty;
 
 uses(PassportBootedTestCase::class);
 
@@ -47,7 +48,7 @@ function passportTestKeyContents(string $basename): string
 
 function authCodeTtlMinutesFromServer(AuthorizationServer $authorizationServer): ?float
 {
-    $enabledGrantTypesProperty = new \ReflectionProperty($authorizationServer, 'enabledGrantTypes');
+    $enabledGrantTypesProperty = new ReflectionProperty($authorizationServer, 'enabledGrantTypes');
     /** @var array<string, object> $enabledGrantTypes */
     $enabledGrantTypes = $enabledGrantTypesProperty->getValue($authorizationServer);
 
@@ -56,7 +57,7 @@ function authCodeTtlMinutesFromServer(AuthorizationServer $authorizationServer):
             continue;
         }
 
-        $authCodeTtlProperty = new \ReflectionProperty(AuthCodeGrant::class, 'authCodeTTL');
+        $authCodeTtlProperty = new ReflectionProperty(AuthCodeGrant::class, 'authCodeTTL');
         /** @var DateInterval $interval */
         $interval = $authCodeTtlProperty->getValue($grant);
 
