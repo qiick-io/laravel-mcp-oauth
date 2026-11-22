@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `*.local`, `*.internal`), IPv6 literals embedding IPv4 (mapped, translated,
   NAT64, 6to4), non-ASCII hosts, alternative IPv4 spellings, CGNAT,
   benchmarking, IETF-protocol and multicast ranges.
+- `RedirectUriGuard` refuses every host whose last label is numeric unless it
+  is four decimal octets of 0..255 (WHATWG reads `0177.0.0.1` as octal
+  127.0.0.1); the rule no longer depends on glibc vs macOS `inet_pton`.
 - DCR `client_name` fails closed on invalid UTF-8 or a PCRE error, and refuses
   line / paragraph separators, Hangul fillers and names with no visible text.
 - `RedirectUriGuard` uses one canonical parse for registration, scheme, hostOf

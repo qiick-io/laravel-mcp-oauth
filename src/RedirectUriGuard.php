@@ -396,29 +396,35 @@ final class RedirectUriGuard
     }
 
     /**
-     * Integer, hex, short, and other WHATWG IPv4 spellings that are not four
-     * decimal octets.
+     * Integer, hex, short, octal and other spellings WHATWG URL parsing would
+     * read as IPv4. WHATWG treats a host whose last label is numeric as an
+     * IPv4 address, so such a host is allowed only as four decimal octets of
+     * 0..255; anything else (`127.1`, `2130706433`, `0177.0.0.1`,
+     * `256.0.0.1`, `example.123`) is refused here instead of being left to
+     * inet_pton, whose answer differs between glibc and macOS.
      */
     private function isForbiddenIpv4Notation(string $host): bool
     {
-        if (preg_match('/^\d+$/', $host) === 1) {
-            return true;
+        // IPv6 literals (possibly ending in an embedded dotted quad) go to inet_pton.
+        if (str_contains($host, ':')) {
+            return false;
         }
 
-        // Hex IPv4 as a host or last label only (keep 0xproject.io usable).
         // afterLast returns the whole string when '.' is absent — no ternary.
         $lastLabel = Str::afterLast($host, '.');
 
+        // Hex IPv4 as a host or last label only (keep 0xproject.io usable).
         if (preg_match('/^0x[0-9a-f]+$/i', $lastLabel) === 1) {
             return true;
         }
 
-        // 1.2 / 1.2.3 short forms (leading-zero octets are checked separately).
-        if (preg_match('/^\d+(?:\.\d+){1,2}$/', $host) === 1) {
-            return true;
+        if (preg_match('/^\d+$/', $lastLabel) !== 1) {
+            return false;
         }
 
-        return false;
+        $decimalOctet = '(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)';
+
+        return preg_match('/^'.$decimalOctet.'(?:\.'.$decimalOctet.'){3}$/', $host) !== 1;
     }
 
     /**
