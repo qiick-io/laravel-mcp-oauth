@@ -21,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Package migrations loaded via `loadMigrationsFrom` (publish tag
+- Package migrations loaded via `loadMigrationsFrom` when
+  `mcp-oauth.migrations.load` is true (default; publish tag
   `mcp-oauth-migrations` kept for customise): `oauth_client_metadata` (M3:
   RFC 7591/7592 fields, CIMD cache, PAR/DPoP flags),
   `oauth_blocked_redirect_hosts` (M6: `public_id`, `match_mode`, expiry), and

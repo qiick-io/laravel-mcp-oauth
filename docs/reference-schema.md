@@ -7,8 +7,10 @@ apps that customise them), and for the product-owned grant binding columns on
 Binding source: standards completeness review §2 (2026-11-22) and
 [[2026-11-22 Standard names in base packages]].
 
-Core migrations are auto-loaded; optional/future tables (PAR, DPoP) stay
-publish-only. Edited in place until `1.0.0`. Each table has its own `create_`
+Core migrations are auto-loaded when `mcp-oauth.migrations.load` is true
+(default); set it false when the app publishes and owns the files.
+Optional/future tables (PAR, DPoP) stay publish-only. Edited in place until
+`1.0.0`. Each table has its own `create_`
 file so a product that already has `oauth_blocked_redirect_hosts` (externa) can
 publish and customise only what it needs. Passport’s tables are never altered;
 a schema test scrapes Passport 13 migration `Schema::create` names and asserts

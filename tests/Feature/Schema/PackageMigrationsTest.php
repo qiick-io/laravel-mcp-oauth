@@ -170,12 +170,14 @@ it('S2: CIMD runtime is off by default while schema columns exist', function ():
         ->and(Schema::hasColumn('oauth_client_metadata', 'metadata_document_url_sha256'))->toBeTrue();
 });
 
-it('loads core migrations and keeps the mcp-oauth-migrations publish tag for customise', function (): void {
+it('loads core migrations by default and keeps the mcp-oauth-migrations publish tag', function (): void {
     $providerSource = file_get_contents(
         dirname(__DIR__, 3).'/src/McpOAuthServiceProvider.php',
     );
 
-    expect($providerSource)->toContain('loadMigrationsFrom')
+    expect(config('mcp-oauth.migrations.load'))->toBeTrue()
+        ->and($providerSource)->toContain('loadMigrationsFrom')
+        ->and($providerSource)->toContain('mcp-oauth.migrations.load')
         ->and($providerSource)->toContain("'mcp-oauth-migrations'")
         ->and($providerSource)->toContain('publishesMigrations');
 

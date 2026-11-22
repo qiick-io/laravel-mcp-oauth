@@ -20,6 +20,7 @@ it('merges the package defaults into the mcp-oauth config', function (): void {
     expect(config('mcp-oauth.host_block_chunk_size'))->toBe(100);
     expect(config('mcp-oauth.grant_binding_column'))->toBe('api_key_id');
     expect(config('mcp-oauth.user_model'))->toBeNull();
+    expect(config('mcp-oauth.migrations.load'))->toBeTrue();
 });
 
 it('lets an app publish the config file', function (): void {

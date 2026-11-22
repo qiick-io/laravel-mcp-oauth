@@ -78,4 +78,12 @@ return [
      */
     'user_model' => null,
 
+    /*
+     * When true (default), the provider loadMigrationsFrom the core side
+     * tables. Set false when the app publishes and owns the migration files.
+     */
+    'migrations' => [
+        'load' => (bool) env('MCP_OAUTH_LOAD_MIGRATIONS', true),
+    ],
+
 ];
