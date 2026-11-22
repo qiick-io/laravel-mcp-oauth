@@ -93,7 +93,7 @@ final class RedirectUriGuard
         $scheme = $parts['scheme'] ?? null;
 
         if (! is_string($scheme) || $scheme === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty,BooleanOrToBooleanAnd
-            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
+            return false;
         }
 
         $normalizedScheme = Str::lower($scheme);
@@ -112,7 +112,7 @@ final class RedirectUriGuard
             try {
                 $host = $this->normalizeHost($rawHost);
             } catch (InvalidArgumentException) {
-                return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
+                return false;
             }
 
             if ($normalizedScheme === 'https') {
@@ -362,7 +362,10 @@ final class RedirectUriGuard
             return true;
         }
 
-        if (preg_match('/0x/i', $host) === 1) {
+        // Hex IPv4 as a host or last label only (keep 0xproject.io usable).
+        $lastLabel = Str::afterLast($host, '.') ?: $host;
+
+        if (preg_match('/^0x[0-9a-f]+$/i', $lastLabel) === 1) {
             return true;
         }
 
@@ -373,8 +376,10 @@ final class RedirectUriGuard
 
         if (preg_match('/^(?:\d{1,3}\.){3}\d{1,3}$/', $host) === 1) {
             foreach (explode('.', $host) as $octet) {
-                if (strlen($octet) > 1 && str_starts_with($octet, '0')) { // @pest-mutate-ignore: StrStartsWithToStrEndsWith,TrueToFalse,RemoveEarlyReturn
-                    return true; // also refused later when inet_pton canonical form differs
+                // Load-bearing on glibc: inet_pton rejects these, then IDNA would
+                // accept them as hostnames without this leading-zero check.
+                if (strlen($octet) > 1 && str_starts_with($octet, '0')) {
+                    return true;
                 }
             }
         }
@@ -382,12 +387,24 @@ final class RedirectUriGuard
         return false;
     }
 
+    /**
+     * Embedded IPv4 from ::ffff:/96, ::ffff:0:0/96, ::/96 (except ::/127),
+     * 64:ff9b::/96 or 64:ff9b:1::/48 — same rules as ClientThrottleKey.
+     */
     private function embeddedIpv4FromMappedOrTranslated(string $packed): ?string
     {
         $isIpv4Mapped = str_starts_with($packed, "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff");
-        $isIpv4Translated = str_starts_with($packed, "\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\x00\x00"); // @pest-mutate-ignore: StrStartsWithToStrEndsWith
+        $isIpv4Translated = str_starts_with($packed, "\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\x00\x00");
+        $isIpv4Compatible = str_starts_with($packed, "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
+        $isNat64WellKnown = str_starts_with($packed, "\x00\x64\xff\x9b\x00\x00\x00\x00\x00\x00\x00\x00");
+        $isNat64Local = str_starts_with($packed, "\x00\x64\xff\x9b\x00\x01")
+            && substr($packed, 6, 6) === "\x00\x00\x00\x00\x00\x00";
 
-        if (! $isIpv4Mapped && ! $isIpv4Translated) {
+        if ($isIpv4Compatible && substr($packed, 0, 15) === str_repeat("\x00", 15)) {
+            return null;
+        }
+
+        if (! $isIpv4Mapped && ! $isIpv4Translated && ! $isIpv4Compatible && ! $isNat64WellKnown && ! $isNat64Local) {
             return null;
         }
 

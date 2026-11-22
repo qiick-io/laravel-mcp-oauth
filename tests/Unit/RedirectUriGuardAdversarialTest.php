@@ -91,7 +91,15 @@ it('refuses http without a usable host', function (): void {
 
     expect($guard->isAllowedScheme('http:'))->toBeFalse()
         ->and($guard->isAllowedScheme('http:///callback'))->toBeFalse()
-        ->and($guard->isAllowedScheme('http://[not-an-ip]/cb'))->toBeFalse();
+        ->and($guard->isAllowedScheme('http://[not-an-ip]/cb'))->toBeFalse()
+        ->and($guard->isAllowedScheme('//evil.com/cb'))->toBeFalse();
+});
+
+it('refuses http hosts that fail IDNA STD3 (underscore) via isAllowedScheme alone', function (): void {
+    $guard = new RedirectUriGuard;
+
+    expect($guard->isAllowedScheme('http://ev_il.com'))->toBeFalse()
+        ->and($guard->isAcceptableForRegistration('http://ev_il.com/cb'))->toBeFalse();
 });
 
 it('refuses hostless http(s) redirect URIs that browsers resolve onto the path host', function (string $uri): void {
@@ -115,8 +123,14 @@ it('canonicalises IPv6 and unmaps ::ffff so alternate spellings hit the same blo
         ->and($guard->isHostBlocked('[2001:0db8:0:0::1]'))->toBeTrue()
         ->and($guard->isHostBlocked('::ffff:1.2.3.4'))->toBeTrue()
         ->and($guard->isHostBlocked('[::ffff:1.2.3.4]'))->toBeTrue()
+        ->and($guard->isHostBlocked('[::ffff:0:1.2.3.4]'))->toBeTrue()
+        ->and($guard->isHostBlocked('[::1.2.3.4]'))->toBeTrue()
+        ->and($guard->isHostBlocked('[64:ff9b::1.2.3.4]'))->toBeTrue()
         ->and($guard->normalizeHost('2001:0db8:0:0::1'))->toBe('2001:db8::1')
-        ->and($guard->normalizeHost('::ffff:1.2.3.4'))->toBe('1.2.3.4');
+        ->and($guard->normalizeHost('::ffff:1.2.3.4'))->toBe('1.2.3.4')
+        ->and($guard->normalizeHost('::ffff:0:1.2.3.4'))->toBe('1.2.3.4')
+        ->and($guard->normalizeHost('::1.2.3.4'))->toBe('1.2.3.4')
+        ->and($guard->normalizeHost('64:ff9b::1.2.3.4'))->toBe('1.2.3.4');
 });
 
 it('refuses non-dotted-decimal IPv4 spellings that WHATWG would still parse', function (string $host): void {
@@ -131,6 +145,23 @@ it('refuses non-dotted-decimal IPv4 spellings that WHATWG would still parse', fu
     'short form' => ['127.1'],
     'hex' => ['0x7f000001'],
 ]);
+
+it('refuses leading-zero IPv4 octets as forbidden notation (glibc-safe)', function (): void {
+    $guard = new RedirectUriGuard;
+
+    // Without the leading-zero check, glibc inet_pton rejects these and IDNA
+    // would accept them as ordinary hostnames.
+    expect(fn () => $guard->normalizeHost('01.02.03.04'))->toThrow(InvalidArgumentException::class)
+        ->and($guard->isAcceptableForRegistration('https://01.02.03.04/cb'))->toBeFalse()
+        ->and($guard->isAllowedScheme('https://01.02.03.04/cb'))->toBeFalse();
+});
+
+it('allows domains that contain 0x but are not hex IPv4 labels', function (): void {
+    $guard = new RedirectUriGuard;
+
+    expect($guard->normalizeHost('0xproject.io'))->toBe('0xproject.io')
+        ->and($guard->isAcceptableForRegistration('https://0xproject.io/cb'))->toBeTrue();
+});
 
 it('flags clients whose stored redirect URIs fail registration rules', function (): void {
     $guard = new RedirectUriGuard(new BlockedHostCatalog([]));

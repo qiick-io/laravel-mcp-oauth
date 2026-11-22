@@ -22,7 +22,12 @@ function mutationServer(
 
 it('freezes the wire grant and challenge constants', function (): void {
     expect(McpOAuthServer::SUPPORTED_GRANT_TYPES)->toBe(['authorization_code', 'refresh_token'])
+        ->and(McpOAuthServer::SUPPORTED_GRANT_TYPES)->toHaveCount(2)
         ->and(McpOAuthServer::SUPPORTED_CODE_CHALLENGE_METHODS)->toBe(['S256'])
+        ->and(McpOAuthServer::SUPPORTED_CODE_CHALLENGE_METHODS)->toHaveCount(1)
+        ->and(McpOAuthServer::SUPPORTED_GRANT_TYPES[0])->toBe('authorization_code')
+        ->and(McpOAuthServer::SUPPORTED_GRANT_TYPES[1])->toBe('refresh_token')
+        ->and(McpOAuthServer::SUPPORTED_CODE_CHALLENGE_METHODS[0])->toBe('S256')
         ->and(array_keys(mutationServer()->scopeDescriptions()))->toBe(['mcp:use']);
 });
 
@@ -175,6 +180,30 @@ it('skips unix mode checks when constructed for Windows', function (): void {
     try {
         expect(mutationServer(skipUnixKeyModes: true)->hasPassportKeys())->toBeTrue()
             ->and(mutationServer(skipUnixKeyModes: false)->hasPassportKeys())->toBeFalse();
+    } finally {
+        @chmod($privatePath, 0600);
+        @chmod($publicPath, 0600);
+        @unlink($privatePath);
+        @unlink($publicPath);
+    }
+});
+
+it('refuses near-allowlist unix modes such as 0601 that a wrong 0777 mask could accept', function (): void {
+    config()->set('passport.private_key', null);
+    config()->set('passport.public_key', null);
+
+    $privatePath = Passport::keyPath('oauth-private.key');
+    $publicPath = Passport::keyPath('oauth-public.key');
+    @mkdir(dirname($privatePath), 0777, true);
+    @chmod($privatePath, 0600);
+    @chmod($publicPath, 0600);
+    file_put_contents($privatePath, 'private');
+    file_put_contents($publicPath, 'public');
+    chmod($privatePath, 0601);
+    chmod($publicPath, 0601);
+
+    try {
+        expect(mutationServer(skipUnixKeyModes: false)->hasPassportKeys())->toBeFalse();
     } finally {
         @chmod($privatePath, 0600);
         @chmod($publicPath, 0600);
