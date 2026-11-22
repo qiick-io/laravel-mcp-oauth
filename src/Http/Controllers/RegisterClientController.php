@@ -9,6 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Laravel\Mcp\Server\Http\Controllers\OAuthRegisterController;
 use Laravel\Passport\Client;
+use Qiick\McpOAuth\ClientMetadataUriGuard;
 use Qiick\McpOAuth\Events\McpClientRegistered;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\RedirectUriGuard;
@@ -26,6 +27,7 @@ final class RegisterClientController extends OAuthRegisterController
 
     public function __construct(
         private readonly RedirectUriGuard $redirectUriGuard,
+        private readonly ClientMetadataUriGuard $clientMetadataUriGuard,
         private readonly ConfigRepository $config,
     ) {}
 
@@ -50,7 +52,7 @@ final class RegisterClientController extends OAuthRegisterController
         if ($this->clientNameContainsDisallowedCharacters($request)) {
             return response()->json([
                 'error' => 'invalid_client_metadata', // @pest-mutate-ignore: RemoveArrayItem
-                'error_description' => 'client_name must not contain control or bidi formatting characters.', // @pest-mutate-ignore: RemoveArrayItem
+                'error_description' => 'client_name must be valid UTF-8 with visible text and no control, separator or formatting characters.', // @pest-mutate-ignore: RemoveArrayItem
             ], 400);
         }
 
@@ -61,7 +63,7 @@ final class RegisterClientController extends OAuthRegisterController
                 continue; // @pest-mutate-ignore: ContinueToBreak
             }
 
-            if (! is_string($metadataUri) || ! $this->isRedirectUriAllowedForRegistration($metadataUri)) { // @pest-mutate-ignore: RemoveNot
+            if (! is_string($metadataUri) || ! $this->clientMetadataUriGuard->isAcceptable($metadataUri)) { // @pest-mutate-ignore: RemoveNot
                 return response()->json([
                     'error' => 'invalid_client_metadata', // @pest-mutate-ignore: RemoveArrayItem
                     'error_description' => $metadataUriField.' is not an allowed URI.', // @pest-mutate-ignore: RemoveArrayItem,ConcatRemoveLeft,ConcatRemoveRight,ConcatSwitchSides
@@ -149,17 +151,38 @@ final class RegisterClientController extends OAuthRegisterController
         return strlen($request->getContent()) > self::MAX_BODY_BYTES; // @pest-mutate-ignore: GreaterToGreaterOrEqual
     }
 
+    /**
+     * The client name is shown on the consent screen as the client's own
+     * claim, so nothing in it may reorder, hide or break the text around it.
+     * Fails closed: invalid UTF-8 (reachable through a form-encoded body) and
+     * any PCRE error count as disallowed.
+     */
     private function clientNameContainsDisallowedCharacters(Request $request): bool
     {
-        foreach (['client_name', 'name'] as $nameKey) { // @pest-mutate-ignore: RemoveArrayItem
+        // resolveClientName() falls back to `name`, so both keys are checked.
+        foreach (['client_name', 'name'] as $nameKey) {
             $nameValue = $request->input($nameKey);
 
             if (! is_string($nameValue) || $nameValue === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
-                continue; // @pest-mutate-ignore: ContinueToBreak
+                continue;
             }
 
-            // Cc = controls; Cf = format (includes bidi overrides used to spoof names).
-            if (preg_match('/[\p{Cc}\p{Cf}]/u', $nameValue) === 1) {
+            if (! mb_check_encoding($nameValue, 'UTF-8')) {
+                return true;
+            }
+
+            // Refused: C0/C1 controls (Cc), line and paragraph separators
+            // (Zl, Zp), Hangul fillers (blank letters, class Lo) and format
+            // characters (Cf) except ZWNJ (U+200C, Persian) and ZWJ (U+200D,
+            // emoji sequences). preg_match false (an error) is not 0: refused.
+            if (preg_match('/[\p{Cc}\p{Zl}\p{Zp}\x{115F}\x{1160}\x{3164}\x{FFA0}]|(?![\x{200C}\x{200D}])\p{Cf}/u', $nameValue) !== 0) {
+                return true;
+            }
+
+            // A name made only of spaces, combining marks (variation
+            // selectors, CGJ included), joiners or the blank braille pattern
+            // would render as nothing next to "wants access".
+            if (preg_match('/[^\p{Z}\p{M}\x{200C}\x{200D}\x{2800}]/u', $nameValue) !== 1) {
                 return true;
             }
         }

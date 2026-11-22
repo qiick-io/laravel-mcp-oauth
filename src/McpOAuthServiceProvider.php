@@ -70,6 +70,10 @@ final class McpOAuthServiceProvider extends ServiceProvider
             return new RedirectUriGuard($app->make(BlockedHostCatalog::class));
         });
 
+        $this->app->singleton(ClientMetadataUriGuard::class, function (Application $app): ClientMetadataUriGuard {
+            return new ClientMetadataUriGuard($app->make(RedirectUriGuard::class));
+        });
+
         $this->app->singleton(McpOAuthServer::class, function (Application $app): McpOAuthServer {
             return new McpOAuthServer(
                 $app->make(ConfigRepository::class),
