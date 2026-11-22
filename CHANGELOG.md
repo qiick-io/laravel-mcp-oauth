@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   issue after family revoke; parallel League-order race on the default DB
   (MySQL / PostgreSQL / SQLite WAL) asserts the loser persists no tokens;
   enrolled in `mutate-per-class.sh` (MSI ≥95); `FakeGrantStore` for Testbench.
+- Opaque `invalid_grant` hints on refresh refusal (same League wording for
+  reuse and concurrent family revoke); path details only in logs / audit
+  events. Method-level `@pest-mutate-ignore` removed from the repository.
 
 - Passport boot (design §5.6): `Passport::ignoreRoutes()` and device grant off
   in `register()` (S4 / S19); access, refresh and auth-code TTLs from raw
