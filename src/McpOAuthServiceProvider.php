@@ -6,24 +6,35 @@ namespace Qiick\McpOAuth;
 
 use Carbon\CarbonInterval;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Auth\Factory as AuthFactory;
+use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Inertia\Inertia;
 use Laravel\Passport\Bridge\RefreshTokenRepository as PassportRefreshTokenRepository;
+use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
+use Laravel\Passport\Scope;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Grant\AuthCodeGrant;
 use League\OAuth2\Server\Grant\ClientCredentialsGrant;
 use Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
+use Qiick\McpOAuth\Contracts\ConsentView;
 use Qiick\McpOAuth\Contracts\GrantStore;
+use Qiick\McpOAuth\Http\Controllers\AuthorizeClientController;
 use Qiick\McpOAuth\Internal\BlockedHostCatalog;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Internal\DisabledAdminSwitch;
+use Qiick\McpOAuth\Services\ConsentPageService;
+use Qiick\McpOAuth\Views\InertiaConsentView;
 use ReflectionProperty;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Registers the package in a Laravel app. Auto-discovered through
@@ -53,6 +64,23 @@ final class McpOAuthServiceProvider extends ServiceProvider
         Passport::$deviceCodeGrantEnabled = false;
 
         $this->app->singletonIf(AdminSwitch::class, DisabledAdminSwitch::class);
+
+        // Design Resolved #9: the default consent page needs Inertia, which is only a suggest.
+        if (class_exists(Inertia::class)) {
+            $this->app->bindIf(ConsentView::class, InertiaConsentView::class);
+        }
+
+        // Passport gives its own AuthorizationController the session guard; the subclass needs it too.
+        $this->app->when(AuthorizeClientController::class)
+            ->needs(StatefulGuard::class)
+            ->give(static function (Application $app): StatefulGuard {
+                $guardName = $app->make(ConfigRepository::class)->get('passport.guard');
+                $passportGuard = $app->make(AuthFactory::class)->guard(is_string($guardName) ? $guardName : null);
+
+                assert($passportGuard instanceof StatefulGuard);
+
+                return $passportGuard;
+            });
 
         // Design §5.6: Passport resolves this concrete; products must bind GrantStore
         // before the AuthorizationServer is first resolved.
@@ -97,6 +125,11 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->configurePassportTokenLifetimes();
         $this->configurePassportScopes();
         Passport::useAuthorizationServerResponseType(new McpBearerTokenResponse);
+        Passport::authorizationView(function (array $parameters): Response {
+            // The shape AuthorizationController passes to withParameters().
+            /** @var array{request: Request, user: Authenticatable, client: Client, scopes: list<Scope>, authToken: string} $parameters */
+            return $this->app->make(ConsentPageService::class)->render($parameters);
+        });
         $this->configureRateLimiters();
         $this->validateMcpAuthFailuresPerMinute();
 

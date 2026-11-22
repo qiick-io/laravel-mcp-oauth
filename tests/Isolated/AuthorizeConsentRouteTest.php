@@ -8,7 +8,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
+use Laravel\Passport\Bridge\User;
+use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
+use League\OAuth2\Server\RequestTypes\AuthorizationRequest;
+use League\Uri\UriString;
+use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Data\ConsentDecision;
 use Qiick\McpOAuth\Data\ConsentOption;
 use Qiick\McpOAuth\Data\ConsentOptions;
@@ -17,7 +22,9 @@ use Qiick\McpOAuth\Events\McpConsentDenied;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
+use Qiick\McpOAuth\Testing\FakeConsentProvider;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
+use Qiick\McpOAuth\Tests\Support\ForeignAuthorizationRequest;
 use Qiick\McpOAuth\Tests\Support\TestUser;
 
 uses(AuthorizeFlowTestCase::class);
@@ -35,11 +42,10 @@ beforeEach(function (): void {
  * @param  array<string, mixed>  $queryOverrides
  * @return array<string, mixed>
  */
-function renderConsentPage(AuthorizeFlowTestCase $testCase, TestUser $user, Laravel\Passport\Client $client, array $queryOverrides = []): array
+function renderConsentPage(AuthorizeFlowTestCase $testCase, TestUser $user, Client $client, array $queryOverrides = []): array
 {
     $response = $testCase->actingAs($user)
-        ->withHeaders(INERTIA_HEADERS)
-        ->get(authorizeUrlFor($testCase, $client, $queryOverrides));
+        ->get(authorizeUrlFor($testCase, $client, $queryOverrides), INERTIA_HEADERS);
 
     $response->assertOk()->assertJsonPath('component', 'oauth/authorize');
 
@@ -52,7 +58,7 @@ function renderConsentPage(AuthorizeFlowTestCase $testCase, TestUser $user, Lara
 /**
  * @param  array<string, mixed>  $overrides
  */
-function authorizeUrlFor(AuthorizeFlowTestCase $testCase, Laravel\Passport\Client $client, array $overrides = []): string
+function authorizeUrlFor(AuthorizeFlowTestCase $testCase, Client $client, array $overrides = []): string
 {
     $reflection = new ReflectionMethod($testCase, 'authorizeUrl');
 
@@ -64,13 +70,14 @@ function authorizeUrlFor(AuthorizeFlowTestCase $testCase, Laravel\Passport\Clien
  */
 function validApproval(string $authToken, array $overrides = []): array
 {
-    return array_merge([
+    // A null override removes the field, as a form that never sent it.
+    return array_filter(array_merge([
         'auth_token' => $authToken,
         'scopes' => ['mcp:read'],
         'role' => 'editor',
         'resources' => ['news'],
         'all_resources' => false,
-    ], $overrides);
+    ], $overrides), static fn (mixed $value): bool => $value !== null);
 }
 
 /**
@@ -78,7 +85,7 @@ function validApproval(string $authToken, array $overrides = []): array
  */
 function queryOfLocation(string $location): array
 {
-    $query = (string) League\Uri\UriString::parse($location)['query'];
+    $query = (string) UriString::parse($location)['query'];
     parse_str($query, $parameters);
 
     /** @var array<string, string> $parameters */
@@ -167,10 +174,44 @@ it('refuses an authorization request without PKCE S256 as JSON, never a redirect
     'other resource' => [['resource' => 'https://evil.example/mcp'], 'invalid_target'],
     'resource prefix' => [['resource' => 'https://mcp-oauth.test/mc'], 'invalid_target'],
     'array state' => [['state' => ['a', 'b']], 'invalid_request'],
-    'array scope' => [['scope' => ['mcp:use']], 'invalid_request'],
     'array redirect uri' => [['redirect_uri' => [AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI]], 'invalid_request'],
     'array challenge' => [['code_challenge' => [AuthorizeFlowTestCase::CODE_CHALLENGE]], 'invalid_request'],
+    'array challenge method' => [['code_challenge_method' => ['S256']], 'invalid_request'],
+    'array response type' => [['response_type' => ['code']], 'unsupported_response_type'],
+    'array client id' => [['client_id' => ['x']], 'invalid_client'],
 ]);
+
+it('names the failed check in error_description', function (array $overrides, string $description): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+
+    $this->actingAs($this->createUser())
+        ->get($this->authorizeUrl($client, $overrides))
+        ->assertStatus(400)
+        ->assertJsonPath('error_description', $description);
+})->with([
+    'pkce' => [['code_challenge_method' => 'plain'], 'PKCE with code_challenge_method S256 is required.'],
+    'response type' => [['response_type' => 'token'], 'Only response_type=code is supported.'],
+    'resource' => [['resource' => null], 'The resource parameter is required and must name this MCP endpoint.'],
+    'client' => [['client_id' => 'not-a-uuid'], 'The client is unknown, revoked or blocked on this server.'],
+    'redirect' => [['redirect_uri' => 'https://evil.example/cb'], 'The redirect_uri is not registered for this client.'],
+]);
+
+it('never queries the clients table for a client_id that is not a UUID', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    DB::enableQueryLog();
+
+    $this->actingAs($this->createUser())
+        ->get($this->authorizeUrl($client, ['client_id' => 'not-a-uuid']))
+        ->assertStatus(400);
+
+    $clientQueries = array_filter(DB::getQueryLog(), static fn (array $query): bool => str_contains($query['query'], 'oauth_clients'));
+
+    expect($clientQueries)->toBe([]);
+});
 
 it('refuses unknown, malformed and revoked clients as JSON', function (string $clientId): void {
     $this->enableOAuth();
@@ -230,7 +271,7 @@ it('never redirects to a redirect_uri that is not exactly registered', function 
     'missing with two registered' => ['', ['https://app.example/a', 'https://app.example/b']],
 ]);
 
-it('drops foreign wire scopes before Passport sees them', function (string $scope): void {
+it('drops foreign wire scopes before Passport sees them', function (string|array $scope): void {
     $this->enableOAuth();
     McpOAuthRoutes::register();
     $client = $this->createClient();
@@ -248,6 +289,7 @@ it('drops foreign wire scopes before Passport sees them', function (string $scop
     'foreign scopes around the wire scope' => ['openid mcp:use admin'],
     'only foreign scopes' => ['openid profile'],
     'empty scope' => [''],
+    'repeated scope parameter' => [['mcp:use', 'admin']],
 ]);
 
 // --- Login and the consent page ----------------------------------------------
@@ -260,7 +302,10 @@ it('sends a guest to the login page and keeps the full authorize URL as intended
 
     $this->get($authorizeUrl)->assertRedirect('/login');
 
-    expect(session('url.intended'))->toBe('https://mcp-oauth.test'.$authorizeUrl);
+    $intendedUrl = (string) session('url.intended');
+
+    expect($intendedUrl)->toStartWith(url('/oauth/authorize').'?')
+        ->and(queryOfLocation($intendedUrl))->toEqualCanonicalizing($this->authorizeQuery($client));
 });
 
 it('renders the consent page with the client as self-asserted, the return host and the options', function (): void {
@@ -269,8 +314,7 @@ it('renders the consent page with the client as self-asserted, the return host a
     $client = $this->createClient(['https://app.example/callback', 'https://other.example/cb']);
 
     $response = $this->actingAs($this->createUser())
-        ->withHeaders(INERTIA_HEADERS)
-        ->get($this->authorizeUrl($client));
+        ->get($this->authorizeUrl($client), INERTIA_HEADERS);
 
     $response->assertOk()
         ->assertHeader('X-Frame-Options', 'DENY')
@@ -441,7 +485,7 @@ it('leaves an Inertia approval with a full-page location to the client', functio
     $client = $this->createClient();
     $props = renderConsentPage($this, $this->createUser(), $client);
 
-    $response = $this->withHeaders(INERTIA_HEADERS)->post('/oauth/authorize', validApproval($props['authToken']));
+    $response = $this->post('/oauth/authorize', validApproval($props['authToken']), INERTIA_HEADERS);
 
     $response->assertStatus(409);
     expect((string) $response->headers->get('X-Inertia-Location'))->toStartWith(AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI.'?code=');
@@ -483,11 +527,26 @@ it('refuses an approval without the pending request it was rendered for', functi
         session()->put('authRequest', serialize(new ArrayObject));
     }
 
+    if ($case === 'pending request of a class outside the allowlist') {
+        // Everything else is right: only the unserialize allowlist refuses it.
+        $foreignRequest = new ForeignAuthorizationRequest;
+        $foreignRequest->setUser(new User((string) $user->getKey()));
+        $foreignRequest->setClient(new Laravel\Passport\Bridge\Client((string) $client->getKey(), 'Cursor', [AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI]));
+        $foreignRequest->setGrantTypeId('authorization_code');
+        session()->put('authRequest', serialize($foreignRequest));
+    }
+
+    if ($case === 'pending request without a user') {
+        session()->put('authRequest', serialize(new AuthorizationRequest));
+    }
+
     $this->post('/oauth/authorize', validApproval((string) $authToken))
         ->assertStatus(403)
         ->assertHeaderMissing('Location');
 
-    expect($this->grantStore()->replacedDecisions)->toBe([])
+    expect(session()->has('authRequest'))->toBeFalse()
+        ->and(session()->has('authToken'))->toBeFalse()
+        ->and($this->grantStore()->replacedDecisions)->toBe([])
         ->and(OAuthConsentRecord::query()->count())->toBe(0)
         ->and(DB::table('oauth_auth_codes')->count())->toBe(0);
 })->with([
@@ -498,7 +557,79 @@ it('refuses an approval without the pending request it was rendered for', functi
     'client revoked since',
     'redirect host blocked since',
     'corrupt pending request',
+    'pending request without a user',
+    'pending request of a class outside the allowlist',
 ]);
+
+it('accepts explicit nulls for an optional resources list and the only organisation', function (): void {
+    $defaultOptions = AuthorizeFlowTestCase::defaultConsentOptions();
+    $this->enableOAuth(new ConsentOptions(
+        scopes: $defaultOptions->scopes,
+        roles: $defaultOptions->roles,
+        resources: $defaultOptions->resources,
+        resourcesRequired: true,
+        canGrant: true,
+        organisations: [new ConsentOption('acme', 'Acme', grantable: true)],
+    ));
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $props = renderConsentPage($this, $this->createUser(), $client);
+
+    // Inertia forms send unselected fields as null.
+    $this->postJson('/oauth/authorize', [
+        'auth_token' => $props['authToken'],
+        'scopes' => ['mcp:read'],
+        'role' => 'editor',
+        'resources' => null,
+        'all_resources' => true,
+        'organisation' => null,
+    ])->assertRedirect();
+
+    $decision = $this->grantStore()->replacedDecisions[0];
+
+    expect($decision->allResources)->toBeTrue()
+        ->and($decision->attributes)->toBe(['organisation' => 'acme']);
+});
+
+it('records the only registered URI when the request omitted redirect_uri', function (string $method): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient(['https://solo.example/cb']);
+    $props = renderConsentPage($this, $this->createUser(), $client, ['redirect_uri' => null]);
+
+    $response = $this->call($method, '/oauth/authorize', validApproval($props['authToken']));
+
+    expect((string) $response->headers->get('Location'))->toStartWith('https://solo.example/cb?')
+        ->and(OAuthConsentRecord::query()->sole()->redirect_uri)->toBe('https://solo.example/cb');
+})->with(['POST', 'DELETE']);
+
+it('records and answers the redirect_uri the request named, not the first registered one', function (string $method): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient(['https://first.example/cb', 'https://second.example/cb']);
+    $props = renderConsentPage($this, $this->createUser(), $client, ['redirect_uri' => 'https://second.example/cb']);
+
+    expect($props['client']['redirectHost'])->toBe('second.example');
+
+    $response = $this->call($method, '/oauth/authorize', validApproval($props['authToken']));
+
+    $consentRecord = OAuthConsentRecord::query()->sole();
+
+    expect((string) $response->headers->get('Location'))->toStartWith('https://second.example/cb?')
+        ->and($consentRecord->redirect_uri)->toBe('https://second.example/cb')
+        ->and($consentRecord->redirect_host)->toBe('second.example');
+})->with(['POST', 'DELETE']);
+
+it('stores at most 512 bytes of the user agent', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $props = renderConsentPage($this, $this->createUser(), $client);
+
+    $this->delete('/oauth/authorize', ['auth_token' => $props['authToken']], ['User-Agent' => str_repeat('a', 600)]);
+
+    expect(OAuthConsentRecord::query()->sole()->user_agent)->toBe(str_repeat('a', 512));
+});
 
 it('consumes the pending request so an approval cannot be replayed', function (): void {
     $this->enableOAuth();
@@ -551,7 +682,12 @@ it('judges the posted choices against the offered options, never the form', func
     'scope not offered' => [['scopes' => ['mcp:read', 'billing']], 'scopes.1'],
     'no scope' => [['scopes' => []], 'scopes'],
     'scopes as a string' => [['scopes' => 'mcp:read'], 'scopes'],
+    'scopes as an object' => [['scopes' => ['first' => 'mcp:read']], 'scopes'],
+    'scope that is not a string' => [['scopes' => [['mcp:read']]], 'scopes.0'],
+    'resources as an object' => [['resources' => ['first' => 'news']], 'resources'],
+    'role that is not a string' => [['role' => ['editor']], 'role'],
     'duplicate scopes' => [['scopes' => ['mcp:read', 'mcp:read']], 'scopes.0'],
+    'duplicate resources' => [['resources' => ['news', 'news']], 'resources.0'],
     'role not grantable' => [['role' => 'owner'], 'role'],
     'role not offered' => [['role' => 'super-admin'], 'role'],
     'missing role' => [['role' => null], 'role'],
@@ -674,7 +810,7 @@ it('refuses the only organisation when it is not grantable', function (): void {
 
 it('lets the product refuse the decision after the package checks', function (): void {
     $this->enableOAuth();
-    app()->instance(Qiick\McpOAuth\Contracts\ConsentProvider::class, new Qiick\McpOAuth\Testing\FakeConsentProvider(
+    app()->instance(ConsentProvider::class, new FakeConsentProvider(
         AuthorizeFlowTestCase::defaultConsentOptions(),
         static function (ConsentDecision $decision): void {
             throw ValidationException::withMessages(['scopes' => 'The product refuses this combination.']);
@@ -794,7 +930,7 @@ it('leaves an Inertia denial with a full-page location to the client', function 
     $client = $this->createClient();
     $props = renderConsentPage($this, $this->createUser(), $client);
 
-    $response = $this->withHeaders(INERTIA_HEADERS)->delete('/oauth/authorize', ['auth_token' => $props['authToken']]);
+    $response = $this->delete('/oauth/authorize', ['auth_token' => $props['authToken']], INERTIA_HEADERS);
 
     $response->assertStatus(409);
     expect((string) $response->headers->get('X-Inertia-Location'))->toContain('error=access_denied');

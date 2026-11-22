@@ -32,6 +32,9 @@ final class BoundedPositiveInt
     /** Hard ceiling for non-revoked Passport clients (DCR global cap). */
     public const int REGISTRATIONS_GLOBAL_CAP_MAX = 100_000;
 
+    /** Ten years: retention beyond that is a legal hold, not a config value. */
+    public const int REVOKED_RETENTION_DAYS_MAX = 3_650;
+
     /**
      * Accepts a PHP int in range, or a string of ASCII digits only (no sign,
      * spaces, decimal point, or exponent). Never casts float / scientific

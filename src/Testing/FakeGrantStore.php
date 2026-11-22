@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Qiick\McpOAuth\Testing;
 
-use Illuminate\Contracts\Auth\Authenticatable;
 use DateTimeImmutable;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Str;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\ConsentDecision;

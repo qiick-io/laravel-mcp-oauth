@@ -5,15 +5,20 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth;
 
 use Illuminate\Support\Facades\Route;
+use Laravel\Mcp\Server\Middleware\AddAuthorizationFramingHeaders;
 use LogicException;
+use Qiick\McpOAuth\Http\Controllers\ApproveClientController;
+use Qiick\McpOAuth\Http\Controllers\AuthorizeClientController;
+use Qiick\McpOAuth\Http\Controllers\DenyClientController;
 use Qiick\McpOAuth\Http\Controllers\RegisterClientController;
 use Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware;
+use Qiick\McpOAuth\Http\Middleware\ValidateAuthorizationRequestMiddleware;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 
 /**
  * Registers the package OAuth HTTP surface the product calls from routes/mcp.php
- * (design §5.2). This slice ships DCR only; authorize / token / revoke and
- * discovery land in follow-up PRs. Throws when a foreign `passport.*` route is
+ * (design §5.2): DCR and the authorization endpoint with consent; token,
+ * revoke and discovery land in follow-up PRs. Throws when a foreign `passport.*` route is
  * already present (Signaculum guard, design §3.3).
  *
  * Every HTTP method for `oauth/register` sits behind
@@ -42,10 +47,41 @@ final class McpOAuthRoutes
             Route::post('oauth/register', RegisterClientController::class)
                 ->middleware('throttle:mcp-oauth-register')
                 ->name('mcp.oauth.register');
+
+            self::registerAuthorizationRoutes();
         });
 
         // ->name() is applied after addRoute; rebuild so Route::has() sees it.
         Route::getRoutes()->refreshNameLookups();
+    }
+
+    /**
+     * Authorization endpoint and consent (design §5.2 item 7). Inside the
+     * off-gate, so `web` (session, CSRF) and the framing headers only run once
+     * OAuth is on: off, the path answers exactly like a missing route.
+     * AddAuthorizationFramingHeaders sets `X-Frame-Options: DENY` and
+     * `frame-ancestors 'none'` on the `passport.authorizations.*` names.
+     */
+    private static function registerAuthorizationRoutes(): void
+    {
+        Route::middleware(['web', AddAuthorizationFramingHeaders::class, 'throttle:mcp-oauth-authorize'])
+            ->group(static function (): void {
+                Route::match(['PUT', 'PATCH', 'OPTIONS'], 'oauth/authorize', static function (): never {
+                    throw new MethodNotAllowedHttpException(['GET', 'HEAD', 'POST', 'DELETE']);
+                });
+
+                Route::get('oauth/authorize', [AuthorizeClientController::class, 'authorize'])
+                    ->middleware(ValidateAuthorizationRequestMiddleware::class)
+                    ->name('passport.authorizations.authorize');
+
+                Route::middleware(['auth', 'verified'])->group(static function (): void {
+                    Route::post('oauth/authorize', ApproveClientController::class)
+                        ->name('passport.authorizations.approve');
+
+                    Route::delete('oauth/authorize', DenyClientController::class)
+                        ->name('passport.authorizations.deny');
+                });
+            });
     }
 
     /**
