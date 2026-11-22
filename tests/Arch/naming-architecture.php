@@ -16,7 +16,46 @@ return [
     'namespace' => 'Qiick\McpOAuth',
 
     'ignoring' => [
-        // Feature PRs add design §3 / §5 types that omit shared suffixes.
+        'Contracts' => [
+            // Design §3.2: contract names without Contract suffix.
+            'Qiick\McpOAuth\Contracts\AdminSwitch',
+            'Qiick\McpOAuth\Contracts\OAuthUserResolver',
+            'Qiick\McpOAuth\Contracts\ConsentProvider',
+            'Qiick\McpOAuth\Contracts\GrantStore',
+            'Qiick\McpOAuth\Contracts\GrantAuthorizer',
+            'Qiick\McpOAuth\Contracts\ApiKeyDoor',
+            'Qiick\McpOAuth\Contracts\McpCredentialBinder',
+            'Qiick\McpOAuth\Contracts\AuditLogger',
+            'Qiick\McpOAuth\Contracts\ConsentView',
+        ],
+        'Data' => [
+            // Design §3.2 DTOs: names are the API, not *Data.
+            'Qiick\McpOAuth\Data\ClientInfo',
+            'Qiick\McpOAuth\Data\ConsentOption',
+            'Qiick\McpOAuth\Data\ConsentOptions',
+            'Qiick\McpOAuth\Data\ConsentDecision',
+            'Qiick\McpOAuth\Data\GrantRecord',
+            'Qiick\McpOAuth\Data\ConsentPage',
+            'Qiick\McpOAuth\Data\AuthorizationDecision',
+            // Enum lives beside the DTOs; naming rule targets classes only, but
+            // keep the FQCN listed if a future rule expands.
+            'Qiick\McpOAuth\Data\RevocationReason',
+        ],
+        'Events' => [
+            // Design §5.5: verb past-tense names, no Event suffix.
+            'Qiick\McpOAuth\Events\McpOAuthEnabled',
+            'Qiick\McpOAuth\Events\McpOAuthDisabled',
+            'Qiick\McpOAuth\Events\McpClientRegistered',
+            'Qiick\McpOAuth\Events\McpConsentApproved',
+            'Qiick\McpOAuth\Events\McpConsentDenied',
+            'Qiick\McpOAuth\Events\McpGrantRevoked',
+            'Qiick\McpOAuth\Events\McpRefreshTokenReused',
+            'Qiick\McpOAuth\Events\McpClientBlocked',
+            'Qiick\McpOAuth\Events\McpRedirectHostBlocked',
+            'Qiick\McpOAuth\Events\McpRedirectHostUnblocked',
+            'Qiick\McpOAuth\Events\McpUnusedClientsPruned',
+            'Qiick\McpOAuth\Events\McpPassportKeysMissing',
+        ],
     ],
 
     'suffixes' => [],

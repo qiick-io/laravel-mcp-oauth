@@ -62,6 +62,14 @@ until keys exist and the admin switch is flipped.
 
 Full table: design §16.
 
+## Public API (contracts and data)
+
+Products implement `Qiick\McpOAuth\Contracts\*` (`AdminSwitch`, `GrantStore`,
+`ConsentProvider`, `GrantAuthorizer`, `ApiKeyDoor`, `McpCredentialBinder`,
+`AuditLogger`, `ConsentView`, `OAuthUserResolver`). Wire and consent shapes are
+the `@api` DTOs under `Qiick\McpOAuth\Data` and events under
+`Qiick\McpOAuth\Events`. Public ids are UUID strings only.
+
 ## Config
 
 Publishable `config/mcp-oauth.php` (tag `mcp-oauth-config`). Env prefix
