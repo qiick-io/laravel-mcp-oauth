@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hard-coded `*` scope cannot be issued for MCP.
 - `McpBearerTokenResponse` (S21): token endpoint JSON includes `scope` via
   `Passport::useAuthorizationServerResponseType`.
+- Rate limiters `mcp-oauth-register` and `mcp-oauth-token` (design §5.6),
+  keyed by `ClientThrottleKey`, caps from config (fail-closed, ≤10000/min).
 
 - Package migrations loaded via `loadMigrationsFrom` when
   `mcp-oauth.migrations.load` is true (default; publish tag

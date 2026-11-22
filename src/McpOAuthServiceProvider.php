@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth;
 
 use Carbon\CarbonInterval;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Passport\Passport;
 use League\OAuth2\Server\AuthorizationServer;
@@ -24,10 +27,11 @@ use ReflectionProperty;
  *
  * Always calls `Passport::ignoreRoutes()` and turns the device grant off in
  * `register()` (design Resolved #3 / #4). Token TTLs, the wire scope
- * (`tokensCan` / `defaultScopes`), stripping ClientCredentialsGrant, and
- * `McpBearerTokenResponse` (adds `scope` to the token JSON) land in `boot()`.
- * Rate limiters and fail-closed adapter validation land with later feature
- * PRs. While `mcp-oauth.enabled` is false (the default), missing product
+ * (`tokensCan` / `defaultScopes`), stripping ClientCredentialsGrant,
+ * `McpBearerTokenResponse`, and the `mcp-oauth-register` /
+ * `mcp-oauth-token` rate limiters (keyed by ClientThrottleKey) land in
+ * `boot()`. Fail-closed adapter validation lands with later feature PRs.
+ * While `mcp-oauth.enabled` is false (the default), missing product
  * adapters are allowed so products can install before writing adapters.
  *
  * @api
@@ -73,6 +77,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->configurePassportTokenLifetimes();
         $this->configurePassportScopes();
         Passport::useAuthorizationServerResponseType(new McpBearerTokenResponse);
+        $this->configureRateLimiters();
 
         if ($this->app->runningInConsole()) {
             $this->publishes([
@@ -168,5 +173,35 @@ final class McpOAuthServiceProvider extends ServiceProvider
 
         Passport::tokensCan($server->scopeDescriptions());
         Passport::defaultScopes([McpOAuthServer::WIRE_SCOPE]);
+    }
+
+    /**
+     * Named limiters for DCR and the token endpoint (design §5.6). Routes
+     * attach `throttle:mcp-oauth-register` / `throttle:mcp-oauth-token` when
+     * those endpoints land; both keys use ClientThrottleKey (S29 / S30).
+     */
+    private function configureRateLimiters(): void
+    {
+        /** @var ConfigRepository $config */
+        $config = $this->app->make(ConfigRepository::class);
+
+        $registrationsPerMinute = BoundedPositiveInt::require(
+            $config->get('mcp-oauth.registrations_per_minute'),
+            'registrations_per_minute',
+            BoundedPositiveInt::RATE_LIMIT_PER_MINUTE_MAX,
+        );
+        $tokenRequestsPerMinute = BoundedPositiveInt::require(
+            $config->get('mcp-oauth.token_requests_per_minute'),
+            'token_requests_per_minute',
+            BoundedPositiveInt::RATE_LIMIT_PER_MINUTE_MAX,
+        );
+
+        RateLimiter::for('mcp-oauth-register', static function (Request $request) use ($registrationsPerMinute): Limit {
+            return Limit::perMinute($registrationsPerMinute)->by(ClientThrottleKey::fromRequest($request));
+        });
+
+        RateLimiter::for('mcp-oauth-token', static function (Request $request) use ($tokenRequestsPerMinute): Limit {
+            return Limit::perMinute($tokenRequestsPerMinute)->by(ClientThrottleKey::fromRequest($request));
+        });
     }
 }

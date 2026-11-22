@@ -26,6 +26,9 @@ final class BoundedPositiveInt
      */
     public const int AUTH_CODE_TTL_MINUTES_MAX = 10;
 
+    /** Per-minute rate limiter ceilings (register / token). */
+    public const int RATE_LIMIT_PER_MINUTE_MAX = 10_000;
+
     /**
      * Accepts a PHP int in range, or a string of ASCII digits only (no sign,
      * spaces, decimal point, or exponent). Never casts float / scientific

@@ -44,7 +44,14 @@ return [
 
     'auth_code_ttl_minutes' => env('MCP_OAUTH_AUTH_CODE_TTL_MINUTES', '10'),
 
-    'registrations_per_minute' => (int) env('MCP_OAUTH_REGISTRATIONS_PER_MINUTE', 10),
+    /*
+     * Named rate limiters (design §5.6): throttle:mcp-oauth-register and
+     * throttle:mcp-oauth-token, keyed by ClientThrottleKey. Raw env strings;
+     * boot validates 1..10000 (BoundedPositiveInt::RATE_LIMIT_PER_MINUTE_MAX).
+     */
+    'registrations_per_minute' => env('MCP_OAUTH_REGISTRATIONS_PER_MINUTE', '10'),
+
+    'token_requests_per_minute' => env('MCP_OAUTH_TOKEN_REQUESTS_PER_MINUTE', '60'),
 
     'registrations_global_cap' => (int) env('MCP_OAUTH_REGISTRATIONS_GLOBAL_CAP', 10000),
 
@@ -54,8 +61,6 @@ return [
      * Days a revoked client or grant stays before mcp-oauth:purge-revoked.
      */
     'revoked_retention_days' => (int) env('MCP_OAUTH_REVOKED_RETENTION_DAYS', 90),
-
-    'token_requests_per_minute' => (int) env('MCP_OAUTH_TOKEN_REQUESTS_PER_MINUTE', 60),
 
     'mcp_auth_failures_per_minute' => (int) env('MCP_OAUTH_MCP_AUTH_FAILURES_PER_MINUTE', 20),
 
