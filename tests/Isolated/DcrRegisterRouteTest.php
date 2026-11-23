@@ -278,6 +278,8 @@ it('answers 503 when the global client cap is reached', function (): void {
 it('counts the cap on the client model Passport writes to', function (): void {
     enableMcpOAuthWithKeys();
     config()->set('mcp-oauth.registrations_global_cap', 1);
+    // Persistent engines keep tables across runs.
+    Schema::dropIfExists('product_oauth_clients');
     Schema::create('product_oauth_clients', function (Blueprint $table): void {
         $table->uuid('id')->primary();
         $table->nullableMorphs('owner');
@@ -307,11 +309,11 @@ it('counts the cap on the client model Passport writes to', function (): void {
             'redirect_uris' => ['https://app.example/callback'],
         ])->assertStatus(503)
             ->assertJsonPath('error', 'temporarily_unavailable');
+        expect(SeparateTableClient::query()->count())->toBe(1);
     } finally {
         Passport::useClientModel(Client::class);
+        Schema::dropIfExists('product_oauth_clients');
     }
-
-    expect(SeparateTableClient::query()->count())->toBe(1);
 });
 
 it('refuses a subdomain of a blocked host only when the row matches subdomains', function (): void {

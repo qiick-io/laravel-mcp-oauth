@@ -64,9 +64,11 @@ use Symfony\Component\HttpFoundation\Response;
 final class McpOAuthServiceProvider extends ServiceProvider
 {
     /**
-     * The grants the AuthorizationServer keeps: the MCP grants, and personal
-     * access so the product's own `createToken()` still works (its tokens are
-     * never bound, see BindAccessTokenAction).
+     * The grants an AuthorizationServer keeps while OAuth is on: the MCP
+     * grants. `personal_access` is listed because the same afterResolving hook
+     * also runs on the separate server Passport gives PersonalAccessTokenFactory
+     * (the main server never has that grant): keeping it there means the
+     * product's own `createToken()` still works.
      */
     private const array SERVER_GRANT_TYPES = [...McpOAuthServer::SUPPORTED_GRANT_TYPES, 'personal_access'];
 
@@ -97,9 +99,14 @@ final class McpOAuthServiceProvider extends ServiceProvider
                 return $passportGuard;
             });
 
-        // Design §5.6: Passport resolves this concrete; products must bind GrantStore
-        // before the AuthorizationServer is first resolved.
-        $this->app->bind(PassportRefreshTokenRepository::class, function (Application $app): FamilyRevokingRefreshTokenRepository {
+        // Design §5.6: Passport resolves these concretes; with OAuth on, products
+        // must bind GrantStore before the AuthorizationServer is first resolved.
+        // Off, Passport stays the product's: its own repositories, and no GrantStore needed (S81).
+        $this->app->bind(PassportRefreshTokenRepository::class, function (Application $app): PassportRefreshTokenRepository {
+            if (! $this->isMcpOAuthEnabled()) {
+                return new PassportRefreshTokenRepository($app->make(Dispatcher::class));
+            }
+
             return new FamilyRevokingRefreshTokenRepository(
                 $app->make(Dispatcher::class),
                 $app->make(GrantStore::class),
@@ -110,7 +117,9 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->app->scoped(ConsumedAuthCodeGrant::class);
 
         // One-shot codes, and a code presented again revokes its tokens (RFC 9700 §4.5).
-        $this->app->bind(PassportAuthCodeRepository::class, OneShotAuthCodeRepository::class);
+        $this->app->bind(PassportAuthCodeRepository::class, function (Application $app): PassportAuthCodeRepository {
+            return $this->isMcpOAuthEnabled() ? $app->make(OneShotAuthCodeRepository::class) : new PassportAuthCodeRepository;
+        });
         $this->app->bind(RevokeAuthCodeTokensAction::class, static function (Application $app): RevokeAuthCodeTokensAction {
             return new RevokeAuthCodeTokensAction(
                 $app->make(GrantStore::class),
@@ -181,7 +190,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
     {
         $this->app->make(Dispatcher::class)->listen(AccessTokenCreated::class, function (AccessTokenCreated $event): void {
             // Off, no MCP token is minted and the adapters may not be bound yet (S81).
-            if (! (bool) $this->app->make(ConfigRepository::class)->get('mcp-oauth.enabled')) {
+            if (! $this->isMcpOAuthEnabled()) {
                 return;
             }
 
@@ -199,7 +208,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
      */
     private function assertAdaptersBoundWhileEnabled(): void
     {
-        if (! (bool) $this->app->make(ConfigRepository::class)->get('mcp-oauth.enabled')) {
+        if (! $this->isMcpOAuthEnabled()) {
             return;
         }
 
@@ -214,6 +223,15 @@ final class McpOAuthServiceProvider extends ServiceProvider
                 throw InvalidMcpOAuthConfigException::missingAdapter($contract, $remedy);
             }
         }
+    }
+
+    /**
+     * The deployment gate (`mcp-oauth.enabled`), read when a binding resolves:
+     * off, the package changes nothing in Passport.
+     */
+    private function isMcpOAuthEnabled(): bool
+    {
+        return (bool) $this->app->make(ConfigRepository::class)->get('mcp-oauth.enabled');
     }
 
     /**
@@ -266,7 +284,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
             /** @var array<string, object> $enabledGrantTypes */
             $enabledGrantTypes = $enabledGrantTypesProperty->getValue($authorizationServer);
             // Off, Passport stays the product's: its own grants are left as they are.
-            $isMcpOAuthEnabled = (bool) $this->app->make(ConfigRepository::class)->get('mcp-oauth.enabled');
+            $isMcpOAuthEnabled = $this->isMcpOAuthEnabled();
 
             foreach ($enabledGrantTypes as $grantIdentifier => $grant) {
                 // Password, implicit, client credentials, device: whatever Passport enables.

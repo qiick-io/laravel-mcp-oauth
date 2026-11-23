@@ -82,9 +82,10 @@ final class OneShotAuthCodeRepository extends AuthCodeRepository
         $codeOwner = $authCode->only(['client_id', 'user_id']);
         $grant = $this->grantStore->activeFor($codeOwner['client_id'], (string) $codeOwner['user_id']);
 
+        $this->consumedAuthCodeGrant->record($grant?->id);
+
         if ($grant !== null) {
             OAuthAuthCodeExchange::query()->create(['auth_code_id' => $codeId, 'grant_id' => $grant->id]);
-            $this->consumedAuthCodeGrant->grantId = $grant->id;
         }
     }
 }

@@ -48,8 +48,8 @@ final class BindAccessTokenAction
 
     public function execute(string $accessTokenId, ?string $userIdentifier, string $clientId): void
     {
-        // Only clients the package registered: the product's own Passport clients are not MCP clients.
-        if (! OAuthClientMetadata::query()->where('client_id', $clientId)->exists()) {
+        // Second guard: the endpoints already refuse clients the package did not register.
+        if (! OAuthClientMetadata::isRegisteredClient($clientId)) {
             return;
         }
 
@@ -76,15 +76,17 @@ final class BindAccessTokenAction
     }
 
     /**
-     * A code exchange binds to the grant its code was consumed under; a
-     * refresh binds to the active grant, which S59 already requires.
+     * A code exchange binds to the grant its code was consumed under (none if
+     * no grant was active then); a refresh binds to the active grant, which
+     * S59 already requires.
      */
     private function grantFor(string $clientId, ?string $userIdentifier): ?GrantRecord
     {
-        $consumedGrantId = $this->consumedAuthCodeGrant->take();
+        if ($this->consumedAuthCodeGrant->isRecorded()) {
+            $consumedGrantId = $this->consumedAuthCodeGrant->take();
 
-        if ($consumedGrantId !== null) {
-            return $this->grantStore->find($consumedGrantId);
+            // Consumed with no active grant: nothing may be bound, not even a later consent.
+            return $consumedGrantId === null ? null : $this->grantStore->find($consumedGrantId);
         }
 
         return $userIdentifier === null ? null : $this->grantStore->activeFor($clientId, $userIdentifier);

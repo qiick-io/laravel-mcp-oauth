@@ -16,6 +16,11 @@ use Qiick\McpOAuth\Data\RevocationReason;
  */
 interface GrantStore
 {
+    /**
+     * A fresh read of committed state, from the primary, never cached or
+     * memoised: the package reads a grant again right after binding a token
+     * to catch a concurrent revocation (BindAccessTokenAction).
+     */
     public function find(string $grantId): ?GrantRecord;
 
     /**

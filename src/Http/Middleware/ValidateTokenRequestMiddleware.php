@@ -11,6 +11,7 @@ use Illuminate\Support\Str;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\McpOAuthServer;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
 use Qiick\McpOAuth\Services\TokenErrorResponseService;
 use Symfony\Component\HttpFoundation\Response;
@@ -25,11 +26,11 @@ use Symfony\Component\HttpFoundation\Response;
  * - the RFC 8707 `resource` names this server's MCP endpoint, on the code
  *   exchange and on every refresh (MCP authorization requires it on both);
  * - the client, named in the body or as the HTTP Basic username (never
- *   both, RFC 6749 §2.3), is a UUID and none of its redirect hosts is
- *   blocked.
+ *   both, RFC 6749 §2.3), is a UUID, was registered by the package (its
+ *   `oauth_client_metadata` row, so every token minted here is bound) and
+ *   none of its redirect hosts is blocked.
  *
- * An unknown or revoked client is left to league, which answers the same
- * `invalid_client`. PKCE, the code and the refresh token are league's checks;
+ * A revoked client is left to league, which answers the same `invalid_client`. PKCE, the code and the refresh token are league's checks;
  * {@see TokenErrorResponseService} renders every refusal.
  */
 final class ValidateTokenRequestMiddleware
@@ -74,7 +75,9 @@ final class ValidateTokenRequestMiddleware
         }
 
         // A non-UUID would make PostgreSQL throw on the uuid column.
-        if (! Str::isUuid($clientId) || $this->clientHasBlockedRedirectHost($clientId)) {
+        if (! Str::isUuid($clientId)
+            || ! OAuthClientMetadata::isRegisteredClient($clientId)
+            || $this->clientHasBlockedRedirectHost($clientId)) {
             return $this->invalidClient($request);
         }
 

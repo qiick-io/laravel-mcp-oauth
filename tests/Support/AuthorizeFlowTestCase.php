@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
+use League\OAuth2\Server\AuthorizationServer;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\GrantStore;
@@ -95,6 +96,8 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
         app()->instance(AdminSwitch::class, new FakeAdminSwitch(isEnabled: true));
         app()->forgetInstance(McpOAuthServer::class);
         app()->forgetInstance(RedirectUriGuard::class);
+        // Its repositories depend on the gate (Passport's own while off).
+        app()->forgetInstance(AuthorizationServer::class);
 
         $consentProvider = new FakeConsentProvider($consentOptions ?? self::defaultConsentOptions());
         app()->instance(ConsentProvider::class, $consentProvider);

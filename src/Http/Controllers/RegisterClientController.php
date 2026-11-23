@@ -16,6 +16,7 @@ use Qiick\McpOAuth\Events\McpClientRegistered;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
+use Throwable;
 
 /**
  * Dynamic client registration (RFC 7591 / design §8.1). Extends laravel/mcp's
@@ -69,7 +70,10 @@ final class RegisterClientController extends OAuthRegisterController
                 continue;
             }
 
-            if (! is_string($metadataUri) || ! $this->clientMetadataUriGuard->isAcceptable($metadataUri)) {
+            // https only: a consent page may show these.
+            if (! is_string($metadataUri)
+                || ! str_starts_with(strtolower($metadataUri), 'https://')
+                || ! $this->clientMetadataUriGuard->isAcceptable($metadataUri)) {
                 return response()->json([
                     'error' => 'invalid_client_metadata',
                     'error_description' => $metadataUriField.' is not an allowed URI.',
@@ -99,7 +103,25 @@ final class RegisterClientController extends OAuthRegisterController
             ], 503);
         }
 
-        $response = parent::__invoke($request);
+        // laravel/mcp creates the client, then calls persistClientMetadata(), and
+        // answers 500 when anything throws: one transaction, so a failure never
+        // leaves a client without its metadata row (an unregistered client).
+        $passportConnection = Passport::client()->getConnection();
+        $passportConnection->beginTransaction();
+
+        try {
+            $response = parent::__invoke($request);
+        } catch (Throwable $exception) {
+            $passportConnection->rollBack();
+
+            throw $exception;
+        }
+
+        if ($response->getStatusCode() === 201) {
+            $passportConnection->commit();
+        } else {
+            $passportConnection->rollBack();
+        }
 
         if ($response->getStatusCode() === 201) {
             $this->dispatchRegisteredEvent($response);

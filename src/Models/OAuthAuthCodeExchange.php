@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Qiick\McpOAuth\Traits\UsesPassportConnectionTrait;
 
 /**
  * The grant an authorization code was consumed under, so a code presented
@@ -21,6 +22,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 final class OAuthAuthCodeExchange extends Model
 {
+    use UsesPassportConnectionTrait;
+
     public $timestamps = false;
 
     public $incrementing = false;
@@ -35,15 +38,4 @@ final class OAuthAuthCodeExchange extends Model
      * @var list<string>
      */
     protected $fillable = ['auth_code_id', 'grant_id'];
-
-    /**
-     * Passport's connection, like the code row it is written beside: consuming
-     * the code and recording its grant share one transaction.
-     */
-    public function getConnectionName(): ?string
-    {
-        $passportConnection = config('passport.connection');
-
-        return is_string($passportConnection) ? $passportConnection : null;
-    }
 }
