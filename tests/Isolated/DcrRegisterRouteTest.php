@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
+use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\ClientThrottleKey;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
@@ -226,6 +227,22 @@ it('closes its transaction whatever laravel/mcp answers', function (array $body,
     'registered' => [['client_name' => 'Cursor', 'redirect_uris' => ['https://app.example/callback']], 201],
     'refused by laravel/mcp validation' => [['client_name' => 'Cursor'], 400],
 ]);
+
+it('closes its transaction when laravel/mcp lets an exception out (U2)', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+    // laravel/mcp resolves the ClientRepository outside its own try.
+    app()->bind(ClientRepository::class, static fn () => throw new RuntimeException('client repository unavailable'));
+    $passportConnection = Passport::client()->getConnection();
+    $transactionLevelBefore = $passportConnection->transactionLevel();
+
+    expect(fn () => $this->withoutExceptionHandling()->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+    ]))->toThrow(RuntimeException::class, 'client repository unavailable');
+
+    expect($passportConnection->transactionLevel())->toBe($transactionLevelBefore);
+});
 
 it('accepts an upper-case HTTPS scheme for logo_uri', function (): void {
     enableMcpOAuthWithKeys();

@@ -181,6 +181,26 @@ it('keeps the auth-code exchange on the Passport connection, with the code row i
     expect((new OAuthAuthCodeExchange)->getConnectionName())->toBeNull();
 });
 
+it('creates the tables its Passport-connection models use on passport.connection (B2)', function (string $migrationFile, string $table): void {
+    // Passport on its own database: the package tables its models read beside Passport's rows must live there too.
+    config()->set('database.connections.passport_second', [
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'prefix' => '',
+        'foreign_key_constraints' => true,
+    ]);
+    config()->set('passport.connection', 'passport_second');
+    $migration = require __DIR__.'/../../../database/migrations/'.$migrationFile;
+
+    // The migrator runs a migration on the connection the migration names, as `php artisan migrate` does.
+    (fn (object $migrationToRun) => $this->runMigration($migrationToRun, 'up'))->call(app('migrator'), $migration);
+
+    expect(Schema::connection('passport_second')->hasTable($table))->toBeTrue();
+})->with([
+    'client metadata' => ['2026_11_22_100000_create_oauth_client_metadata_table.php', 'oauth_client_metadata'],
+    'auth-code exchanges' => ['2026_11_23_100300_create_oauth_auth_code_exchanges_table.php', 'oauth_auth_code_exchanges'],
+]);
+
 it('S2: CIMD runtime is off by default while schema columns exist', function (): void {
     expect(config('mcp-oauth.cimd.enabled'))->toBeFalse()
         ->and(Schema::hasColumn('oauth_client_metadata', 'metadata_document_url'))->toBeTrue()
