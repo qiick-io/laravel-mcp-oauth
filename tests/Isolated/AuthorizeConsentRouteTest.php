@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Laravel\Passport\Bridge\User;
 use Laravel\Passport\Client;
@@ -25,6 +26,7 @@ use Qiick\McpOAuth\Models\OAuthConsentRecord;
 use Qiick\McpOAuth\Testing\FakeConsentProvider;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 use Qiick\McpOAuth\Tests\Support\ForeignAuthorizationRequest;
+use Qiick\McpOAuth\Tests\Support\SkippingAuthorizationClient;
 use Qiick\McpOAuth\Tests\Support\TestUser;
 
 uses(AuthorizeFlowTestCase::class);
@@ -960,3 +962,93 @@ it('refuses a denial without a pending request and records nothing', function ()
 
     expect(OAuthConsentRecord::query()->count())->toBe(0);
 });
+
+// --- Review hardening (SF1–SF3, prompt=login) -------------------------------
+
+it('never skips consent, even when the product client model would', function (): void {
+    $this->enableOAuth();
+    Passport::useClientModel(SkippingAuthorizationClient::class);
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+
+    try {
+        $response = $this->actingAs($this->createUser())->get($this->authorizeUrl($client));
+    } finally {
+        Passport::useClientModel(Client::class);
+    }
+
+    $response->assertStatus(500)->assertHeaderMissing('Location');
+
+    expect(DB::table('oauth_auth_codes')->count())->toBe(0)
+        ->and($this->grantStore()->replacedDecisions)->toBe([]);
+});
+
+it('keeps the framing headers on a CSRF failure and an unsupported method', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $props = renderConsentPage($this, $this->createUser(), $client);
+    // Laravel skips CSRF checks while running unit tests; leave testing mode.
+    $this->app['env'] = 'local';
+
+    $csrfFailure = $this->post('/oauth/authorize', validApproval($props['authToken']));
+    $unsupportedMethod = $this->put('/oauth/authorize');
+
+    $csrfFailure->assertStatus(419)->assertHeader('X-Frame-Options', 'DENY');
+    $unsupportedMethod->assertStatus(405)->assertHeader('X-Frame-Options', 'DENY');
+
+    expect($csrfFailure->headers->all('content-security-policy'))->toContain("frame-ancestors 'none'")
+        ->and($unsupportedMethod->headers->all('content-security-policy'))->toContain("frame-ancestors 'none'");
+});
+
+it('keeps the framing headers on the browser 503 page', function (): void {
+    $this->enableOAuth();
+    config()->set('passport.private_key', '');
+    config()->set('passport.public_key', '');
+    $missingKeyDirectory = sys_get_temp_dir().'/mcp-oauth-framing-no-keys-'.uniqid('', true);
+    mkdir($missingKeyDirectory, 0700);
+    Passport::loadKeysFrom($missingKeyDirectory);
+    McpOAuthRoutes::register();
+
+    $response = $this->get($this->authorizeUrl($this->createClient()), ['Accept' => 'text/html']);
+
+    $response->assertStatus(503)->assertHeader('X-Frame-Options', 'DENY');
+
+    expect($response->headers->all('content-security-policy'))->toContain("frame-ancestors 'none'");
+});
+
+it('replaces an iss the registered redirect URI already carries', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $redirectUri = 'https://app.example/callback?iss=https%3A%2F%2Fevil.example&tenant=7';
+    $client = $this->createClient([$redirectUri]);
+
+    $response = $this->actingAs($this->createUser())
+        ->get($this->authorizeUrl($client, ['prompt' => 'none', 'redirect_uri' => $redirectUri]));
+
+    $query = Str::after((string) $response->headers->get('Location'), '?');
+    $issValues = array_values(array_filter(
+        explode('&', $query),
+        static fn (string $pair): bool => urldecode(Str::before($pair, '=')) === 'iss',
+    ));
+
+    expect($issValues)->toBe(['iss='.urlencode('https://mcp-oauth.test')])
+        ->and(queryOfLocation((string) $response->headers->get('Location')))->toMatchArray([
+            'tenant' => '7',
+            'error' => 'consent_required',
+            'state' => 'state-1234',
+        ]);
+});
+
+it('ignores prompt=login, so a link cannot sign the user out', function (string $prompt): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $user = $this->createUser();
+
+    $this->actingAs($user)
+        ->get($this->authorizeUrl($this->createClient(), ['prompt' => $prompt]), INERTIA_HEADERS)
+        ->assertOk()
+        ->assertJsonPath('component', 'oauth/authorize');
+
+    $this->assertAuthenticatedAs($user);
+})->with(['login', 'login consent', 'consent login']);
