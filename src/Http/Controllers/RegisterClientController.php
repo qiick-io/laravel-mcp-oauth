@@ -16,7 +16,6 @@ use Qiick\McpOAuth\Events\McpClientRegistered;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
-use Throwable;
 
 /**
  * Dynamic client registration (RFC 7591 / design §8.1). Extends laravel/mcp's
@@ -108,22 +107,20 @@ final class RegisterClientController extends OAuthRegisterController
         // leaves a client without its metadata row (an unregistered client).
         $passportConnection = Passport::client()->getConnection();
         $passportConnection->beginTransaction();
+        $isRegistered = false;
 
         try {
             $response = parent::__invoke($request);
-        } catch (Throwable $exception) {
-            $passportConnection->rollBack();
-
-            throw $exception;
+            $isRegistered = $response->getStatusCode() === 201;
+        } finally {
+            // Any other answer, or an exception, leaves nothing behind.
+            if (! $isRegistered) {
+                $passportConnection->rollBack();
+            }
         }
 
-        if ($response->getStatusCode() === 201) {
+        if ($isRegistered) {
             $passportConnection->commit();
-        } else {
-            $passportConnection->rollBack();
-        }
-
-        if ($response->getStatusCode() === 201) {
             $this->dispatchRegisteredEvent($response);
         }
 

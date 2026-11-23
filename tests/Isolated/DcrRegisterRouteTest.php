@@ -210,6 +210,34 @@ it('leaves no client behind when its metadata row cannot be written (S1)', funct
     }
 });
 
+it('closes its transaction whatever laravel/mcp answers', function (array $body, int $status): void {
+    Event::fake([McpClientRegistered::class]);
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+    $passportConnection = Passport::client()->getConnection();
+    $transactionLevelBefore = $passportConnection->transactionLevel();
+
+    $this->postJson('/oauth/register', $body)->assertStatus($status);
+
+    expect($passportConnection->transactionLevel())->toBe($transactionLevelBefore);
+    // Only a registration that happened is announced.
+    Event::assertDispatchedTimes(McpClientRegistered::class, $status === 201 ? 1 : 0);
+})->with([
+    'registered' => [['client_name' => 'Cursor', 'redirect_uris' => ['https://app.example/callback']], 201],
+    'refused by laravel/mcp validation' => [['client_name' => 'Cursor'], 400],
+]);
+
+it('accepts an upper-case HTTPS scheme for logo_uri', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $this->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+        'logo_uri' => 'HTTPS://app.example/logo.png',
+    ])->assertCreated();
+});
+
 it('accepts only https for logo_uri and client_uri, which a consent page may show (N5)', function (string $field): void {
     enableMcpOAuthWithKeys();
     McpOAuthRoutes::register();

@@ -16,9 +16,15 @@ namespace Qiick\McpOAuth\Internal;
  */
 final class ConsumedAuthCodeGrant
 {
-    private bool $isRecorded = false;
+    private bool $isRecorded;
 
-    private ?string $grantId = null;
+    private ?string $grantId;
+
+    public function __construct()
+    {
+        $this->isRecorded = false;
+        $this->grantId = null;
+    }
 
     public function record(?string $grantId): void
     {
