@@ -15,6 +15,15 @@ use Illuminate\Support\Facades\Schema;
  */
 return new class extends Migration
 {
+    /**
+     * Passport's connection, like Passport's own migrations: the model reads
+     * and writes this table beside Passport's rows (UsesPassportConnectionTrait).
+     */
+    public function getConnection(): ?string
+    {
+        return $this->connection ?? config('passport.connection');
+    }
+
     public function up(): void
     {
         Schema::create('oauth_auth_code_exchanges', function (Blueprint $table): void {

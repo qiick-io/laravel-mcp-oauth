@@ -105,9 +105,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   code exchange is bound to the grant its code was consumed under.
 - Only MCP clients reach `oauth/authorize` and `oauth/token`: a Passport
   client with no `oauth_client_metadata` row is refused as `invalid_client`,
-  so every token minted there is bound. DCR writes the client and its row in
-  one transaction. With `mcp-oauth.enabled` off, Passport keeps its own
-  auth-code and refresh-token repositories and needs no `GrantStore`.
+  so every token minted there is bound. **Upgrade:** clients registered via
+  DCR before this version have no row and are refused; they must register
+  again (or the product backfills a `registration_source = dcr` row for them).
+  DCR writes the client and its row in one transaction;
+  `oauth_client_metadata` and `oauth_auth_code_exchanges` live on
+  `passport.connection`, like Passport's tables. With `mcp-oauth.enabled` off,
+  Passport keeps its own auth-code and refresh-token repositories and needs no
+  `GrantStore`.
 - Only tokens of MCP clients are bound, and only while `mcp-oauth.enabled` is
   on. An MCP client is one with an `oauth_client_metadata` row, which DCR now
   writes (`registration_source = dcr`, `token_endpoint_auth_method = none`,

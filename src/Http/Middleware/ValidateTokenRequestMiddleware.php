@@ -30,8 +30,9 @@ use Symfony\Component\HttpFoundation\Response;
  *   `oauth_client_metadata` row, so every token minted here is bound) and
  *   none of its redirect hosts is blocked.
  *
- * A revoked client is left to league, which answers the same `invalid_client`. PKCE, the code and the refresh token are league's checks;
- * {@see TokenErrorResponseService} renders every refusal.
+ * A revoked client is left to league, which answers the same
+ * `invalid_client`. PKCE, the code and the refresh token are league's
+ * checks; {@see TokenErrorResponseService} renders every refusal.
  */
 final class ValidateTokenRequestMiddleware
 {
