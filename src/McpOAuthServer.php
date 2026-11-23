@@ -95,13 +95,22 @@ final class McpOAuthServer
         return $this->issuer().'/'.$this->mcpPath();
     }
 
+    /**
+     * RFC 8707 resource check. The path is compared byte for byte; scheme
+     * and host are case-insensitive (RFC 3986 §6.2.2.1), and the MCP spec
+     * says implementations SHOULD accept them in upper case. One trailing
+     * slash names the same resource (RFC 9728 §3.1); more does not.
+     */
     public function acceptsResource(mixed $resource): bool
     {
-        // RFC 8707: the resource is compared exactly, byte for byte; only a
-        // trailing slash is ignored. Case folding would let a distinct path
-        // (`/API/MCP` vs `/api/mcp`) stand for this resource.
-        return is_string($resource)
-            && rtrim($resource, '/') === $this->resourceIdentifier();
+        if (! is_string($resource)) {
+            return false;
+        }
+
+        $withoutTrailingSlash = str_ends_with($resource, '/') ? substr($resource, 0, -1) : $resource;
+
+        return $this->lowercaseSchemeAndAuthority($withoutTrailingSlash)
+            === $this->lowercaseSchemeAndAuthority($this->resourceIdentifier());
     }
 
     public function protectedResourceMetadataUrl(): string
@@ -146,8 +155,24 @@ final class McpOAuthServer
     private function mcpPath(): string
     {
         $path = $this->config->get('mcp-oauth.mcp_path', 'mcp');
+        $trimmedPath = is_string($path) ? trim($path, '/') : '';
 
-        return trim(is_string($path) && $path !== '' ? $path : 'mcp', '/');
+        // An empty or slash-only path would make the resource the bare origin.
+        return $trimmedPath !== '' ? $trimmedPath : 'mcp';
+    }
+
+    /**
+     * Everything before the path: an absolute URI's scheme and authority.
+     * Userinfo is lowered too, which is harmless: the resource identifier
+     * has none, so a candidate carrying one never matches.
+     */
+    private function lowercaseSchemeAndAuthority(string $uri): string
+    {
+        return preg_replace_callback(
+            '#^[^/]*//[^/?\#]*#',
+            static fn (array $schemeAndAuthority): string => strtolower($schemeAndAuthority[0]),
+            $uri,
+        ) ?? $uri;
     }
 
     private function productMcpEnabled(): bool

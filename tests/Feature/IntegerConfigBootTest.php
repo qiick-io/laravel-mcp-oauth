@@ -68,3 +68,22 @@ it('boots with the documented maximum of every integer key', function (): void {
 
     expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())->not->toThrow(InvalidMcpOAuthConfigException::class);
 });
+
+it('rejects a CIMD cache minimum above the cache maximum at boot', function (): void {
+    config([
+        'mcp-oauth.cimd.cache_min_seconds' => '600',
+        'mcp-oauth.cimd.cache_max_seconds' => '60',
+    ]);
+
+    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
+        ->toThrow(InvalidMcpOAuthConfigException::class, 'cimd.cache_min_seconds');
+});
+
+it('boots when the CIMD cache minimum equals the maximum', function (): void {
+    config([
+        'mcp-oauth.cimd.cache_min_seconds' => '600',
+        'mcp-oauth.cimd.cache_max_seconds' => '600',
+    ]);
+
+    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())->not->toThrow(InvalidMcpOAuthConfigException::class);
+});
