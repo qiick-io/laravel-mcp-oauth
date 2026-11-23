@@ -18,7 +18,9 @@ jobs:
   tests:
     name: PHP ${{ matrix.php }} Laravel ${{ matrix.laravel }} ${{ matrix.dependency-version }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The mutate cell runs one pest --mutate per class (about 30 minutes for
+    # 22 classes); the other cells keep the 20-minute brake.
+    timeout-minutes: ${{ (matrix.php == '8.4' && matrix.laravel == '12' && matrix.dependency-version == 'stable') && 45 || 20 }}
     strategy:
       fail-fast: false
       matrix:

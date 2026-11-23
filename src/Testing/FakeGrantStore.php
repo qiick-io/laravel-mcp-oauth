@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace Qiick\McpOAuth\Testing;
 
+use DateTimeImmutable;
 use Illuminate\Contracts\Auth\Authenticatable;
-use LogicException;
+use Illuminate\Support\Str;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\ConsentDecision;
 use Qiick\McpOAuth\Data\GrantRecord;
@@ -46,9 +47,35 @@ final class FakeGrantStore implements GrantStore
         return $matchingGrants === [] ? null : $matchingGrants[array_key_last($matchingGrants)];
     }
 
+    /** @var list<ConsentDecision> decisions passed to replace(), oldest first */
+    public array $replacedDecisions = [];
+
+    /**
+     * Revokes the active grant for (client, user) with RevocationReason::Reconsent,
+     * then stores a new active grant built from the decision.
+     */
     public function replace(ConsentDecision $decision): GrantRecord
     {
-        throw new LogicException('FakeGrantStore::replace() is not used by family-revoke tests.');
+        $this->replacedDecisions[] = $decision;
+        $earlierGrant = $this->activeFor($decision->clientId, $decision->userIdentifier);
+
+        if ($earlierGrant !== null) {
+            $this->revoke($earlierGrant->id, $decision->userIdentifier, RevocationReason::Reconsent);
+        }
+
+        $grant = new GrantRecord(
+            id: (string) Str::uuid7(),
+            clientId: $decision->clientId,
+            userIdentifier: $decision->userIdentifier,
+            revoked: false,
+            scopes: $decision->scopes,
+            authorizedAt: new DateTimeImmutable,
+            lastUsedAt: null,
+            display: ['role' => $decision->role, 'resources' => $decision->resources],
+        );
+        $this->grantsById[$grant->id] = $grant;
+
+        return $grant;
     }
 
     public function revoke(string $grantId, ?string $actorIdentifier, RevocationReason $reason): void

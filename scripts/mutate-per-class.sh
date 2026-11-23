@@ -9,15 +9,28 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 CLASSES=(
+  'Qiick\McpOAuth\Actions\ApproveConsentAction'
+  'Qiick\McpOAuth\Actions\DenyConsentAction'
+  'Qiick\McpOAuth\Actions\RecordConsentDecisionAction'
   'Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository'
   'Qiick\McpOAuth\ClientMetadataUriGuard'
   'Qiick\McpOAuth\ClientThrottleKey'
+  'Qiick\McpOAuth\Http\Controllers\ApproveClientController'
+  'Qiick\McpOAuth\Http\Controllers\AuthorizeClientController'
+  'Qiick\McpOAuth\Http\Controllers\DenyClientController'
   'Qiick\McpOAuth\Http\Controllers\RegisterClientController'
   'Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware'
+  'Qiick\McpOAuth\Http\Middleware\ValidateAuthorizationRequestMiddleware'
+  'Qiick\McpOAuth\Internal\PassportUserIdentifier'
   'Qiick\McpOAuth\McpOAuthReadiness'
   'Qiick\McpOAuth\McpOAuthRoutes'
   'Qiick\McpOAuth\McpOAuthServer'
   'Qiick\McpOAuth\RedirectUriGuard'
+  'Qiick\McpOAuth\Services\AuthorizationResponseService'
+  'Qiick\McpOAuth\Services\ConsentDecisionService'
+  'Qiick\McpOAuth\Services\ConsentPageService'
+  'Qiick\McpOAuth\Services\PendingAuthorizationRequestService'
+  'Qiick\McpOAuth\Views\InertiaConsentView'
 )
 
 MIN="${MUTATE_MIN:-95}"

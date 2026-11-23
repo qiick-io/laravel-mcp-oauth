@@ -16,6 +16,9 @@ final readonly class ConsentOptions
      * @param  list<ConsentOption>  $roles
      * @param  list<ConsentOption>  $resources
      * @param  list<string>  $notices
+     * @param  list<ConsentOption>  $organisations  tenants the grant may belong
+     *                                              to; with more than one the
+     *                                              user must pick one (instituta)
      */
     public function __construct(
         public array $scopes,
@@ -24,5 +27,6 @@ final readonly class ConsentOptions
         public bool $resourcesRequired,
         public bool $canGrant,
         public array $notices = [],
+        public array $organisations = [],
     ) {}
 }

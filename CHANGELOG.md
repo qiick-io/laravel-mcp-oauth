@@ -42,6 +42,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Authorization endpoint and consent (design §8.3): `GET|POST|DELETE
+  oauth/authorize` (`passport.authorizations.*`) inside the off-gate (404
+  identical to a missing route, HTML 503 for a browser when keys are missing),
+  with `web`, `throttle:mcp-oauth-authorize` and `frame-ancestors 'none'` /
+  `X-Frame-Options: DENY`; approve and deny also need `auth` and `verified`,
+  and CSRF comes from `web`. `ValidateAuthorizationRequestMiddleware` requires
+  `response_type=code`, PKCE `S256` with a challenge, the exact `resource`, an
+  active unblocked client and a `redirect_uri` exactly equal to a registered
+  one under `RedirectUriGuard` (the port counts on loopback too); every refusal
+  is a JSON 400, never a redirect (RFC 6749 §4.1.2.1). Foreign wire scopes are
+  dropped. Consent is asked every time. Approve and deny need the pending
+  request of the signed-in user and its `auth_token` (else 403) and write one
+  `oauth_consent_records` row each (`denied` kept 90 days); approve judges the
+  posted scopes, role, resources and organisation against
+  `ConsentProvider::options()`, then `validate()`, replaces the grant, revokes
+  the earlier codes and tokens of that client and user, and dispatches
+  `McpConsentApproved`; deny dispatches `McpConsentDenied`. Every redirect to
+  the client carries `state` and `iss` (RFC 9207); an Inertia visit leaves
+  with `X-Inertia-Location`. `ConsentOptions::$organisations` (instituta: the
+  user picks one when they have several). Default `InertiaConsentView` renders
+  `oauth/authorize` when Inertia is installed; props and form fields are in
+  `docs/consent-page.md`. `FakeConsentProvider`, and `FakeGrantStore::replace()`.
+
 - `mcp_auth_failures_per_minute` kept as a raw env string and validated with
   `BoundedPositiveInt` at boot (same digit-only fail-closed path as TTLs /
   rate caps). Route `throttle:mcp-oauth-*` middleware is documented as a
