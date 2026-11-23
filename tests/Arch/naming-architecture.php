@@ -50,6 +50,7 @@ return [
             'Qiick\McpOAuth\Events\McpConsentDenied',
             'Qiick\McpOAuth\Events\McpGrantRevoked',
             'Qiick\McpOAuth\Events\McpRefreshTokenReused',
+            'Qiick\McpOAuth\Events\McpTokenRevoked',
             'Qiick\McpOAuth\Events\McpClientBlocked',
             'Qiick\McpOAuth\Events\McpRedirectHostBlocked',
             'Qiick\McpOAuth\Events\McpRedirectHostUnblocked',

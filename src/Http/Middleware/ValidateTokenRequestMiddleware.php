@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth\Http\Middleware;
 
 use Closure;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
@@ -79,7 +78,7 @@ final class ValidateTokenRequestMiddleware
         if (! Str::isUuid($clientId)
             || ! OAuthClientMetadata::isRegisteredClient($clientId)
             || $this->clientHasBlockedRedirectHost($clientId)) {
-            return $this->invalidClient($request);
+            return $this->tokenErrorResponses->invalidClient($request);
         }
 
         return $next($request);
@@ -94,20 +93,5 @@ final class ValidateTokenRequestMiddleware
             ->first();
 
         return $client !== null && $this->redirectUriGuard->clientHasBlockedRedirectHost($client);
-    }
-
-    /**
-     * RFC 6749 §5.2: 401, with a challenge in the scheme the client used.
-     */
-    private function invalidClient(Request $request): JsonResponse
-    {
-        $authorization = $request->headers->get('Authorization');
-
-        // League's rule, so this refusal cannot be told apart from league's own.
-        $headers = $authorization === null
-            ? []
-            : ['WWW-Authenticate' => (str_starts_with($authorization, 'Bearer') ? 'Bearer' : 'Basic').' realm="OAuth"'];
-
-        return $this->tokenErrorResponses->refusal('invalid_client', 401, $headers);
     }
 }

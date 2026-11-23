@@ -25,10 +25,13 @@ use Laravel\Passport\Passport;
 use Laravel\Passport\Scope;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Grant\AuthCodeGrant;
+use League\OAuth2\Server\ResourceServer;
 use Qiick\McpOAuth\Actions\BindAccessTokenAction;
 use Qiick\McpOAuth\Actions\RevokeAuthCodeTokensAction;
+use Qiick\McpOAuth\Actions\RevokeTokenAction;
 use Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository;
 use Qiick\McpOAuth\Bridge\OneShotAuthCodeRepository;
+use Qiick\McpOAuth\Console\PruneAuthCodeExchangesCommand;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\ConsentView;
@@ -120,6 +123,15 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->app->bind(PassportAuthCodeRepository::class, function (Application $app): PassportAuthCodeRepository {
             return $this->isMcpOAuthEnabled() ? $app->make(OneShotAuthCodeRepository::class) : new PassportAuthCodeRepository;
         });
+        $this->app->bind(RevokeTokenAction::class, static function (Application $app): RevokeTokenAction {
+            return new RevokeTokenAction(
+                $app->make(GrantStore::class),
+                $app->make(ResourceServer::class),
+                $app->make(ConfigRepository::class),
+                $app->make(Dispatcher::class),
+                Passport::tokenEncryptionKey($app->make(Encrypter::class)),
+            );
+        });
         $this->app->bind(RevokeAuthCodeTokensAction::class, static function (Application $app): RevokeAuthCodeTokensAction {
             return new RevokeAuthCodeTokensAction(
                 $app->make(GrantStore::class),
@@ -172,6 +184,8 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->assertAdaptersBoundWhileEnabled();
 
         if ($this->app->runningInConsole()) {
+            $this->commands([PruneAuthCodeExchangesCommand::class]);
+
             $this->publishes([
                 __DIR__.'/../config/mcp-oauth.php' => config_path('mcp-oauth.php'),
             ], 'mcp-oauth-config');

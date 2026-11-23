@@ -234,8 +234,9 @@ it('requires the secret of a confidential client', function (array $credentials,
     $this->enableOAuth();
     McpOAuthRoutes::register();
     $client = $this->createClient();
-    $client->forceFill(['secret' => Hash::make('s3cret')])->save();
     $tokens = tokensFor($this, $client);
+    // Confidential from now on; the exchange above ran as a public client.
+    $client->forceFill(['secret' => Hash::make('s3cret')])->save();
     $parameters = ['token' => $tokens['refresh_token']];
     $headers = [];
 

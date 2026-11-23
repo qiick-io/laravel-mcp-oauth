@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth\Services;
 
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use League\OAuth2\Server\Exception\OAuthServerException;
 
 /**
@@ -41,6 +42,21 @@ final class TokenErrorResponseService
     public function refusal(string $error, int $status = 400, array $headers = []): JsonResponse
     {
         return $this->response($error, $status, $headers);
+    }
+
+    /**
+     * RFC 6749 §5.2: 401, with a challenge in the scheme the client used when
+     * it sent an Authorization header (league's rule, so a package refusal
+     * cannot be told apart from league's own).
+     */
+    public function invalidClient(Request $request): JsonResponse
+    {
+        $authorization = $request->headers->get('Authorization');
+        $headers = $authorization === null
+            ? []
+            : ['WWW-Authenticate' => (str_starts_with($authorization, 'Bearer') ? 'Bearer' : 'Basic').' realm="OAuth"'];
+
+        return $this->refusal('invalid_client', 401, $headers);
     }
 
     /**
