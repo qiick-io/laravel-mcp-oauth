@@ -158,12 +158,12 @@ final class RedirectUriGuard
         }
 
         foreach ($this->blockedHosts->all() as $blockedHost) {
-            if ($blockedHost === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
+            if ($blockedHost->host === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
                 continue;
             }
 
             try {
-                $normalizedBlocked = $this->normalizeHost($blockedHost);
+                $normalizedBlocked = $this->normalizeHost($blockedHost->host);
             } catch (InvalidArgumentException) {
                 continue;
             }
@@ -172,7 +172,7 @@ final class RedirectUriGuard
                 return true;
             }
 
-            if (str_ends_with($normalizedHost, '.'.$normalizedBlocked)) {
+            if ($blockedHost->shouldMatchSubdomains && str_ends_with($normalizedHost, '.'.$normalizedBlocked)) {
                 return true;
             }
         }

@@ -78,7 +78,7 @@ is nullable with **no** database default (registration writes the value).
 | `public_id` | uuid | no | UUID v7 | unique (wire) |
 | `host` | string | no | — | unique (ASCII) |
 | `host_original` | string(1024) | yes | null | — |
-| `match_mode` | string(24) | no | `host_and_subdomains` | — |
+| `match_mode` | string(24) | no | `host_and_subdomains` | — (`exact` blocks the host only; any other value also blocks subdomains) |
 | `reason` | string(512) | yes | null | — |
 | `expires_at` | dateTime | yes | null | index |
 | `metadata` | json | yes | null | — |

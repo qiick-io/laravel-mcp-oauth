@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Every integer config key is a raw env string validated at boot:
+  `registrations_global_cap`, `unused_client_retention_hours`,
+  `revoked_retention_days` and the `cimd.*` numbers no longer go through
+  `(int) env()`, which read `1e3` as 1000 and `abc` as 0. Boot fails closed
+  outside 1..the documented maximum (new maxima for unused-client retention
+  and CIMD). A PHP int still works; an app that published the config file
+  drops the `(int)` casts there to get the stricter check.
+- A blocked host with `match_mode = exact` blocks the host only; until now
+  it blocked its subdomains too. Any other mode, a typo included, still
+  blocks the subdomains.
+- The DCR global cap counts `Passport::client()`, the model Passport writes
+  to, so a product's `Passport::useClientModel()` no longer bypasses it.
+- `McpOAuthServer::acceptsResource()` compares the resource exactly (RFC 8707);
+  only a trailing slash is ignored. Case is no longer folded, so
+  `https://app.example/API/MCP` and `https://app.example/api/mcp` are
+  different resources.
+
 - `ClientMetadataUriGuard` starts from `RedirectUriGuard::parseCanonical()`
   (now public) and refuses internal names (single-label, `localhost`,
   `*.local`, `*.internal`), IPv6 literals embedding IPv4 (mapped, translated,
@@ -35,8 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `https:/…`, …) and canonicalises IPv6 / unmaps `::ffff:` so alternate
   spellings hit the same block; non-dotted-decimal IPv4 forms are refused.
 - `McpOAuthServer`: a throwing `AdminSwitch` counts as OFF (S11); `isReady`
-  requires an absolute `app.url`; `mcp_path` trailing slashes normalised;
-  resource host comparison is case-insensitive.
+  requires an absolute `app.url`; `mcp_path` trailing slashes normalised.
 - `ClientThrottleKey` excludes `::/127` from IPv4-compatible unmapping and
   unmaps `::ffff:0:a.b.c.d` plus `64:ff9b:1::/48`.
 

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Laravel\Passport\Client;
+use Qiick\McpOAuth\Data\BlockedRedirectHostData;
 use Qiick\McpOAuth\Internal\BlockedHostCatalog;
 use Qiick\McpOAuth\RedirectUriGuard;
 
@@ -114,4 +115,18 @@ it('refuses registration URIs that cannot be parsed or lack a scheme', function 
         ->and($guard->isAcceptableForRegistration('/relative'))->toBeFalse()
         ->and($guard->isAllowedScheme('not a uri'))->toBeFalse()
         ->and($guard->isAllowedScheme('http://203.0.113.10/cb'))->toBeFalse();
+});
+
+it('blocks only the host itself for an exact-mode entry, and subdomains for the default mode', function (): void {
+    $guard = new RedirectUriGuard(new BlockedHostCatalog([
+        new BlockedRedirectHostData('exact.test', shouldMatchSubdomains: false),
+        'wide.test',
+    ]));
+
+    expect($guard->isHostBlocked('exact.test'))->toBeTrue()
+        ->and($guard->isHostBlocked('EXACT.test.'))->toBeTrue()
+        ->and($guard->isHostBlocked('app.exact.test'))->toBeFalse()
+        ->and($guard->isHostBlocked('wide.test'))->toBeTrue()
+        ->and($guard->isHostBlocked('app.wide.test'))->toBeTrue()
+        ->and($guard->isHostBlocked('notwide.test'))->toBeFalse();
 });

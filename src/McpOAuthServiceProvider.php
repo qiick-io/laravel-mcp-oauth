@@ -131,7 +131,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
             return $this->app->make(ConsentPageService::class)->render($parameters);
         });
         $this->configureRateLimiters();
-        $this->validateMcpAuthFailuresPerMinute();
+        $this->validateRemainingIntegerConfig();
 
         if ($this->app->runningInConsole()) {
             $this->publishes([
@@ -277,16 +277,30 @@ final class McpOAuthServiceProvider extends ServiceProvider
     }
 
     /**
-     * Fail-closed digit-only check for the /mcp auth-failure cap. The named
-     * limiter itself lands with the Bearer door; validating early keeps a
-     * hostile env from shipping until then.
+     * Fail-closed check of the integer keys read later than boot (the
+     * /mcp auth-failure limiter, the DCR cap, retention and CIMD). Their
+     * features land or run on request or schedule; validating here keeps a
+     * hostile or mistyped env from shipping until the first request finds it.
      */
-    private function validateMcpAuthFailuresPerMinute(): void
+    private function validateRemainingIntegerConfig(): void
     {
         /** @var ConfigRepository $config */
         $config = $this->app->make(ConfigRepository::class);
 
-        $this->rateLimitPerMinute($config, 'mcp_auth_failures_per_minute');
+        $maximumsByConfigKey = [
+            'mcp_auth_failures_per_minute' => BoundedPositiveInt::RATE_LIMIT_PER_MINUTE_MAX,
+            'registrations_global_cap' => BoundedPositiveInt::REGISTRATIONS_GLOBAL_CAP_MAX,
+            'unused_client_retention_hours' => BoundedPositiveInt::UNUSED_CLIENT_RETENTION_HOURS_MAX,
+            'revoked_retention_days' => BoundedPositiveInt::REVOKED_RETENTION_DAYS_MAX,
+            'cimd.max_document_bytes' => BoundedPositiveInt::CIMD_MAX_DOCUMENT_BYTES_MAX,
+            'cimd.timeout_seconds' => BoundedPositiveInt::CIMD_TIMEOUT_SECONDS_MAX,
+            'cimd.cache_min_seconds' => BoundedPositiveInt::CIMD_CACHE_SECONDS_MAX,
+            'cimd.cache_max_seconds' => BoundedPositiveInt::CIMD_CACHE_SECONDS_MAX,
+        ];
+
+        foreach ($maximumsByConfigKey as $configKey => $maximum) {
+            BoundedPositiveInt::require($config->get('mcp-oauth.'.$configKey), $configKey, $maximum);
+        }
     }
 
     /**

@@ -7,7 +7,7 @@ namespace Qiick\McpOAuth\Internal;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 
 /**
- * Fail-closed positive integers for mcp-oauth TTL keys (design §6).
+ * Fail-closed positive integers for every mcp-oauth integer key (design §6).
  *
  * Documented maxima keep a typo’d env from issuing near-permanent tokens
  * or over-long auth codes. Invalid values throw; they are never floored
@@ -34,6 +34,18 @@ final class BoundedPositiveInt
 
     /** Ten years: retention beyond that is a legal hold, not a config value. */
     public const int REVOKED_RETENTION_DAYS_MAX = 3_650;
+
+    /** One year: a registered client nobody uses is purged well before that. */
+    public const int UNUSED_CLIENT_RETENTION_HOURS_MAX = 8_760;
+
+    /** 1 MiB: a client metadata document is a few hundred bytes of JSON. */
+    public const int CIMD_MAX_DOCUMENT_BYTES_MAX = 1_048_576;
+
+    /** A metadata fetch runs inside the authorize request, so it stays short. */
+    public const int CIMD_TIMEOUT_SECONDS_MAX = 30;
+
+    /** One week: a cached metadata document must not outlive a client's key rotation for long. */
+    public const int CIMD_CACHE_SECONDS_MAX = 604_800;
 
     /**
      * Accepts a PHP int in range, or a string of ASCII digits only (no sign,
