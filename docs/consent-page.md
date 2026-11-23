@@ -80,6 +80,18 @@ Both actions post to the same URL, `/oauth/authorize` (route names
 `web`, `auth` and `verified`. With Inertia, the XSRF cookie covers CSRF; a
 plain HTML form must include `_token`.
 
+What the package does not decide, and the product must:
+
+- **Deactivated accounts.** The package checks only `auth` and `verified`.
+  A user who may sign in but must not connect apps gets `canGrant: false` from
+  `ConsentProvider::options()`, or is stopped by middleware the product appends
+  to its `web` group (the same goes for enforcing two-factor enrolment).
+- **Email verification.** `verified` sends an unverified browser approval to
+  the `verification.notice` route; without that route the request is a 500.
+  A JSON or Inertia-less API client gets a 403 instead.
+- **`prompt`.** `none` and `consent` are honoured; `login` is ignored, because
+  Passport would sign the user out on a plain GET.
+
 Approve, `POST /oauth/authorize`:
 
 | Field | Type | Rule |

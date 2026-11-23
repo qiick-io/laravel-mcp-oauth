@@ -46,9 +46,11 @@ final class EnsureMcpOAuthEnabledMiddleware
 
             // A browser on the consent flow gets a page, not JSON (design §4.2).
             if ($request->routeIs('passport.authorizations.*') && ! $request->expectsJson()) {
+                // This group runs before the route's framing middleware, so the page sets its own.
                 return response(
                     '<!doctype html><title>Sign-in unavailable</title><p>Connecting apps is temporarily unavailable. Try again later.</p>',
                     503,
+                    ['X-Frame-Options' => 'DENY', 'Content-Security-Policy' => "frame-ancestors 'none'"],
                 );
             }
 

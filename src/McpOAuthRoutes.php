@@ -60,15 +60,18 @@ final class McpOAuthRoutes
      * off-gate, so `web` (session, CSRF) and the framing headers only run once
      * OAuth is on: off, the path answers exactly like a missing route.
      * AddAuthorizationFramingHeaders sets `X-Frame-Options: DENY` and
-     * `frame-ancestors 'none'` on the `passport.authorizations.*` names.
+     * `frame-ancestors 'none'` on the `passport.authorizations.*` names,
+     * error responses included.
      */
     private static function registerAuthorizationRoutes(): void
     {
-        Route::middleware(['web', AddAuthorizationFramingHeaders::class, 'throttle:mcp-oauth-authorize'])
+        // Framing outside `web`, so a CSRF 419 thrown inside `web` carries it too.
+        Route::middleware([AddAuthorizationFramingHeaders::class, 'web', 'throttle:mcp-oauth-authorize'])
             ->group(static function (): void {
+                // Named under passport.authorizations.* so the framing middleware covers it.
                 Route::match(['PUT', 'PATCH', 'OPTIONS'], 'oauth/authorize', static function (): never {
                     throw new MethodNotAllowedHttpException(['GET', 'HEAD', 'POST', 'DELETE']);
-                });
+                })->name('passport.authorizations.unsupported-method');
 
                 Route::get('oauth/authorize', [AuthorizeClientController::class, 'authorize'])
                     ->middleware(ValidateAuthorizationRequestMiddleware::class)

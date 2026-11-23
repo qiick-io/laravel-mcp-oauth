@@ -54,7 +54,7 @@ final class AuthorizationResponseService
     }
 
     /**
-     * Adds `iss` to a redirect to the client and adapts it to Inertia; any
+     * Sets `iss` on a redirect to the client and adapts it to Inertia; any
      * other response is returned as is.
      */
     public function forClient(Request $request, Response $response): Response
@@ -66,7 +66,7 @@ final class AuthorizationResponseService
             return $response;
         }
 
-        $location .= (str_contains($location, '?') ? '&' : '?').http_build_query(['iss' => $this->mcpOAuthServer->issuer()]);
+        $location = $this->withIssuer($location);
         $response->headers->set('Location', $location);
 
         if ($request->header('X-Inertia') === null) {
@@ -74,5 +74,23 @@ final class AuthorizationResponseService
         }
 
         return new IlluminateResponse('', 409, ['X-Inertia-Location' => $location]);
+    }
+
+    /**
+     * RFC 9207 §2.4: the client checks one `iss`. A registered redirect URI
+     * may already carry an `iss` of its own (registered URIs have no
+     * fragment), so every existing one is removed before ours is added.
+     */
+    private function withIssuer(string $location): string
+    {
+        [$locationWithoutQuery, $query] = explode('?', $location, 2) + [1 => ''];
+
+        $keptPairs = array_filter(
+            explode('&', $query),
+            static fn (string $pair): bool => $pair !== '' && urldecode(explode('=', $pair, 2)[0]) !== 'iss',
+        );
+        $keptPairs[] = http_build_query(['iss' => $this->mcpOAuthServer->issuer()]);
+
+        return $locationWithoutQuery.'?'.implode('&', $keptPairs);
     }
 }

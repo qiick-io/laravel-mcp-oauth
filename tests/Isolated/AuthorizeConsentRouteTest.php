@@ -988,11 +988,11 @@ it('keeps the framing headers on a CSRF failure and an unsupported method', func
     McpOAuthRoutes::register();
     $client = $this->createClient();
     $props = renderConsentPage($this, $this->createUser(), $client);
+    $unsupportedMethod = $this->put('/oauth/authorize');
     // Laravel skips CSRF checks while running unit tests; leave testing mode.
     $this->app['env'] = 'local';
 
     $csrfFailure = $this->post('/oauth/authorize', validApproval($props['authToken']));
-    $unsupportedMethod = $this->put('/oauth/authorize');
 
     $csrfFailure->assertStatus(419)->assertHeader('X-Frame-Options', 'DENY');
     $unsupportedMethod->assertStatus(405)->assertHeader('X-Frame-Options', 'DENY');

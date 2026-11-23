@@ -20,7 +20,8 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * - `response_type=code`, a `code_challenge` and `code_challenge_method=S256`
  *   (OAuth 2.1; `plain` and missing PKCE are refused even for confidential
- *   clients, which league would let through);
+ *   clients, which league would let through); the challenge format
+ *   (RFC 7636 §4.2) is league's check;
  * - the RFC 8707 `resource` names this server's MCP endpoint;
  * - the client exists, is not revoked and none of its redirect hosts is
  *   blocked;
@@ -28,7 +29,9 @@ use Symfony\Component\HttpFoundation\Response;
  *   {@see RedirectUriGuard::areExactlyEqual()}, or is omitted while the client
  *   has exactly one. League would accept another port on a loopback URI
  *   (RFC 8252 §7.3); here the port must match too, because DCR clients
- *   register the exact URI they listen on.
+ *   register the exact URI they listen on. League then compares the raw
+ *   strings, so a host-case or empty-query variant that passes here is still
+ *   refused there (as `invalid_client`, without a redirect).
  *
  * Every refusal is a JSON 400 and never a redirect: the redirect URI is not
  * trusted yet, and RFC 6749 §4.1.2.1 forbids redirecting to an unvalidated
@@ -57,8 +60,26 @@ final class ValidateAuthorizationRequestMiddleware
         // The token only ever carries `mcp:use`, Passport's default scope, so the
         // requested scope is dropped instead of echoed or refused (S20).
         $request->query->remove('scope');
+        $this->dropPromptLogin($request);
 
         return $next($request);
+    }
+
+    /**
+     * Passport answers `prompt=login` by signing the user out with a GET, and
+     * anyone can register a client, so the link would be a logout CSRF. MCP
+     * clients have no use for it; `none` and `consent` keep working.
+     */
+    private function dropPromptLogin(Request $request): void
+    {
+        $prompt = $request->query('prompt');
+
+        if (! is_string($prompt)) {
+            return;
+        }
+
+        $promptValues = array_diff(explode(' ', $prompt), ['login']);
+        $request->query->set('prompt', implode(' ', $promptValues));
     }
 
     private function refusalFor(Request $request): ?JsonResponse
