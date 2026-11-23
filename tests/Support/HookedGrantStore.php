@@ -29,6 +29,9 @@ final class HookedGrantStore implements GrantStore
     /** Runs once, after the next find() has read the grant and before it returns it. */
     public ?Closure $afterNextFind = null;
 
+    /** When true, find() answers as if the product had deleted the grant. */
+    public bool $isGrantGone = false;
+
     /** @var Closure(string): void|null runs before every revoke(), with the grant id */
     public ?Closure $beforeRevoke = null;
 
@@ -45,7 +48,7 @@ final class HookedGrantStore implements GrantStore
             $beforeHook();
         }
 
-        $grant = $this->grantStore->find($grantId);
+        $grant = $this->isGrantGone ? null : $this->grantStore->find($grantId);
         $afterHook = $this->afterNextFind;
         $this->afterNextFind = null;
 

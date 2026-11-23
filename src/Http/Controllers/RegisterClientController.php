@@ -9,10 +9,12 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Laravel\Mcp\Server\Http\Controllers\OAuthRegisterController;
+use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\ClientMetadataUriGuard;
 use Qiick\McpOAuth\Events\McpClientRegistered;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
 
 /**
@@ -104,6 +106,37 @@ final class RegisterClientController extends OAuthRegisterController
         }
 
         return $response;
+    }
+
+    /**
+     * Records the client in `oauth_client_metadata`: that row is what makes a
+     * Passport client an MCP client (BindAccessTokenAction binds only those
+     * tokens). `token_endpoint_auth_method` is written explicitly (standards
+     * review Resolved #2): laravel/mcp registers public clients only. The
+     * `logo_uri` and `client_uri` laravel/mcp validated are kept here, never
+     * on Passport's table, and returned in the registration response
+     * (RFC 7591 §3.2.1).
+     *
+     * @param  Client  $client  laravel/mcp passes the Passport client it just created
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    protected function persistClientMetadata(mixed $client, array $validated): array
+    {
+        $registeredUris = array_filter(
+            ['logo_uri' => $validated['logo_uri'] ?? null, 'client_uri' => $validated['client_uri'] ?? null],
+            static fn (mixed $uri): bool => $uri !== null,
+        );
+
+        OAuthClientMetadata::query()->create([
+            'client_id' => $client->getKey(),
+            'registration_source' => 'dcr',
+            'token_endpoint_auth_method' => 'none',
+            'client_id_issued_at' => now(),
+            ...$registeredUris,
+        ]);
+
+        return $registeredUris;
     }
 
     protected function isValidRedirectUri(string $value): bool

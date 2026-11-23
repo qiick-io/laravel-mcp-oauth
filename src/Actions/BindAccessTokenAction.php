@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth\Actions;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
-use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Internal\ConsumedAuthCodeGrant;
 use Qiick\McpOAuth\Internal\GrantBindingColumn;
 use Qiick\McpOAuth\McpOAuthServer;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 
 /**
  * Binds a freshly issued access token to the grant it acts under and to its
@@ -19,9 +19,9 @@ use Qiick\McpOAuth\McpOAuthServer;
  * AccessTokenCreated, for the code exchange and every refresh alike, so the
  * token is bound before the response reaches the client.
  *
- * Only tokens of MCP clients (allowed the `authorization_code` grant, as
- * every DCR client is) are bound; the product's own personal access tokens
- * are left alone. The grant is the one the code was consumed under for a
+ * Only tokens of MCP clients (those with an `oauth_client_metadata` row, which
+ * DCR writes) are bound; the product's own Passport clients, personal access
+ * or not, are left alone. The grant is the one the code was consumed under for a
  * code exchange ({@see ConsumedAuthCodeGrant}), else
  * {@see GrantStore::activeFor()} of the token's client and user; its
  * {@see GrantStore::bindingKey()} goes into the configured binding
@@ -30,8 +30,12 @@ use Qiick\McpOAuth\McpOAuthServer;
  * `/mcp`, and `/mcp` refuses a token that names anything else.
  *
  * A token with no user or no active grant (revoked between consent and the
- * exchange, S54, or by a concurrent replay of its code) is revoked at once: it could never authorize a call, and
- * FamilyRevokingRefreshTokenRepository refuses its refresh token (S59).
+ * exchange, S54, or by a concurrent replay of its code) is revoked at once:
+ * it could never authorize a call, and FamilyRevokingRefreshTokenRepository
+ * refuses its refresh token (S59). The grant sits behind the product's
+ * GrantStore, so no lock can be held on it; the order (bind, then read the
+ * grant again) is what closes the race with a replay, because the replay
+ * revokes the grant before it selects the grant's tokens.
  */
 final class BindAccessTokenAction
 {
@@ -44,11 +48,8 @@ final class BindAccessTokenAction
 
     public function execute(string $accessTokenId, ?string $userIdentifier, string $clientId): void
     {
-        /** @var Client|null $client */
-        $client = Passport::client()->newQuery()->find($clientId);
-
-        // Not an MCP client (a personal access or client credentials client of the product).
-        if ($client === null || ! $client->hasGrantType('authorization_code')) {
+        // Only clients the package registered: the product's own Passport clients are not MCP clients.
+        if (! OAuthClientMetadata::query()->where('client_id', $clientId)->exists()) {
             return;
         }
 
@@ -65,6 +66,13 @@ final class BindAccessTokenAction
             GrantBindingColumn::from($this->config) => $this->grantStore->bindingKey($grant),
             'audience' => $this->mcpOAuthServer->resourceIdentifier(),
         ]);
+
+        // Bound first, then the grant read again: a concurrent replay of the
+        // code either selects this token by its binding, or has already
+        // revoked the grant, which this read then sees.
+        if ($this->grantStore->find($grant->id)?->revoked !== false) {
+            $accessTokenQuery->update(['revoked' => true]);
+        }
     }
 
     /**

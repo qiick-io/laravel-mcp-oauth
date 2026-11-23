@@ -159,7 +159,10 @@ it('registers a public client through the redirect URI guard', function (): void
 
     $response->assertCreated()
         ->assertJsonPath('token_endpoint_auth_method', 'none')
-        ->assertJsonPath('redirect_uris.0', 'https://app.example/callback');
+        ->assertJsonPath('redirect_uris.0', 'https://app.example/callback')
+        // Metadata the client did not send is not answered as null.
+        ->assertJsonMissingPath('logo_uri')
+        ->assertJsonMissingPath('client_uri');
 
     expect(Client::query()->where('revoked', false)->count())->toBe(1);
 
@@ -172,15 +175,22 @@ it('records every registered client as an MCP client in oauth_client_metadata', 
     enableMcpOAuthWithKeys();
     McpOAuthRoutes::register();
 
-    $clientId = $this->postJson('/oauth/register', [
+    $response = $this->postJson('/oauth/register', [
         'client_name' => 'Cursor',
         'redirect_uris' => ['https://app.example/callback'],
-    ])->assertCreated()->json('client_id');
+        'logo_uri' => 'https://app.example/logo.png',
+        'client_uri' => 'https://app.example',
+    ])->assertCreated()
+        ->assertJsonPath('logo_uri', 'https://app.example/logo.png')
+        ->assertJsonPath('client_uri', 'https://app.example');
 
-    $metadata = OAuthClientMetadata::query()->where('client_id', $clientId)->sole();
+    $metadata = OAuthClientMetadata::query()->where('client_id', $response->json('client_id'))->sole();
 
     expect($metadata->registration_source)->toBe('dcr')
-        ->and($metadata->token_endpoint_auth_method)->toBe('none');
+        ->and($metadata->token_endpoint_auth_method)->toBe('none')
+        ->and($metadata->client_id_issued_at)->not->toBeNull()
+        ->and($metadata->logo_uri)->toBe('https://app.example/logo.png')
+        ->and($metadata->client_uri)->toBe('https://app.example');
 });
 
 it('refuses a fragment redirect_uri via the guard before Passport create (B3)', function (): void {

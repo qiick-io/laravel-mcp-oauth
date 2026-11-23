@@ -9,7 +9,10 @@ use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Grant\AuthCodeGrant;
 use League\OAuth2\Server\Grant\ClientCredentialsGrant;
 use League\OAuth2\Server\Grant\RefreshTokenGrant;
+use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\McpOAuthServiceProvider;
+use Qiick\McpOAuth\Testing\FakeConsentProvider;
+use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 use Qiick\McpOAuth\Tests\Support\PassportBootedTestCase;
 use ReflectionProperty;
 
@@ -106,8 +109,12 @@ it('retrofits auth_code_ttl when AuthorizationServer was already resolved', func
     expect(authCodeTtlMinutesFromServer($authorizationServer))->toBe(3.0);
 });
 
-it('disables ClientCredentialsGrant so Passport star scope cannot be issued', function (): void {
+it('disables ClientCredentialsGrant with OAuth on so Passport star scope cannot be issued', function (): void {
+    // OAuth on needs every adapter bound (S81).
+    app()->instance(ConsentProvider::class, new FakeConsentProvider(AuthorizeFlowTestCase::defaultConsentOptions()));
     config([
+        // Grants are stripped only while OAuth is on.
+        'mcp-oauth.enabled' => true,
         'passport.private_key' => passportTestKeyContents('oauth-private.key'),
         'passport.public_key' => passportTestKeyContents('oauth-public.key'),
     ]);
@@ -133,7 +140,11 @@ it('disables ClientCredentialsGrant so Passport star scope cannot be issued', fu
 });
 
 it('keeps only the MCP grants on the server, and personal access on its own, whatever Passport enables', function (): void {
+    // OAuth on needs every adapter bound (S81).
+    app()->instance(ConsentProvider::class, new FakeConsentProvider(AuthorizeFlowTestCase::defaultConsentOptions()));
     config([
+        // Grants are stripped only while OAuth is on.
+        'mcp-oauth.enabled' => true,
         'passport.private_key' => passportTestKeyContents('oauth-private.key'),
         'passport.public_key' => passportTestKeyContents('oauth-public.key'),
     ]);

@@ -251,10 +251,11 @@ final class McpOAuthServiceProvider extends ServiceProvider
     /**
      * Passport hardcodes AuthCodeGrant at PT10M and always enables
      * ClientCredentialsGrant. Patch the live AuthorizationServer: set the
-     * validated auth-code TTL, and drop every grant outside
-     * SERVER_GRANT_TYPES (client_credentials, whose hard-coded `*` scope must
-     * never be issued for MCP, and password or implicit if a product enables
-     * them), so the token endpoint's own check is not the only guard. Retrofits an already-resolved singleton.
+     * validated auth-code TTL, and, while `mcp-oauth.enabled` is on, drop
+     * every grant outside SERVER_GRANT_TYPES (client_credentials, whose
+     * hard-coded `*` scope must never be issued for MCP, and password or
+     * implicit if a product enables them), so the token endpoint's own check
+     * is not the only guard. Off, the product's Passport grants stay. Retrofits an already-resolved singleton.
      */
     private function hardenAuthorizationServer(int $authCodeTtlMinutes): void
     {
@@ -264,10 +265,12 @@ final class McpOAuthServiceProvider extends ServiceProvider
             $enabledGrantTypesProperty = new ReflectionProperty($authorizationServer, 'enabledGrantTypes');
             /** @var array<string, object> $enabledGrantTypes */
             $enabledGrantTypes = $enabledGrantTypesProperty->getValue($authorizationServer);
+            // Off, Passport stays the product's: its own grants are left as they are.
+            $isMcpOAuthEnabled = (bool) $this->app->make(ConfigRepository::class)->get('mcp-oauth.enabled');
 
             foreach ($enabledGrantTypes as $grantIdentifier => $grant) {
                 // Password, implicit, client credentials, device: whatever Passport enables.
-                if (! in_array($grantIdentifier, self::SERVER_GRANT_TYPES, true)) {
+                if ($isMcpOAuthEnabled && ! in_array($grantIdentifier, self::SERVER_GRANT_TYPES, true)) {
                     unset($enabledGrantTypes[$grantIdentifier]);
 
                     continue;

@@ -103,10 +103,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `oauth_auth_code_exchanges` records that grant. The grant is revoked before
   its tokens, an already revoked grant is left as it is, and the token of a
   code exchange is bound to the grant its code was consumed under.
-- Only tokens of MCP clients (allowed `authorization_code`) are bound, and
-  only while `mcp-oauth.enabled` is on; the product's personal access tokens
-  are left alone. The AuthorizationServer keeps only the MCP grants (password,
-  implicit and client credentials are removed even if Passport enables them).
+- Only tokens of MCP clients are bound, and only while `mcp-oauth.enabled` is
+  on. An MCP client is one with an `oauth_client_metadata` row, which DCR now
+  writes (`registration_source = dcr`, `token_endpoint_auth_method = none`,
+  `client_id_issued_at`, and the `logo_uri` / `client_uri` it echoes); the
+  product's own Passport clients and their `createToken()` tokens are left
+  alone. A token is bound first and its grant read again, so a concurrent
+  replay of its code always ends with the token revoked. While OAuth is on,
+  the AuthorizationServer keeps only the MCP grants (password, implicit and
+  client credentials are removed even if Passport enables them); off, the
+  product's Passport grants stay.
   The token endpoint refuses HTTP Basic and body credentials together
   (RFC 6749 §2.3), challenges in the scheme the client used, and the
   per-client throttle keys on the body (query for authorize) or Basic id,

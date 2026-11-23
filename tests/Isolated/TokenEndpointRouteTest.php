@@ -860,3 +860,19 @@ it('leaves alone the tokens of a client the package did not register', function 
     expect((bool) $tokenRow->revoked)->toBeFalse()
         ->and($tokenRow->api_key_id)->toBeNull();
 })->with(['product app', 'migrated personal access client']);
+
+it('revokes a token whose grant disappears while it is being bound', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $code] = $this->obtainAuthorizationCode($client);
+    $hookedGrantStore = hookGrantStore($this);
+    // The product deletes the grant right after the winner first reads it.
+    $hookedGrantStore->afterNextFind = static function () use ($hookedGrantStore): void {
+        $hookedGrantStore->isGrantGone = true;
+    };
+
+    postToken($this, $this->codeExchange($client, $code))->assertOk();
+
+    expect(DB::table('oauth_access_tokens')->where('client_id', $client->getKey())->where('revoked', false)->count())->toBe(0);
+});
