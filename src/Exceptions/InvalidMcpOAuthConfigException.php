@@ -33,4 +33,21 @@ final class InvalidMcpOAuthConfigException extends InvalidArgumentException
             "mcp-oauth config [cimd.cache_min_seconds] {$cacheMinSeconds} must not exceed [cimd.cache_max_seconds] {$cacheMaxSeconds}.",
         );
     }
+
+    public static function invalidGrantBindingColumn(): self
+    {
+        return new self(
+            'mcp-oauth config [grant_binding_column] must name the oauth_access_tokens column that holds GrantStore::bindingKey().',
+        );
+    }
+
+    /**
+     * @param  class-string  $contract
+     */
+    public static function missingAdapter(string $contract, string $remedy): self
+    {
+        return new self(
+            "mcp-oauth is enabled but [{$contract}] is not bound. {$remedy} Bind adapters in a service provider's register().",
+        );
+    }
 }

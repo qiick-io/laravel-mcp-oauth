@@ -10,6 +10,7 @@ cd "$ROOT"
 
 CLASSES=(
   'Qiick\McpOAuth\Actions\ApproveConsentAction'
+  'Qiick\McpOAuth\Actions\BindAccessTokenAction'
   'Qiick\McpOAuth\Actions\DenyConsentAction'
   'Qiick\McpOAuth\Actions\RecordConsentDecisionAction'
   'Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository'
@@ -18,9 +19,11 @@ CLASSES=(
   'Qiick\McpOAuth\Http\Controllers\ApproveClientController'
   'Qiick\McpOAuth\Http\Controllers\AuthorizeClientController'
   'Qiick\McpOAuth\Http\Controllers\DenyClientController'
+  'Qiick\McpOAuth\Http\Controllers\IssueTokenController'
   'Qiick\McpOAuth\Http\Controllers\RegisterClientController'
   'Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware'
   'Qiick\McpOAuth\Http\Middleware\ValidateAuthorizationRequestMiddleware'
+  'Qiick\McpOAuth\Http\Middleware\ValidateTokenRequestMiddleware'
   'Qiick\McpOAuth\Internal\PassportUserIdentifier'
   'Qiick\McpOAuth\McpOAuthReadiness'
   'Qiick\McpOAuth\McpOAuthRoutes'
@@ -30,6 +33,7 @@ CLASSES=(
   'Qiick\McpOAuth\Services\ConsentDecisionService'
   'Qiick\McpOAuth\Services\ConsentPageService'
   'Qiick\McpOAuth\Services\PendingAuthorizationRequestService'
+  'Qiick\McpOAuth\Services\TokenErrorResponseService'
   'Qiick\McpOAuth\Views\InertiaConsentView'
 )
 

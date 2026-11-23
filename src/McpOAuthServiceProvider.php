@@ -18,13 +18,16 @@ use Illuminate\Support\ServiceProvider;
 use Inertia\Inertia;
 use Laravel\Passport\Bridge\RefreshTokenRepository as PassportRefreshTokenRepository;
 use Laravel\Passport\Client;
+use Laravel\Passport\Events\AccessTokenCreated;
 use Laravel\Passport\Passport;
 use Laravel\Passport\Scope;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Grant\AuthCodeGrant;
 use League\OAuth2\Server\Grant\ClientCredentialsGrant;
+use Qiick\McpOAuth\Actions\BindAccessTokenAction;
 use Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
+use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\ConsentView;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
@@ -47,10 +50,10 @@ use Symfony\Component\HttpFoundation\Response;
  * `McpBearerTokenResponse`, rate limiters for DCR / authorize / token /
  * revoke (per-IP via ClientThrottleKey and per-client when known; 429 with
  * Retry-After), and the family-revoking refresh-token repository binding
- * land in `register()` / `boot()`. Fail-closed adapter validation lands with
- * later feature PRs. While `mcp-oauth.enabled` is false (the default),
- * missing product adapters are allowed so products can install before
- * writing adapters.
+ * land in `register()` / `boot()`, with the AccessTokenCreated binding. With
+ * `mcp-oauth.enabled` on, boot fails closed when ConsentView, ConsentProvider
+ * or GrantStore is not bound (S81); while it is false (the default), missing
+ * product adapters are allowed so products can install before writing them.
  *
  * @api
  */
@@ -133,6 +136,8 @@ final class McpOAuthServiceProvider extends ServiceProvider
         });
         $this->configureRateLimiters();
         $this->validateRemainingIntegerConfig();
+        $this->bindAccessTokensOnCreation();
+        $this->assertAdaptersBoundWhileEnabled();
 
         if ($this->app->runningInConsole()) {
             $this->publishes([
@@ -142,6 +147,44 @@ final class McpOAuthServiceProvider extends ServiceProvider
             $this->publishesMigrations([
                 __DIR__.'/../database/migrations' => database_path('migrations'),
             ], 'mcp-oauth-migrations');
+        }
+    }
+
+    /**
+     * Design §8.4: every token Passport mints is bound before the response
+     * leaves. Synchronous on purpose; never queue this listener.
+     */
+    private function bindAccessTokensOnCreation(): void
+    {
+        $this->app->make(Dispatcher::class)->listen(AccessTokenCreated::class, function (AccessTokenCreated $event): void {
+            $this->app->make(BindAccessTokenAction::class)->execute($event->tokenId, $event->userId, $event->clientId);
+        });
+    }
+
+    /**
+     * S81 / design §5.6: with `mcp-oauth.enabled` on, the OAuth endpoints
+     * cannot work without these adapters, so boot fails with a clear message
+     * instead of a 500 on the first request. Off, a product may install the
+     * package before writing its adapters.
+     *
+     * @throws InvalidMcpOAuthConfigException
+     */
+    private function assertAdaptersBoundWhileEnabled(): void
+    {
+        if (! (bool) $this->app->make(ConfigRepository::class)->get('mcp-oauth.enabled')) {
+            return;
+        }
+
+        $remediesByContract = [
+            ConsentView::class => 'Install inertiajs/inertia-laravel for the default consent page, or bind your own ConsentView.',
+            ConsentProvider::class => 'Bind the product ConsentProvider that says what a user may grant.',
+            GrantStore::class => 'Bind the product GrantStore that stores consented grants.',
+        ];
+
+        foreach ($remediesByContract as $contract => $remedy) {
+            if (! $this->app->bound($contract)) {
+                throw InvalidMcpOAuthConfigException::missingAdapter($contract, $remedy);
+            }
         }
     }
 

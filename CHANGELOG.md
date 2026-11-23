@@ -83,6 +83,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   user picks one when they have several). Default `InertiaConsentView` renders
   `oauth/authorize` when Inertia is installed; props and form fields are in
   `docs/consent-page.md`. `FakeConsentProvider`, and `FakeGrantStore::replace()`.
+- Token endpoint (design §5.2 item 6, §8.4): `POST oauth/token`
+  (`passport.token`) inside the off-gate, stateless, with
+  `throttle:mcp-oauth-token` and `ValidateTokenRequestMiddleware`: only the
+  `authorization_code` (PKCE `S256`) and `refresh_token` grants, even when
+  Passport enables another one; the exact `resource` on both; a client named
+  in the body or in HTTP Basic must be a UUID with no blocked redirect host.
+  Every refusal is one fixed RFC 6749 §5.2 body per error code with no `hint`;
+  league's code, client and redirect mismatches answer `invalid_grant`.
+  `AccessTokenCreated` binds each new token to `GrantStore::activeFor()`
+  (`bindingKey()` in `grant_binding_column`, `audience` = the MCP resource) or
+  revokes it at once when no grant is active (S54).
+- Fail-closed boot (S81): with `mcp-oauth.enabled` on, boot throws
+  `InvalidMcpOAuthConfigException` naming a missing `ConsentView`,
+  `ConsentProvider` or `GrantStore` binding.
 
 - `mcp_auth_failures_per_minute` kept as a raw env string and validated with
   `BoundedPositiveInt` at boot (same digit-only fail-closed path as TTLs /

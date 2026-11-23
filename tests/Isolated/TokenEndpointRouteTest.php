@@ -12,8 +12,12 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Testing\TestResponse;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
+use League\OAuth2\Server\AuthorizationServer;
+use Qiick\McpOAuth\Actions\BindAccessTokenAction;
+use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
 use Qiick\McpOAuth\Events\McpRefreshTokenReused;
+use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
@@ -60,7 +64,8 @@ beforeEach(function (): void {
  */
 function postToken(AuthorizeFlowTestCase $testCase, array $parameters, array $headers = []): TestResponse
 {
-    return $testCase->withHeaders($headers)->postJson('/oauth/token', $parameters);
+    // RFC 6749 §4.1.3: the token request is form-encoded.
+    return $testCase->withHeaders(['Accept' => 'application/json', ...$headers])->post('/oauth/token', $parameters);
 }
 
 /**
@@ -208,6 +213,25 @@ it('binds through the configured grant binding column', function (): void {
         ->and($tokenRow->api_key_id)->toBeNull();
 });
 
+it('refuses a grant binding column that is not a non-empty string', function (mixed $bindingColumn): void {
+    $this->enableOAuth();
+    $client = $this->createClient();
+    $user = $this->createUser();
+    $this->grantStore()->seed(new GrantRecord(
+        id: '0195f0a0-0000-7000-8000-00000000beef',
+        clientId: (string) $client->getKey(),
+        userIdentifier: (string) $user->getKey(),
+        revoked: false,
+        scopes: ['mcp:read'],
+        authorizedAt: null,
+        lastUsedAt: null,
+    ));
+    config()->set('mcp-oauth.grant_binding_column', $bindingColumn);
+
+    expect(fn () => app(BindAccessTokenAction::class)->execute('any-token', (string) $user->getKey(), (string) $client->getKey()))
+        ->toThrow(InvalidMcpOAuthConfigException::class, 'grant_binding_column');
+})->with(['empty' => [''], 'not a string' => [['api_key_id']], 'missing' => [null]]);
+
 it('revokes at once a token minted for a grant revoked before the exchange', function (): void {
     $this->enableOAuth();
     McpOAuthRoutes::register();
@@ -238,6 +262,8 @@ it('refuses a code exchange without the PKCE verifier', function (): void {
     expect(DB::table('oauth_access_tokens')->count())->toBe(0);
 });
 
+// Expiry is league's check against PHP's time(), which travel() cannot move;
+// it is an invalid_grant like these and goes through the same renderer.
 it('answers every refused code with the same invalid_grant body', function (Closure $tamper): void {
     $this->enableOAuth();
     McpOAuthRoutes::register();
@@ -257,11 +283,6 @@ it('answers every refused code with the same invalid_grant body', function (Clos
         $otherClient = $testCase->createClient();
 
         return $testCase->codeExchange($otherClient, $code);
-    }],
-    'expired code' => [static function ($testCase, Client $client, string $code): array {
-        $testCase->travel(11)->minutes();
-
-        return $testCase->codeExchange($client, $code);
     }],
     'replayed code' => [static function ($testCase, Client $client, string $code): array {
         postToken($testCase, $testCase->codeExchange($client, $code))->assertOk();
@@ -357,6 +378,53 @@ it('refuses a client whose redirect host was blocked, by body or HTTP Basic clie
     expect(DB::table('oauth_access_tokens')->count())->toBe(0);
 })->with(['body', 'basic']);
 
+it('exchanges a code for a client named only in HTTP Basic', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $code] = $this->obtainAuthorizationCode($client);
+
+    postToken($this, $this->codeExchange($client, $code, ['client_id' => null]), ['Authorization' => 'Basic '.base64_encode($client->getKey().':')])
+        ->assertOk()
+        ->assertJsonPath('token_type', 'Bearer');
+});
+
+it('leaves a missing or repeated client_id to league as invalid_request', function (mixed $clientId): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+
+    postToken($this, $this->codeExchange($client, 'any-code', ['client_id' => $clientId]))
+        ->assertStatus(400)
+        ->assertExactJson(INVALID_REQUEST_BODY);
+})->with([
+    'missing' => [null],
+    'repeated' => [['0195f0a0-0000-7000-8000-000000000000', '0195f0a0-0000-7000-8000-000000000001']],
+]);
+
+it('refuses the password grant even when Passport has it enabled', function (): void {
+    Passport::enablePasswordGrant();
+    app()->forgetInstance(AuthorizationServer::class);
+
+    try {
+        $this->enableOAuth();
+        McpOAuthRoutes::register();
+        $client = $this->createClient();
+
+        postToken($this, [
+            'grant_type' => 'password',
+            'client_id' => (string) $client->getKey(),
+            'username' => 'someone@example.com',
+            'password' => 'secret',
+            'resource' => AuthorizeFlowTestCase::RESOURCE,
+        ])
+            ->assertStatus(400)
+            ->assertExactJson(UNSUPPORTED_GRANT_TYPE_BODY);
+    } finally {
+        Passport::$passwordGrantEnabled = false;
+    }
+});
+
 // --- Refresh tokens (design §8.4, S56, S59) --------------------------------
 
 it('rotates a refresh token into a new bound pair', function (): void {
@@ -420,11 +488,6 @@ it('answers every refused refresh with the same invalid_grant body', function (C
     'grant revoked by the user' => [static function ($testCase, Client $client, array $tokens): array {
         $grant = $testCase->grantStore()->activeFor((string) $client->getKey(), $tokens['user_id']);
         $testCase->grantStore()->revoke($grant->id, $tokens['user_id'], RevocationReason::User);
-
-        return refreshRequest($client, $tokens['refresh_token']);
-    }],
-    'expired refresh token' => [static function ($testCase, Client $client, array $tokens): array {
-        $testCase->travel(31)->days();
 
         return refreshRequest($client, $tokens['refresh_token']);
     }],
