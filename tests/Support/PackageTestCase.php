@@ -79,6 +79,7 @@ abstract class PackageTestCase extends TestCase
 
         Schema::create('users', function (Blueprint $table): void {
             $table->id();
+            $table->timestamp('email_verified_at')->nullable();
             $table->timestamps();
         });
 

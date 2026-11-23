@@ -138,9 +138,10 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
         return $client;
     }
 
-    protected function createUser(): TestUser
+    protected function createUser(bool $isEmailVerified = true): TestUser
     {
         $user = new TestUser;
+        $user->email_verified_at = $isEmailVerified ? now() : null;
         $user->save();
 
         return $user;

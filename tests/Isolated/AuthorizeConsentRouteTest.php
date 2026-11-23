@@ -871,6 +871,19 @@ it('sends a guest approval or denial to login', function (string $method): void 
     $this->call($method, '/oauth/authorize', ['auth_token' => 'x'])->assertRedirect('/login');
 })->with(['POST', 'DELETE']);
 
+it('refuses an approval or denial from a user whose email is not verified', function (string $method): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $props = renderConsentPage($this, $this->createUser(isEmailVerified: false), $this->createClient());
+
+    $this->json($method, '/oauth/authorize', validApproval($props['authToken']))
+        ->assertStatus(403)
+        ->assertHeaderMissing('Location');
+
+    expect(OAuthConsentRecord::query()->count())->toBe(0)
+        ->and($this->grantStore()->replacedDecisions)->toBe([]);
+})->with(['POST', 'DELETE']);
+
 it('protects approve and deny with the CSRF token', function (string $method): void {
     $this->enableOAuth();
     McpOAuthRoutes::register();
