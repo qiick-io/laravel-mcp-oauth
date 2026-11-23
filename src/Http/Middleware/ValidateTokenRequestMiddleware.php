@@ -24,8 +24,9 @@ use Symfony\Component\HttpFoundation\Response;
  *   `unsupported_grant_type`, even if Passport would enable one later);
  * - the RFC 8707 `resource` names this server's MCP endpoint, on the code
  *   exchange and on every refresh (MCP authorization requires it on both);
- * - the client, named in the body or as the HTTP Basic username, is a UUID
- *   and none of its redirect hosts is blocked.
+ * - the client, named in the body or as the HTTP Basic username (never
+ *   both, RFC 6749 §2.3), is a UUID and none of its redirect hosts is
+ *   blocked.
  *
  * An unknown or revoked client is left to league, which answers the same
  * `invalid_client`. PKCE, the code and the refresh token are league's checks;
@@ -47,6 +48,8 @@ final class ValidateTokenRequestMiddleware
         $bodyParameters = $request->request->all();
 
         if (! in_array($bodyParameters['grant_type'] ?? null, McpOAuthServer::SUPPORTED_GRANT_TYPES, true)) {
+            // Second guard: the provider also strips every other grant from the server,
+            // and league then answers with this same body.
             return $this->tokenErrorResponses->refusal('unsupported_grant_type');
         }
 
@@ -54,14 +57,18 @@ final class ValidateTokenRequestMiddleware
             return $this->tokenErrorResponses->refusal('invalid_target');
         }
 
-        // League's order: the body, and the Basic username when the body has none.
-        $clientId = $bodyParameters['client_id'] ?? '';
+        $basicClientId = $request->getUser();
+        $hasBodyCredentials = ($bodyParameters['client_id'] ?? null) !== null || ($bodyParameters['client_secret'] ?? null) !== null;
 
-        if ($clientId === '') {
-            $clientId = $request->getUser() ?? '';
+        // RFC 6749 §2.3: one authentication method per request, never Basic and the body together.
+        if ($basicClientId !== null && $hasBodyCredentials) {
+            return $this->tokenErrorResponses->refusal('invalid_request');
         }
 
-        // Missing or repeated: league answers invalid_request.
+        // League's order: the body, else the Basic username.
+        $clientId = $bodyParameters['client_id'] ?? $basicClientId;
+
+        // Missing, empty or repeated: league answers invalid_request.
         if (! is_string($clientId) || $clientId === '') {
             return $next($request);
         }
@@ -90,7 +97,12 @@ final class ValidateTokenRequestMiddleware
      */
     private function invalidClient(Request $request): JsonResponse
     {
-        $headers = $request->headers->has('Authorization') ? ['WWW-Authenticate' => 'Basic realm="OAuth"'] : [];
+        $authorization = $request->headers->get('Authorization');
+
+        // League's rule, so this refusal cannot be told apart from league's own.
+        $headers = $authorization === null
+            ? []
+            : ['WWW-Authenticate' => (str_starts_with($authorization, 'Bearer') ? 'Bearer' : 'Basic').' realm="OAuth"'];
 
         return $this->tokenErrorResponses->refusal('invalid_client', 401, $headers);
     }

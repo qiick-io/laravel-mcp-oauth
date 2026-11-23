@@ -22,7 +22,8 @@ use Qiick\McpOAuth\Models\OAuthAuthCodeExchange;
  * consumed under ({@see OAuthAuthCodeExchange}), refreshed ones included:
  * every approval revokes the earlier codes and tokens of that client and
  * user, so a grant only ever carries the tokens of its own code. The grant is
- * revoked too ({@see RevocationReason::Reuse}). A code that was never consumed
+ * revoked first ({@see RevocationReason::Reuse}), then its tokens; a grant
+ * that is already revoked is left as it is. A code that was never consumed
  * has no row, so it revokes nothing, and an older code never touches the
  * grant of a newer consent.
  */
@@ -43,18 +44,24 @@ final class RevokeAuthCodeTokensAction
         $exchange = OAuthAuthCodeExchange::query()->find($authCodeId);
         $grant = $exchange === null ? null : $this->grantStore->find($exchange->grant_id);
 
-        if ($grant === null) {
+        // Already revoked: its tokens are refused at use, and the first reason stays.
+        if ($grant === null || $grant->revoked) {
             return;
         }
 
+        // The grant first: a race winner still binding its token then finds it
+        // revoked and revokes that token itself (BindAccessTokenAction).
+        $this->grantStore->revoke($grant->id, null, RevocationReason::Reuse);
+
+        // Ids read first: MySQL refuses an UPDATE whose subquery reads the same table (error 1093).
         $grantAccessTokenIds = Passport::token()->newQuery()
             ->where('client_id', $grant->clientId)
             ->where(GrantBindingColumn::from($this->config), $this->grantStore->bindingKey($grant))
-            ->select('id');
+            ->pluck('id')
+            ->all();
 
         Passport::refreshToken()->newQuery()->whereIn('access_token_id', $grantAccessTokenIds)->update(['revoked' => true]);
         Passport::token()->newQuery()->whereIn('id', $grantAccessTokenIds)->update(['revoked' => true]);
-        $this->grantStore->revoke($grant->id, null, RevocationReason::Reuse);
 
         Log::warning('MCP OAuth authorization code presented again: its tokens and grant are revoked.', [
             'client_id' => $grant->clientId,

@@ -35,4 +35,15 @@ final class OAuthAuthCodeExchange extends Model
      * @var list<string>
      */
     protected $fillable = ['auth_code_id', 'grant_id'];
+
+    /**
+     * Passport's connection, like the code row it is written beside: consuming
+     * the code and recording its grant share one transaction.
+     */
+    public function getConnectionName(): ?string
+    {
+        $passportConnection = config('passport.connection');
+
+        return is_string($passportConnection) ? $passportConnection : null;
+    }
 }

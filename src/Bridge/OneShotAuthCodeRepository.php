@@ -9,6 +9,7 @@ use Laravel\Passport\Bridge\AuthCodeRepository;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Actions\RevokeAuthCodeTokensAction;
 use Qiick\McpOAuth\Contracts\GrantStore;
+use Qiick\McpOAuth\Internal\ConsumedAuthCodeGrant;
 use Qiick\McpOAuth\Models\OAuthAuthCodeExchange;
 
 /**
@@ -32,6 +33,7 @@ final class OneShotAuthCodeRepository extends AuthCodeRepository
     public function __construct(
         private readonly GrantStore $grantStore,
         private readonly RevokeAuthCodeTokensAction $revokeAuthCodeTokens,
+        private readonly ConsumedAuthCodeGrant $consumedAuthCodeGrant,
     ) {}
 
     /**
@@ -67,8 +69,9 @@ final class OneShotAuthCodeRepository extends AuthCodeRepository
     }
 
     /**
-     * The grant BindAccessTokenAction will bind this exchange's tokens to:
-     * the active grant of the code's client and user.
+     * The grant this exchange's token is bound to (BindAccessTokenAction,
+     * through ConsumedAuthCodeGrant) and a replay revokes: the active grant of
+     * the code's client and user at the moment the code is consumed.
      */
     private function recordGrantOf(string $codeId): void
     {
@@ -81,6 +84,7 @@ final class OneShotAuthCodeRepository extends AuthCodeRepository
 
         if ($grant !== null) {
             OAuthAuthCodeExchange::query()->create(['auth_code_id' => $codeId, 'grant_id' => $grant->id]);
+            $this->consumedAuthCodeGrant->grantId = $grant->id;
         }
     }
 }

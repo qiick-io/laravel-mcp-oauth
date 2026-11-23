@@ -100,7 +100,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only one of two parallel exchanges wins. A code presented again, before or
   after it expired, revokes the grant it was consumed under and every token
   bound to it (RFC 6749 §4.1.2), never a newer consent's; new package table
-  `oauth_auth_code_exchanges` records that grant.
+  `oauth_auth_code_exchanges` records that grant. The grant is revoked before
+  its tokens, an already revoked grant is left as it is, and the token of a
+  code exchange is bound to the grant its code was consumed under.
+- Only tokens of MCP clients (allowed `authorization_code`) are bound, and
+  only while `mcp-oauth.enabled` is on; the product's personal access tokens
+  are left alone. The AuthorizationServer keeps only the MCP grants (password,
+  implicit and client credentials are removed even if Passport enables them).
+  The token endpoint refuses HTTP Basic and body credentials together
+  (RFC 6749 §2.3), challenges in the scheme the client used, and the
+  per-client throttle keys on the body (query for authorize) or Basic id,
+  lower-cased.
 - Fail-closed boot (S81): with `mcp-oauth.enabled` on, boot throws
   `InvalidMcpOAuthConfigException` naming a missing `ConsentView`,
   `ConsentProvider` or `GrantStore` binding.

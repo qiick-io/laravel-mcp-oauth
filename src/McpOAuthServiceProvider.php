@@ -25,7 +25,6 @@ use Laravel\Passport\Passport;
 use Laravel\Passport\Scope;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Grant\AuthCodeGrant;
-use League\OAuth2\Server\Grant\ClientCredentialsGrant;
 use Qiick\McpOAuth\Actions\BindAccessTokenAction;
 use Qiick\McpOAuth\Actions\RevokeAuthCodeTokensAction;
 use Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository;
@@ -38,6 +37,7 @@ use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\Http\Controllers\AuthorizeClientController;
 use Qiick\McpOAuth\Internal\BlockedHostCatalog;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
+use Qiick\McpOAuth\Internal\ConsumedAuthCodeGrant;
 use Qiick\McpOAuth\Internal\DisabledAdminSwitch;
 use Qiick\McpOAuth\Services\ConsentPageService;
 use Qiick\McpOAuth\Views\InertiaConsentView;
@@ -63,6 +63,13 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class McpOAuthServiceProvider extends ServiceProvider
 {
+    /**
+     * The grants the AuthorizationServer keeps: the MCP grants, and personal
+     * access so the product's own `createToken()` still works (its tokens are
+     * never bound, see BindAccessTokenAction).
+     */
+    private const array SERVER_GRANT_TYPES = [...McpOAuthServer::SUPPORTED_GRANT_TYPES, 'personal_access'];
+
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/mcp-oauth.php', 'mcp-oauth');
@@ -99,6 +106,8 @@ final class McpOAuthServiceProvider extends ServiceProvider
                 $app->make(ConfigRepository::class),
             );
         });
+
+        $this->app->scoped(ConsumedAuthCodeGrant::class);
 
         // One-shot codes, and a code presented again revokes its tokens (RFC 9700 §4.5).
         $this->app->bind(PassportAuthCodeRepository::class, OneShotAuthCodeRepository::class);
@@ -171,6 +180,11 @@ final class McpOAuthServiceProvider extends ServiceProvider
     private function bindAccessTokensOnCreation(): void
     {
         $this->app->make(Dispatcher::class)->listen(AccessTokenCreated::class, function (AccessTokenCreated $event): void {
+            // Off, no MCP token is minted and the adapters may not be bound yet (S81).
+            if (! (bool) $this->app->make(ConfigRepository::class)->get('mcp-oauth.enabled')) {
+                return;
+            }
+
             $this->app->make(BindAccessTokenAction::class)->execute($event->tokenId, $event->userId, $event->clientId);
         });
     }
@@ -237,9 +251,10 @@ final class McpOAuthServiceProvider extends ServiceProvider
     /**
      * Passport hardcodes AuthCodeGrant at PT10M and always enables
      * ClientCredentialsGrant. Patch the live AuthorizationServer: set the
-     * validated auth-code TTL, and drop client_credentials so Passport’s
-     * hard-coded `*` scope cannot be issued for MCP (design: auth code +
-     * refresh only). Retrofits an already-resolved singleton.
+     * validated auth-code TTL, and drop every grant outside
+     * SERVER_GRANT_TYPES (client_credentials, whose hard-coded `*` scope must
+     * never be issued for MCP, and password or implicit if a product enables
+     * them), so the token endpoint's own check is not the only guard. Retrofits an already-resolved singleton.
      */
     private function hardenAuthorizationServer(int $authCodeTtlMinutes): void
     {
@@ -251,7 +266,8 @@ final class McpOAuthServiceProvider extends ServiceProvider
             $enabledGrantTypes = $enabledGrantTypesProperty->getValue($authorizationServer);
 
             foreach ($enabledGrantTypes as $grantIdentifier => $grant) {
-                if ($grant instanceof ClientCredentialsGrant) {
+                // Password, implicit, client credentials, device: whatever Passport enables.
+                if (! in_array($grantIdentifier, self::SERVER_GRANT_TYPES, true)) {
                     unset($enabledGrantTypes[$grantIdentifier]);
 
                     continue;
@@ -406,22 +422,16 @@ final class McpOAuthServiceProvider extends ServiceProvider
     }
 
     /**
-     * Client id from the OAuth body/query or HTTP Basic username (Passport).
+     * Client id where league reads it: the query of `GET oauth/authorize`,
+     * otherwise the body, else the HTTP Basic username. Never the query of a
+     * POST, which a client could vary to change bucket, and lower-cased so
+     * case variants of one UUID share a bucket. A repeated id keys nothing.
      */
     private static function oauthClientIdFromRequest(Request $request): ?string
     {
-        $clientId = $request->input('client_id');
+        $parameters = $request->isMethod('GET') ? $request->query->all() : $request->request->all();
+        $clientId = $parameters['client_id'] ?? $request->getUser();
 
-        if (is_string($clientId) && $clientId !== '') {
-            return $clientId;
-        }
-
-        $basicUser = $request->getUser();
-
-        if (is_string($basicUser) && $basicUser !== '') {
-            return $basicUser;
-        }
-
-        return null;
+        return is_string($clientId) && $clientId !== '' ? strtolower($clientId) : null;
     }
 }

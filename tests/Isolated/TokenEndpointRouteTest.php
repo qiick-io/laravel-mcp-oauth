@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -655,6 +656,8 @@ function hookGrantStore(AuthorizeFlowTestCase $testCase): HookedGrantStore
     $hookedGrantStore = new HookedGrantStore($testCase->grantStore());
     app()->instance(GrantStore::class, $hookedGrantStore);
     app()->forgetInstance(AuthorizationServer::class);
+    // The route keeps its controller, and with it the server, across requests.
+    app('router')->getRoutes()->getByName('passport.token')?->flushController();
 
     return $hookedGrantStore;
 }
@@ -760,6 +763,33 @@ it('refuses a client that uses HTTP Basic and the body together', function (): v
         ->assertExactJson(INVALID_REQUEST_BODY);
 
     expect(DB::table('oauth_access_tokens')->count())->toBe(0);
+});
+
+it('refuses a client_secret in the body beside HTTP Basic', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $code] = $this->obtainAuthorizationCode($client);
+
+    postToken($this, $this->codeExchange($client, $code, ['client_id' => null, 'client_secret' => 'anything']), ['Authorization' => 'Basic '.base64_encode($client->getKey().':')])
+        ->assertStatus(400)
+        ->assertExactJson(INVALID_REQUEST_BODY);
+});
+
+it('leaves an empty client_id to league when empty strings reach the middleware', function (): void {
+    ConvertEmptyStringsToNull::skipWhen(static fn (): bool => true);
+
+    try {
+        $this->enableOAuth();
+        McpOAuthRoutes::register();
+        $client = $this->createClient();
+
+        postToken($this, $this->codeExchange($client, 'any-code', ['client_id' => '']))
+            ->assertStatus(400)
+            ->assertExactJson(INVALID_REQUEST_BODY);
+    } finally {
+        ConvertEmptyStringsToNull::flushState();
+    }
 });
 
 it('challenges with the scheme the client used, as league does', function (): void {

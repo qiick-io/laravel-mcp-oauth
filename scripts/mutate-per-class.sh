@@ -30,6 +30,7 @@ CLASSES=(
   'Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware'
   'Qiick\McpOAuth\Http\Middleware\ValidateAuthorizationRequestMiddleware'
   'Qiick\McpOAuth\Http\Middleware\ValidateTokenRequestMiddleware'
+  'Qiick\McpOAuth\Internal\ConsumedAuthCodeGrant'
   'Qiick\McpOAuth\Internal\GrantBindingColumn'
   'Qiick\McpOAuth\Internal\PassportUserIdentifier'
   'Qiick\McpOAuth\McpOAuthReadiness'

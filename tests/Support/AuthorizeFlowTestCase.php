@@ -105,6 +105,11 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
     {
         $grantStore = app(GrantStore::class);
 
+        // A test may have wrapped it to hook into a request.
+        if ($grantStore instanceof HookedGrantStore) {
+            return $grantStore->grantStore;
+        }
+
         assert($grantStore instanceof FakeGrantStore);
 
         return $grantStore;

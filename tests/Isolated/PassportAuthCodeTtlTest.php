@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Carbon\CarbonInterval;
 use Laravel\Passport\Passport;
+use Laravel\Passport\PersonalAccessTokenFactory;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Grant\AuthCodeGrant;
 use League\OAuth2\Server\Grant\ClientCredentialsGrant;
@@ -131,7 +132,7 @@ it('disables ClientCredentialsGrant so Passport star scope cannot be issued', fu
         ->and(array_keys($enabledGrantTypes))->not->toContain('client_credentials');
 });
 
-it('keeps only the MCP grants and personal access on the server, whatever Passport enables', function (): void {
+it('keeps only the MCP grants on the server, and personal access on its own, whatever Passport enables', function (): void {
     config([
         'passport.private_key' => passportTestKeyContents('oauth-private.key'),
         'passport.public_key' => passportTestKeyContents('oauth-public.key'),
@@ -144,10 +145,16 @@ it('keeps only the MCP grants and personal access on the server, whatever Passpo
         $this->app->forgetInstance(AuthorizationServer::class);
         $authorizationServer = $this->app->make(AuthorizationServer::class);
         $enabledGrantTypes = (new ReflectionProperty($authorizationServer, 'enabledGrantTypes'))->getValue($authorizationServer);
+        // The product's createToken() runs on Passport's own personal access server.
+        $personalAccessServer = (new ReflectionProperty(PersonalAccessTokenFactory::class, 'server'))
+            ->getValue($this->app->make(PersonalAccessTokenFactory::class));
+        $personalAccessGrantTypes = (new ReflectionProperty($personalAccessServer, 'enabledGrantTypes'))->getValue($personalAccessServer);
     } finally {
         Passport::$passwordGrantEnabled = false;
         Passport::$implicitGrantEnabled = false;
     }
 
-    expect(array_keys($enabledGrantTypes))->toEqualCanonicalizing(['authorization_code', 'refresh_token', 'personal_access']);
+    expect(array_keys($enabledGrantTypes))->toEqualCanonicalizing(['authorization_code', 'refresh_token'])
+        ->and(array_keys($personalAccessGrantTypes))->toContain('personal_access')
+        ->and(array_keys($personalAccessGrantTypes))->not->toContain('password');
 });
