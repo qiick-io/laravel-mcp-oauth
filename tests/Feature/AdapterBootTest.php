@@ -28,14 +28,14 @@ it('boots without adapters while OAuth is off', function (): void {
     config()->set('mcp-oauth.enabled', false);
     app()->offsetUnset(ConsentView::class);
 
-    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())->not->toThrow(Throwable::class);
+    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())->not->toThrow(Exception::class);
 });
 
 it('boots with OAuth on once every adapter is bound', function (): void {
     config()->set('mcp-oauth.enabled', true);
     bindEveryAdapter();
 
-    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())->not->toThrow(Throwable::class);
+    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())->not->toThrow(Exception::class);
 });
 
 it('fails boot with OAuth on and an adapter missing, naming it', function (string $contract): void {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use LogicException;
+use Qiick\McpOAuth\Models\OAuthAuthCodeExchange;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
@@ -168,6 +169,16 @@ it('S4: oauth_consent_records is append-only evidence with every consent column'
 it('records the grant each authorization code was consumed under', function (): void {
     expect(Schema::hasTable('oauth_auth_code_exchanges'))->toBeTrue()
         ->and(Schema::getColumnListing('oauth_auth_code_exchanges'))->toEqualCanonicalizing(['auth_code_id', 'grant_id', 'created_at']);
+});
+
+it('keeps the auth-code exchange on the Passport connection, with the code row it records', function (): void {
+    config()->set('passport.connection', 'passport-tenant');
+
+    expect((new OAuthAuthCodeExchange)->getConnectionName())->toBe('passport-tenant');
+
+    config()->set('passport.connection', null);
+
+    expect((new OAuthAuthCodeExchange)->getConnectionName())->toBeNull();
 });
 
 it('S2: CIMD runtime is off by default while schema columns exist', function (): void {

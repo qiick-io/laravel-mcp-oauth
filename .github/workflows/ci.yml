@@ -204,14 +204,15 @@ jobs:
             vendor/bin/pest
           fi
 
-  # Four engines wherever the package touches the database (design §11.3).
+  # Four engines for the whole suite (design §11.3).
   # Scaffold keeps the job shape; migration PRs wire services and DB_CONNECTION.
   # One engine per job so MySQL and MariaDB never share a runner (GHA services
   # start every declared container on every matrix cell).
   databases:
     name: Databases (${{ matrix.engine }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The whole suite on a server engine: MariaDB took over 10 minutes locally.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -291,7 +292,10 @@ jobs:
             "illuminate/support:^13.0"
           composer update --no-interaction --prefer-dist --with-all-dependencies
 
-      - name: Pest schema suite on ${{ matrix.engine }}
+      # The whole suite, not only the schema tests: token, refresh, revocation
+      # and consent queries differ by dialect (MySQL refuses an UPDATE whose
+      # subquery reads the same table, error 1093).
+      - name: Pest on ${{ matrix.engine }}
         env:
           DB_CONNECTION: ${{ matrix.db_connection }}
           DB_HOST: 127.0.0.1
@@ -299,7 +303,7 @@ jobs:
           DB_DATABASE: ${{ matrix.db_database }}
           DB_USERNAME: ${{ matrix.db_username }}
           DB_PASSWORD: ${{ matrix.db_password }}
-        run: vendor/bin/pest --filter=PackageMigrations
+        run: vendor/bin/pest
 
   # S81: installing without Inertia (suggest) boots; --no-dev proves that.
   no-dev-boot:

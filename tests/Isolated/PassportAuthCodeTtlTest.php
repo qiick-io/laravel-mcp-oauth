@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Carbon\CarbonInterval;
+use Laravel\Passport\Passport;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Grant\AuthCodeGrant;
 use League\OAuth2\Server\Grant\ClientCredentialsGrant;
@@ -128,4 +129,25 @@ it('disables ClientCredentialsGrant so Passport star scope cannot be issued', fu
         ->and($grantClasses)->toContain(AuthCodeGrant::class)
         ->and($grantClasses)->toContain(RefreshTokenGrant::class)
         ->and(array_keys($enabledGrantTypes))->not->toContain('client_credentials');
+});
+
+it('keeps only the MCP grants and personal access on the server, whatever Passport enables', function (): void {
+    config([
+        'passport.private_key' => passportTestKeyContents('oauth-private.key'),
+        'passport.public_key' => passportTestKeyContents('oauth-public.key'),
+    ]);
+    Passport::enablePasswordGrant();
+    Passport::enableImplicitGrant();
+
+    try {
+        (new McpOAuthServiceProvider($this->app))->boot();
+        $this->app->forgetInstance(AuthorizationServer::class);
+        $authorizationServer = $this->app->make(AuthorizationServer::class);
+        $enabledGrantTypes = (new ReflectionProperty($authorizationServer, 'enabledGrantTypes'))->getValue($authorizationServer);
+    } finally {
+        Passport::$passwordGrantEnabled = false;
+        Passport::$implicitGrantEnabled = false;
+    }
+
+    expect(array_keys($enabledGrantTypes))->toEqualCanonicalizing(['authorization_code', 'refresh_token', 'personal_access']);
 });

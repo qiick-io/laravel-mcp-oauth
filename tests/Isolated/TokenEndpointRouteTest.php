@@ -12,10 +12,12 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Testing\TestResponse;
 use Laravel\Passport\Client;
+use Laravel\Passport\Events\AccessTokenCreated;
 use Laravel\Passport\Passport;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\CryptTrait;
 use Qiick\McpOAuth\Actions\BindAccessTokenAction;
+use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
 use Qiick\McpOAuth\Events\McpRefreshTokenReused;
@@ -23,6 +25,7 @@ use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
+use Qiick\McpOAuth\Tests\Support\HookedGrantStore;
 
 uses(AuthorizeFlowTestCase::class);
 
@@ -639,4 +642,132 @@ it('ignores an expired code whose payload names no string code id', function ():
         ->assertExactJson(INVALID_GRANT_BODY);
 
     expect(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe(1);
+});
+
+// --- Review of #16: order, recorded grant, listener scope, client auth ------
+
+/**
+ * Puts a HookedGrantStore around the current FakeGrantStore and rebuilds the
+ * AuthorizationServer, whose repositories hold the store they were built with.
+ */
+function hookGrantStore(AuthorizeFlowTestCase $testCase): HookedGrantStore
+{
+    $hookedGrantStore = new HookedGrantStore($testCase->grantStore());
+    app()->instance(GrantStore::class, $hookedGrantStore);
+    app()->forgetInstance(AuthorizationServer::class);
+
+    return $hookedGrantStore;
+}
+
+it('revokes the grant before the tokens when a code comes back', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $code] = $this->obtainAuthorizationCode($client);
+    postToken($this, $this->codeExchange($client, $code))->assertOk();
+    $hookedGrantStore = hookGrantStore($this);
+    $liveTokensWhenGrantRevoked = null;
+    $hookedGrantStore->beforeRevoke = static function () use (&$liveTokensWhenGrantRevoked): void {
+        $liveTokensWhenGrantRevoked = DB::table('oauth_access_tokens')->where('revoked', false)->count();
+    };
+
+    postToken($this, $this->codeExchange($client, $code))->assertStatus(400);
+
+    // A race winner still binding its token sees a revoked grant and revokes it.
+    expect($liveTokensWhenGrantRevoked)->toBe(1)
+        ->and(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe(0);
+});
+
+it('binds the token to the grant the code was consumed under, not a newer one', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $code, 'user' => $user] = $this->obtainAuthorizationCode($client);
+    $consumedGrant = $this->grantStore()->activeFor((string) $client->getKey(), (string) $user->getKey());
+    $hookedGrantStore = hookGrantStore($this);
+    // A new consent lands between the code's consumption and its token.
+    $hookedGrantStore->afterNextActiveFor = function () use ($consumedGrant): void {
+        $this->grantStore()->revoke($consumedGrant->id, $consumedGrant->userIdentifier, RevocationReason::Reconsent);
+        $this->grantStore()->seed(new GrantRecord(
+            id: '0195f0a0-0000-7000-8000-0000000000b2',
+            clientId: $consumedGrant->clientId,
+            userIdentifier: $consumedGrant->userIdentifier,
+            revoked: false,
+            scopes: ['mcp:read'],
+            authorizedAt: null,
+            lastUsedAt: null,
+        ));
+    };
+
+    postToken($this, $this->codeExchange($client, $code))->assertOk();
+
+    $tokenRow = DB::table('oauth_access_tokens')->where('client_id', $client->getKey())->sole();
+
+    expect($tokenRow->api_key_id)->not->toBe('0195f0a0-0000-7000-8000-0000000000b2')
+        ->and((bool) $tokenRow->revoked)->toBeTrue();
+});
+
+it('does not revoke again a grant that is already revoked when its code comes back', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $code, 'user' => $user] = $this->obtainAuthorizationCode($client);
+    postToken($this, $this->codeExchange($client, $code))->assertOk();
+    $grant = $this->grantStore()->activeFor((string) $client->getKey(), (string) $user->getKey());
+    $this->grantStore()->revoke($grant->id, (string) $user->getKey(), RevocationReason::User);
+
+    postToken($this, $this->codeExchange($client, $code))->assertStatus(400);
+
+    expect(collect($this->grantStore()->revocations)->pluck('reason')->all())->toBe([RevocationReason::User]);
+});
+
+it('binds only tokens of MCP clients and leaves the product\'s own tokens alone', function (): void {
+    $this->enableOAuth();
+    $personalAccessClient = $this->createClient();
+    $personalAccessClient->forceFill(['grant_types' => ['personal_access']])->save();
+    $user = $this->createUser();
+    DB::table('oauth_access_tokens')->insert([
+        'id' => 'personal-token', 'user_id' => $user->getKey(), 'client_id' => $personalAccessClient->getKey(),
+        'name' => 'cli', 'scopes' => '[]', 'revoked' => false, 'created_at' => now(), 'updated_at' => now(), 'expires_at' => now()->addDay(),
+    ]);
+
+    event(new AccessTokenCreated('personal-token', (string) $user->getKey(), (string) $personalAccessClient->getKey()));
+
+    $tokenRow = DB::table('oauth_access_tokens')->where('id', 'personal-token')->sole();
+
+    expect((bool) $tokenRow->revoked)->toBeFalse()
+        ->and($tokenRow->api_key_id)->toBeNull()
+        ->and($tokenRow->audience)->toBeNull();
+});
+
+it('leaves token creation alone while OAuth is off, even without adapters', function (): void {
+    config()->set('mcp-oauth.enabled', false);
+    app()->offsetUnset(GrantStore::class);
+
+    expect(fn () => event(new AccessTokenCreated('any-token', '1', '0195f0a0-0000-7000-8000-000000000000')))
+        ->not->toThrow(Exception::class);
+});
+
+it('refuses a client that uses HTTP Basic and the body together', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $otherClient = $this->createClient();
+    ['code' => $code] = $this->obtainAuthorizationCode($client);
+
+    postToken($this, $this->codeExchange($client, $code), ['Authorization' => 'Basic '.base64_encode($otherClient->getKey().':')])
+        ->assertStatus(400)
+        ->assertExactJson(INVALID_REQUEST_BODY);
+
+    expect(DB::table('oauth_access_tokens')->count())->toBe(0);
+});
+
+it('challenges with the scheme the client used, as league does', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+
+    postToken($this, $this->codeExchange($client, 'any-code', ['client_id' => 'not-a-uuid']), ['Authorization' => 'Bearer something'])
+        ->assertStatus(401)
+        ->assertHeader('WWW-Authenticate', 'Bearer realm="OAuth"');
 });
