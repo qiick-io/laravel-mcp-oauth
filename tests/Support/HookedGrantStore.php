@@ -15,13 +15,19 @@ use Qiick\McpOAuth\Testing\FakeGrantStore;
 /**
  * Wraps a FakeGrantStore and runs a hook at one moment of a request, to
  * reproduce what a concurrent request would do in between: a new consent
- * right after a code is consumed, or a look at the tokens when a grant is
- * revoked.
+ * right after a code is consumed, a replay of the code while the winner binds
+ * its token, or a look at the tokens when a grant is revoked.
  */
 final class HookedGrantStore implements GrantStore
 {
     /** Runs once, after the next activeFor(). */
     public ?Closure $afterNextActiveFor = null;
+
+    /** Runs once, before the next find() reads the grant. */
+    public ?Closure $beforeNextFind = null;
+
+    /** Runs once, after the next find() has read the grant and before it returns it. */
+    public ?Closure $afterNextFind = null;
 
     /** @var Closure(string): void|null runs before every revoke(), with the grant id */
     public ?Closure $beforeRevoke = null;
@@ -32,7 +38,22 @@ final class HookedGrantStore implements GrantStore
 
     public function find(string $grantId): ?GrantRecord
     {
-        return $this->grantStore->find($grantId);
+        $beforeHook = $this->beforeNextFind;
+        $this->beforeNextFind = null;
+
+        if ($beforeHook !== null) {
+            $beforeHook();
+        }
+
+        $grant = $this->grantStore->find($grantId);
+        $afterHook = $this->afterNextFind;
+        $this->afterNextFind = null;
+
+        if ($afterHook !== null) {
+            $afterHook();
+        }
+
+        return $grant;
     }
 
     public function activeFor(string $clientId, string $userIdentifier): ?GrantRecord

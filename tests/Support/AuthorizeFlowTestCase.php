@@ -16,6 +16,7 @@ use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\ConsentOption;
 use Qiick\McpOAuth\Data\ConsentOptions;
 use Qiick\McpOAuth\McpOAuthServer;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
 use Qiick\McpOAuth\Testing\FakeAdminSwitch;
 use Qiick\McpOAuth\Testing\FakeConsentProvider;
@@ -151,6 +152,12 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
             'revoked' => $isRevoked,
         ]);
         $client->save();
+        // The row DCR writes for every client it registers: this is an MCP client.
+        OAuthClientMetadata::query()->create([
+            'client_id' => $client->getKey(),
+            'registration_source' => 'dcr',
+            'token_endpoint_auth_method' => 'none',
+        ]);
 
         return $client;
     }

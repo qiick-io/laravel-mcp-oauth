@@ -19,6 +19,7 @@ use Qiick\McpOAuth\Events\McpPassportKeysMissing;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
 use Qiick\McpOAuth\Testing\FakeAdminSwitch;
 use Qiick\McpOAuth\Tests\Support\PassportBootedTestCase;
@@ -165,6 +166,21 @@ it('registers a public client through the redirect URI guard', function (): void
     Event::assertDispatched(McpClientRegistered::class, function (McpClientRegistered $event): bool {
         return $event->displayHosts === ['app.example'];
     });
+});
+
+it('records every registered client as an MCP client in oauth_client_metadata', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $clientId = $this->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+    ])->assertCreated()->json('client_id');
+
+    $metadata = OAuthClientMetadata::query()->where('client_id', $clientId)->sole();
+
+    expect($metadata->registration_source)->toBe('dcr')
+        ->and($metadata->token_endpoint_auth_method)->toBe('none');
 });
 
 it('refuses a fragment redirect_uri via the guard before Passport create (B3)', function (): void {

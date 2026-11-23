@@ -158,3 +158,24 @@ it('keeps only the MCP grants on the server, and personal access on its own, wha
         ->and(array_keys($personalAccessGrantTypes))->toContain('personal_access')
         ->and(array_keys($personalAccessGrantTypes))->not->toContain('password');
 });
+
+it('leaves the product\'s Passport grants alone while OAuth is off', function (): void {
+    config([
+        'mcp-oauth.enabled' => false,
+        'passport.private_key' => passportTestKeyContents('oauth-private.key'),
+        'passport.public_key' => passportTestKeyContents('oauth-public.key'),
+    ]);
+    Passport::enablePasswordGrant();
+
+    try {
+        (new McpOAuthServiceProvider($this->app))->boot();
+        $this->app->forgetInstance(AuthorizationServer::class);
+        $authorizationServer = $this->app->make(AuthorizationServer::class);
+        $enabledGrantTypes = (new ReflectionProperty($authorizationServer, 'enabledGrantTypes'))->getValue($authorizationServer);
+    } finally {
+        Passport::$passwordGrantEnabled = false;
+    }
+
+    expect(array_keys($enabledGrantTypes))->toContain('password')
+        ->and(array_keys($enabledGrantTypes))->toContain('client_credentials');
+});

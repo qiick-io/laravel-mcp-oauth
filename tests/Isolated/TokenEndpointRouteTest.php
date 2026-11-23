@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Laravel\Passport\Client;
 use Laravel\Passport\Events\AccessTokenCreated;
@@ -18,6 +19,7 @@ use Laravel\Passport\Passport;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\CryptTrait;
 use Qiick\McpOAuth\Actions\BindAccessTokenAction;
+use Qiick\McpOAuth\Actions\RevokeAuthCodeTokensAction;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
@@ -25,6 +27,7 @@ use Qiick\McpOAuth\Events\McpRefreshTokenReused;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 use Qiick\McpOAuth\Tests\Support\HookedGrantStore;
 
@@ -728,6 +731,7 @@ it('binds only tokens of MCP clients and leaves the product\'s own tokens alone'
     $this->enableOAuth();
     $personalAccessClient = $this->createClient();
     $personalAccessClient->forceFill(['grant_types' => ['personal_access']])->save();
+    OAuthClientMetadata::query()->where('client_id', $personalAccessClient->getKey())->delete();
     $user = $this->createUser();
     DB::table('oauth_access_tokens')->insert([
         'id' => 'personal-token', 'user_id' => $user->getKey(), 'client_id' => $personalAccessClient->getKey(),
@@ -801,3 +805,58 @@ it('challenges with the scheme the client used, as league does', function (): vo
         ->assertStatus(401)
         ->assertHeader('WWW-Authenticate', 'Bearer realm="OAuth"');
 });
+
+// --- Re-review of #16: the race winner, MCP clients only ---------------------
+
+it('revokes the race winner\'s token whichever side of its binding the replay lands', function (string $replayMoment): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $code] = $this->obtainAuthorizationCode($client);
+    $hookedGrantStore = hookGrantStore($this);
+    // The loser's replay, run inside the winner's request where the race puts it.
+    $replay = static function () use ($client): void {
+        $codeId = (string) DB::table('oauth_auth_codes')->where('client_id', $client->getKey())->value('id');
+        app(RevokeAuthCodeTokensAction::class)->execute($codeId);
+    };
+
+    if ($replayMoment === 'after the winner reads its grant') {
+        $hookedGrantStore->afterNextFind = $replay;
+    } else {
+        $hookedGrantStore->beforeNextFind = $replay;
+    }
+
+    postToken($this, $this->codeExchange($client, $code))->assertOk();
+
+    expect(DB::table('oauth_access_tokens')->where('client_id', $client->getKey())->where('revoked', false)->count())->toBe(0)
+        ->and(collect($this->grantStore()->revocations)->pluck('reason')->all())->toContain(RevocationReason::Reuse);
+})->with(['after the winner reads its grant', 'before the winner reads its grant']);
+
+it('leaves alone the tokens of a client the package did not register', function (string $clientKind): void {
+    $this->enableOAuth();
+    $user = $this->createUser();
+    // An authorization_code client with no oauth_client_metadata row: the
+    // product's own app, or a personal access client migrated from Passport 12.
+    $productClient = new Client;
+    $productClient->forceFill([
+        'id' => (string) Str::uuid7(),
+        'name' => $clientKind,
+        'secret' => null,
+        'redirect_uris' => ['https://app.example/own'],
+        'grant_types' => $clientKind === 'product app'
+            ? ['authorization_code', 'refresh_token']
+            : ['authorization_code', 'implicit', 'personal_access', 'refresh_token'],
+        'revoked' => false,
+    ])->save();
+    DB::table('oauth_access_tokens')->insert([
+        'id' => 'product-token', 'user_id' => $user->getKey(), 'client_id' => $productClient->getKey(),
+        'name' => 'cli', 'scopes' => '[]', 'revoked' => false, 'created_at' => now(), 'updated_at' => now(), 'expires_at' => now()->addDay(),
+    ]);
+
+    event(new AccessTokenCreated('product-token', (string) $user->getKey(), (string) $productClient->getKey()));
+
+    $tokenRow = DB::table('oauth_access_tokens')->where('id', 'product-token')->sole();
+
+    expect((bool) $tokenRow->revoked)->toBeFalse()
+        ->and($tokenRow->api_key_id)->toBeNull();
+})->with(['product app', 'migrated personal access client']);
