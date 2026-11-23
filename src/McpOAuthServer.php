@@ -92,9 +92,11 @@ final class McpOAuthServer
 
     public function acceptsResource(mixed $resource): bool
     {
-        // Host (and path) compared case-insensitively; trailing slash ignored.
+        // RFC 8707: the resource is compared exactly, byte for byte; only a
+        // trailing slash is ignored. Case folding would let a distinct path
+        // (`/API/MCP` vs `/api/mcp`) stand for this resource.
         return is_string($resource)
-            && strtolower(rtrim($resource, '/')) === strtolower($this->resourceIdentifier()); // @pest-mutate-ignore: UnwrapStrtolower
+            && rtrim($resource, '/') === $this->resourceIdentifier();
     }
 
     public function protectedResourceMetadataUrl(): string

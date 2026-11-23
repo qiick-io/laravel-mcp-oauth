@@ -22,6 +22,7 @@ use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
 use Qiick\McpOAuth\RedirectUriGuard;
 use Qiick\McpOAuth\Testing\FakeAdminSwitch;
 use Qiick\McpOAuth\Tests\Support\PassportBootedTestCase;
+use Qiick\McpOAuth\Tests\Support\SeparateTableClient;
 
 uses(PassportBootedTestCase::class);
 
@@ -216,6 +217,67 @@ it('answers 503 when the global client cap is reached', function (): void {
         'redirect_uris' => ['https://app.example/callback'],
     ])->assertStatus(503)
         ->assertJsonPath('error', 'temporarily_unavailable');
+});
+
+it('counts the cap on the client model Passport writes to', function (): void {
+    enableMcpOAuthWithKeys();
+    config()->set('mcp-oauth.registrations_global_cap', 1);
+    Schema::create('product_oauth_clients', function (Blueprint $table): void {
+        $table->uuid('id')->primary();
+        $table->nullableMorphs('owner');
+        $table->string('name');
+        $table->string('secret')->nullable();
+        $table->string('provider')->nullable();
+        $table->text('redirect_uris');
+        $table->text('grant_types');
+        $table->boolean('revoked');
+        $table->timestamps();
+    });
+    Passport::useClientModel(SeparateTableClient::class);
+
+    try {
+        (new SeparateTableClient)->forceFill([
+            'id' => (string) Str::uuid7(),
+            'name' => 'Existing',
+            'redirect_uris' => ['https://existing.example/cb'],
+            'grant_types' => ['authorization_code', 'refresh_token'],
+            'revoked' => false,
+        ])->save();
+
+        McpOAuthRoutes::register();
+
+        $this->postJson('/oauth/register', [
+            'client_name' => 'Over Cap',
+            'redirect_uris' => ['https://app.example/callback'],
+        ])->assertStatus(503)
+            ->assertJsonPath('error', 'temporarily_unavailable');
+    } finally {
+        Passport::useClientModel(Client::class);
+    }
+
+    expect(SeparateTableClient::query()->count())->toBe(1);
+});
+
+it('refuses a subdomain of a blocked host only when the row matches subdomains', function (): void {
+    enableMcpOAuthWithKeys();
+    OAuthBlockedRedirectHost::query()->create(['host' => 'exact.test', 'match_mode' => 'exact']);
+    OAuthBlockedRedirectHost::query()->create(['host' => 'wide.test', 'match_mode' => 'host_and_subdomains']);
+    // An unknown mode is read as the wider block, never as a narrower one.
+    OAuthBlockedRedirectHost::query()->create(['host' => 'typo.test', 'match_mode' => 'Exact']);
+    McpOAuthRoutes::register();
+
+    $this->postJson('/oauth/register', [
+        'client_name' => 'Subdomain of an exact block',
+        'redirect_uris' => ['https://app.exact.test/callback'],
+    ])->assertStatus(201);
+
+    foreach (['https://exact.test/callback', 'https://wide.test/callback', 'https://app.wide.test/callback', 'https://app.typo.test/callback'] as $blockedRedirectUri) {
+        $this->postJson('/oauth/register', [
+            'client_name' => 'Blocked',
+            'redirect_uris' => [$blockedRedirectUri],
+        ])->assertStatus(400)
+            ->assertJsonPath('error', 'invalid_redirect_uri');
+    }
 });
 
 it('limits unauthenticated registrations per address with Retry-After', function (): void {

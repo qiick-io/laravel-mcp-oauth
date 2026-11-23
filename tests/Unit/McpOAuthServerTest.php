@@ -91,7 +91,6 @@ it('builds issuer and resource from APP_URL, never the request Host', function (
     expect($server->issuer())->toBe('https://mcp-oauth.test')
         ->and($server->resourceIdentifier())->toBe('https://mcp-oauth.test/mcp')
         ->and($server->acceptsResource('https://mcp-oauth.test/mcp'))->toBeTrue()
-        ->and($server->acceptsResource('https://MCP-OAUTH.TEST/mcp'))->toBeTrue()
         ->and($server->acceptsResource('https://evil.example/mcp'))->toBeFalse()
         ->and($server->protectedResourceMetadataUrl())->toBe(
             'https://mcp-oauth.test/.well-known/oauth-protected-resource/mcp',
@@ -203,3 +202,16 @@ it('accepts mode-600, 440 and 660 key files as usable', function (int $mode): vo
     '440' => [0440],
     '660' => [0660],
 ]);
+
+it('accepts only the exact resource identifier, apart from a trailing slash (RFC 8707)', function (): void {
+    $server = makeServer(true, true);
+    config()->set('app.url', 'https://mcp.example/API');
+    config()->set('mcp-oauth.mcp_path', 'MCP');
+
+    expect($server->resourceIdentifier())->toBe('https://mcp.example/API/MCP')
+        ->and($server->acceptsResource('https://mcp.example/API/MCP'))->toBeTrue()
+        ->and($server->acceptsResource('https://mcp.example/API/MCP/'))->toBeTrue()
+        ->and($server->acceptsResource('https://mcp.example/api/mcp'))->toBeFalse()
+        ->and($server->acceptsResource('https://MCP.EXAMPLE/API/MCP'))->toBeFalse()
+        ->and($server->acceptsResource('HTTPS://mcp.example/API/MCP'))->toBeFalse();
+});

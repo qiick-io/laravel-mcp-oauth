@@ -8,7 +8,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Laravel\Mcp\Server\Http\Controllers\OAuthRegisterController;
-use Laravel\Passport\Client;
+use Laravel\Passport\Passport;
 use Qiick\McpOAuth\ClientMetadataUriGuard;
 use Qiick\McpOAuth\Events\McpClientRegistered;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
@@ -268,8 +268,14 @@ final class RegisterClientController extends OAuthRegisterController
         return $displayHosts;
     }
 
+    /**
+     * Counts on Passport's configured client model, the one its
+     * ClientRepository writes to: a product that calls
+     * `Passport::useClientModel()` must not leave the cap counting a table
+     * nobody fills.
+     */
     private function nonRevokedClientCount(): int
     {
-        return Client::query()->where('revoked', false)->count();
+        return Passport::client()->newQuery()->where('revoked', false)->count();
     }
 }

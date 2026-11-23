@@ -6,8 +6,8 @@ declare(strict_types=1);
  * qiick/laravel-mcp-oauth configuration.
  *
  * Defaults match the binding design (projects/qiick/packages/laravel-mcp-oauth-design.md).
- * Boot-time validation of ranges and required keys lands with the feature PRs
- * that enforce the three gates.
+ * Every integer key is validated at boot (design §6); an invalid value fails
+ * closed with a message instead of being cast or replaced.
  */
 
 return [
@@ -67,14 +67,19 @@ return [
 
     'revoke_requests_per_client_per_minute' => env('MCP_OAUTH_REVOKE_REQUESTS_PER_CLIENT_PER_MINUTE', '20'),
 
-    'registrations_global_cap' => (int) env('MCP_OAUTH_REGISTRATIONS_GLOBAL_CAP', 10000),
+    /*
+     * Integer keys below stay raw env strings like the TTLs: `(int) env()`
+     * would turn `1e3` into 1000 and `abc` into 0 before boot validation
+     * sees them. Boot fails closed outside 1..the documented maximum.
+     */
+    'registrations_global_cap' => env('MCP_OAUTH_REGISTRATIONS_GLOBAL_CAP', '10000'),
 
-    'unused_client_retention_hours' => (int) env('MCP_OAUTH_UNUSED_CLIENT_RETENTION_HOURS', 24),
+    'unused_client_retention_hours' => env('MCP_OAUTH_UNUSED_CLIENT_RETENTION_HOURS', '24'),
 
     /*
      * Days a revoked client or grant stays before mcp-oauth:purge-revoked.
      */
-    'revoked_retention_days' => (int) env('MCP_OAUTH_REVOKED_RETENTION_DAYS', 90),
+    'revoked_retention_days' => env('MCP_OAUTH_REVOKED_RETENTION_DAYS', '90'),
 
     /*
      * /mcp Bearer auth-failure limiter (lands with the door). Raw env string;
@@ -95,10 +100,10 @@ return [
      */
     'cimd' => [
         'enabled' => (bool) env('MCP_OAUTH_CIMD_ENABLED', false),
-        'max_document_bytes' => (int) env('MCP_OAUTH_CIMD_MAX_DOCUMENT_BYTES', 65536),
-        'timeout_seconds' => (int) env('MCP_OAUTH_CIMD_TIMEOUT_SECONDS', 5),
-        'cache_min_seconds' => (int) env('MCP_OAUTH_CIMD_CACHE_MIN_SECONDS', 60),
-        'cache_max_seconds' => (int) env('MCP_OAUTH_CIMD_CACHE_MAX_SECONDS', 86400),
+        'max_document_bytes' => env('MCP_OAUTH_CIMD_MAX_DOCUMENT_BYTES', '65536'),
+        'timeout_seconds' => env('MCP_OAUTH_CIMD_TIMEOUT_SECONDS', '5'),
+        'cache_min_seconds' => env('MCP_OAUTH_CIMD_CACHE_MIN_SECONDS', '60'),
+        'cache_max_seconds' => env('MCP_OAUTH_CIMD_CACHE_MAX_SECONDS', '86400'),
     ],
 
     /*
