@@ -36,7 +36,7 @@ final class McpOAuthServer
 
     public function isEnabled(): bool
     {
-        if (! (bool) $this->config->get('mcp-oauth.enabled', false)) { // @pest-mutate-ignore: RemoveBooleanCast
+        if (! $this->config->get('mcp-oauth.enabled', false)) {
             return false;
         }
 
@@ -153,7 +153,8 @@ final class McpOAuthServer
             return (bool) $mcpEnabled();
         }
 
-        if (is_string($mcpEnabled) && $mcpEnabled !== '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
+        // An empty key names no config entry, so it reads the `false` default.
+        if (is_string($mcpEnabled)) {
             return (bool) $this->config->get($mcpEnabled, false);
         }
 

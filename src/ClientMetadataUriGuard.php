@@ -51,7 +51,7 @@ final class ClientMetadataUriGuard
         }
 
         // parseCanonical guarantees a host for http(s); the cast only satisfies PHPStan.
-        $host = (string) $parsedUri->normalizedHost; // @pest-mutate-ignore: RemoveStringCast — never null for http(s)
+        $host = (string) $parsedUri->normalizedHost; // @pest-mutate-ignore: RemoveStringCast
 
         if (filter_var($host, FILTER_VALIDATE_IP) === false) {
             return $this->isPublicHostname($host);
@@ -113,7 +113,8 @@ final class ClientMetadataUriGuard
 
     private function bitsOf(string $ipAddress): string
     {
-        $packedAddress = (string) inet_pton($ipAddress); // @pest-mutate-ignore: RemoveStringCast — callers pass validated IP literals
+        // Callers pass validated IP literals, so inet_pton never returns false; the cast only narrows the type.
+        $packedAddress = (string) inet_pton($ipAddress); // @pest-mutate-ignore: RemoveStringCast
 
         $bits = '';
 

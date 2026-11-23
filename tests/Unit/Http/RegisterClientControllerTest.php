@@ -139,7 +139,10 @@ it('refuses redirect_uris that are not a JSON array list', function (): void {
     ]));
 
     expect($response->getStatusCode())->toBe(400)
-        ->and($response->getData(true)['error'])->toBe('invalid_redirect_uri');
+        ->and($response->getData(true))->toBe([
+            'error' => 'invalid_redirect_uri',
+            'error_description' => 'redirect_uris must be a JSON array.',
+        ]);
 });
 
 it('refuses client_name with a bidi override', function (): void {
@@ -151,7 +154,10 @@ it('refuses client_name with a bidi override', function (): void {
     ]));
 
     expect($response->getStatusCode())->toBe(400)
-        ->and($response->getData(true)['error'])->toBe('invalid_client_metadata');
+        ->and($response->getData(true))->toBe([
+            'error' => 'invalid_client_metadata',
+            'error_description' => 'client_name must be valid UTF-8 with visible text and no control, separator or formatting characters.',
+        ]);
 });
 
 it('refuses logo_uri that fails the metadata URI guard', function (): void {
@@ -164,7 +170,10 @@ it('refuses logo_uri that fails the metadata URI guard', function (): void {
     ]));
 
     expect($response->getStatusCode())->toBe(400)
-        ->and($response->getData(true)['error'])->toBe('invalid_client_metadata');
+        ->and($response->getData(true))->toBe([
+            'error' => 'invalid_client_metadata',
+            'error_description' => 'logo_uri is not an allowed URI.',
+        ]);
 });
 
 it('allows https logo_uri to a public host while still guarding redirects separately', function (): void {
@@ -228,7 +237,10 @@ it('refuses client_uri that fails the guard', function (): void {
     ]));
 
     expect($response->getStatusCode())->toBe(400)
-        ->and($response->getData(true)['error'])->toBe('invalid_client_metadata');
+        ->and($response->getData(true))->toBe([
+            'error' => 'invalid_client_metadata',
+            'error_description' => 'client_uri is not an allowed URI.',
+        ]);
 });
 
 it('accepts a blank logo_uri without treating it as present', function (): void {
@@ -274,6 +286,9 @@ it('resolves client_name then name then display host then default', function ():
         ]]))->toBe('cursor')
         ->and(invokeRegisterClientControllerMethod($controller, 'resolveClientName', [[
             'redirect_uris' => [null],
+        ]]))->toBe('MCP Client')
+        ->and(invokeRegisterClientControllerMethod($controller, 'resolveClientName', [[
+            'redirect_uris' => ['https://app.example/cb#unparsable'],
         ]]))->toBe('MCP Client')
         ->and(invokeRegisterClientControllerMethod($controller, 'resolveClientName', [[
             'redirect_uris' => 'not-array',
@@ -341,4 +356,47 @@ it('allows hostless private-use schemes that pass registration', function (): vo
         'isRedirectUriAllowedForRegistration',
         ['myapp://callback'],
     ))->toBeBool();
+});
+
+it('counts the raw body against the limit when Content-Length is absent or not a number', function (string $contentLengthHeader): void {
+    [$controller] = makeRegisterClientController();
+
+    foreach ([65_536 => false, 65_537 => true] as $bodyBytes => $shouldExceed) {
+        $request = Request::create('/oauth/register', 'POST', content: str_repeat('a', $bodyBytes));
+        $request->headers->remove('Content-Length');
+
+        if ($contentLengthHeader !== '') {
+            $request->headers->set('Content-Length', $contentLengthHeader);
+        }
+
+        expect(invokeRegisterClientControllerMethod($controller, 'bodyExceedsLimit', [$request]))->toBe($shouldExceed);
+    }
+})->with([
+    'absent' => [''],
+    'not a number' => ['abc'],
+    'number with a suffix' => ['70000abc'],
+]);
+
+it('refuses a Content-Length one byte over 65 536', function (): void {
+    [$controller] = makeRegisterClientController();
+    $request = Request::create('/oauth/register', 'POST');
+
+    $request->headers->set('Content-Length', '65536');
+    expect(invokeRegisterClientControllerMethod($controller, 'bodyExceedsLimit', [$request]))->toBeFalse();
+
+    $request->headers->set('Content-Length', '65537');
+    expect(invokeRegisterClientControllerMethod($controller, 'bodyExceedsLimit', [$request]))->toBeTrue();
+});
+
+it('ignores an empty client_name instead of refusing it as invisible', function (): void {
+    [$controller] = makeRegisterClientController();
+
+    $response = $controller(Request::create('/oauth/register', 'POST', [
+        'client_name' => '',
+        'redirect_uris' => ['https://app.example/callback#frag'],
+    ]));
+
+    // The request gets past the name check and fails on the next one.
+    expect($response->getStatusCode())->toBe(400)
+        ->and($response->getData(true)['error'])->toBe('invalid_redirect_uri');
 });

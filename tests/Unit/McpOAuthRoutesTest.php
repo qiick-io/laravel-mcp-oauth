@@ -25,9 +25,10 @@ it('throws when any passport-prefixed route name is already registered', functio
         McpOAuthRoutes::register();
         expect(false)->toBeTrue('expected LogicException');
     } catch (LogicException $exception) {
-        expect($exception->getMessage())
-            ->toContain('passport.authorizations.authorize')
-            ->and($exception->getMessage())->toContain('Signaculum');
+        expect($exception->getMessage())->toBe(
+            'McpOAuthRoutes::register() refuses to run beside foreign Passport route [passport.authorizations.authorize]. '
+            .'This package is not an adopter for Signaculum-style Passport IdPs (design §3.3).',
+        );
     }
 });
 

@@ -37,10 +37,10 @@ final class McpOAuthRoutes
             // Non-POST methods share the off-gate. When OAuth is on they 405;
             // when off the middleware already answered the router's 404.
             Route::match(
-                ['GET', 'HEAD', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], // @pest-mutate-ignore: RemoveArrayItem — every non-POST verb must share the off-gate
+                ['GET', 'HEAD', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
                 'oauth/register',
                 static function (): never {
-                    throw new MethodNotAllowedHttpException(['POST']); // @pest-mutate-ignore: RemoveArrayItem — Allow: POST when OAuth is on
+                    throw new MethodNotAllowedHttpException(['POST']);
                 },
             );
 
@@ -100,11 +100,10 @@ final class McpOAuthRoutes
             $routeName = $route->getName();
 
             if (! is_string($routeName) || ! str_starts_with($routeName, 'passport.')) {
-                continue; // @pest-mutate-ignore: ContinueToBreak — must keep scanning for a later passport.* name
+                continue;
             }
 
-            // Message shape is fixed copy; order of the two clauses is not load-bearing.
-            throw new LogicException( // @pest-mutate-ignore: ConcatSwitchSides
+            throw new LogicException(
                 "McpOAuthRoutes::register() refuses to run beside foreign Passport route [{$routeName}]. ".
                 'This package is not an adopter for Signaculum-style Passport IdPs (design §3.3).',
             );
