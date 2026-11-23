@@ -132,6 +132,13 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
 
         $accessTokenId = $refreshToken->getAttribute('access_token_id');
 
+        // Passport's column is not null, but a custom refresh-token model may
+        // allow it: `where(..., null)` would become `whereNull` and revoke the
+        // orphaned refresh tokens of every user.
+        if ($accessTokenId === null) {
+            return;
+        }
+
         /** @var Token|null $accessToken */
         $accessToken = Passport::token()->newQuery()->whereKey($accessTokenId)->first();
 

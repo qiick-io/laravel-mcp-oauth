@@ -656,3 +656,26 @@ it('rotates a refresh token whose access token row was purged', function (): voi
     expect(Passport::refreshToken()->newQuery()->whereKey($family['refreshTokenId'])->value('revoked'))->toBeTrue()
         ->and($grantStore->revocations)->toBe([]);
 });
+
+it('leaves other refresh tokens alone when a custom schema allows a null access_token_id', function (): void {
+    Schema::dropIfExists('oauth_refresh_tokens');
+    Schema::create('oauth_refresh_tokens', function (Blueprint $table): void {
+        $table->string('id', 80)->primary();
+        $table->string('access_token_id', 80)->nullable()->index();
+        $table->boolean('revoked');
+        $table->dateTime('expires_at')->nullable();
+    });
+
+    foreach (['orphan-refresh-of-one-user', 'orphan-refresh-of-another-user'] as $orphanRefreshTokenId) {
+        Passport::refreshToken()->forceFill([
+            'id' => $orphanRefreshTokenId,
+            'access_token_id' => null,
+            'revoked' => false,
+            'expires_at' => now()->addDay(),
+        ])->save();
+    }
+
+    app(FamilyRevokingRefreshTokenRepository::class)->revokeFamilyForRefreshToken('orphan-refresh-of-one-user');
+
+    expect(Passport::refreshToken()->newQuery()->whereKey('orphan-refresh-of-another-user')->value('revoked'))->toBeFalse();
+});
