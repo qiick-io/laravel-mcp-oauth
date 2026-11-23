@@ -6,6 +6,7 @@ namespace Qiick\McpOAuth\Services;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as IlluminateResponse;
+use Illuminate\Support\Str;
 use Laravel\Passport\Http\Controllers\ConvertsPsrResponses;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Exception\OAuthServerException;
@@ -87,7 +88,7 @@ final class AuthorizationResponseService
 
         $keptPairs = array_filter(
             explode('&', $query),
-            static fn (string $pair): bool => $pair !== '' && urldecode(explode('=', $pair, 2)[0]) !== 'iss',
+            static fn (string $pair): bool => $pair !== '' && urldecode(Str::before($pair, '=')) !== 'iss',
         );
         $keptPairs[] = http_build_query(['iss' => $this->mcpOAuthServer->issuer()]);
 

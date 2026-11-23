@@ -1020,7 +1020,7 @@ it('keeps the framing headers on the browser 503 page', function (): void {
 it('replaces an iss the registered redirect URI already carries', function (): void {
     $this->enableOAuth();
     McpOAuthRoutes::register();
-    $redirectUri = 'https://app.example/callback?iss=https%3A%2F%2Fevil.example&tenant=7';
+    $redirectUri = 'https://app.example/callback?iss=https%3A%2F%2Fevil.example&next=/a?b=1&tenant=7';
     $client = $this->createClient([$redirectUri]);
 
     $response = $this->actingAs($this->createUser())
@@ -1034,6 +1034,7 @@ it('replaces an iss the registered redirect URI already carries', function (): v
 
     expect($issValues)->toBe(['iss='.urlencode('https://mcp-oauth.test')])
         ->and(queryOfLocation((string) $response->headers->get('Location')))->toMatchArray([
+            'next' => '/a?b=1',
             'tenant' => '7',
             'error' => 'consent_required',
             'state' => 'state-1234',
