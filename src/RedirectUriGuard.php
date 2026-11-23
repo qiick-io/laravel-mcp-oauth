@@ -72,12 +72,13 @@ final class RedirectUriGuard
         // IDNA_DEFAULT already includes NONTRANSITIONAL_TO_ASCII; OR STD3 so underscores fail.
         $asciiHost = idn_to_ascii(
             $normalizedHost,
-            IDNA_DEFAULT | IDNA_USE_STD3_RULES, // @pest-mutate-ignore: BitwiseOrToBitwiseAnd
+            IDNA_DEFAULT | IDNA_USE_STD3_RULES,
             INTL_IDNA_VARIANT_UTS46,
         );
 
-        // idn_to_ascii returns false on STD3/IDNA failure; '?' is the legacy soft failure.
-        if ($asciiHost === false || $asciiHost === '' || str_contains($asciiHost, '?')) { // @pest-mutate-ignore: EmptyStringToNotEmpty
+        // idn_to_ascii returns false on STD3/IDNA failure (an input that maps
+        // to nothing included); '?' is the legacy soft failure.
+        if ($asciiHost === false || str_contains($asciiHost, '?')) {
             throw new InvalidArgumentException('Host is not a valid internationalised domain name.');
         }
 
@@ -119,11 +120,8 @@ final class RedirectUriGuard
      */
     public function clientHasExactRedirectUri(Client $client, string $redirectUri): bool
     {
+        /** @var array<mixed> $redirectUris Passport's redirectUris accessor always returns an array */
         $redirectUris = $client->getAttribute('redirect_uris');
-
-        if (! is_array($redirectUris)) {
-            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
-        }
 
         foreach ($redirectUris as $registeredUri) {
             if (is_string($registeredUri) && $this->areExactlyEqual($registeredUri, $redirectUri)) {
@@ -146,7 +144,8 @@ final class RedirectUriGuard
             return $parsed->scheme;
         }
 
-        return $parsed->normalizedHost !== null ? $parsed->normalizedHost : '';
+        // parseCanonical never yields a null http(s) host; the cast only narrows the type.
+        return (string) $parsed->normalizedHost; // @pest-mutate-ignore: RemoveStringCast
     }
 
     public function isHostBlocked(string $host): bool
@@ -158,10 +157,7 @@ final class RedirectUriGuard
         }
 
         foreach ($this->blockedHosts->all() as $blockedHost) {
-            if ($blockedHost->host === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
-                continue;
-            }
-
+            // An empty or malformed row cannot normalise and is skipped.
             try {
                 $normalizedBlocked = $this->normalizeHost($blockedHost->host);
             } catch (InvalidArgumentException) {
@@ -182,28 +178,21 @@ final class RedirectUriGuard
 
     public function clientHasBlockedRedirectHost(Client $client): bool
     {
+        /** @var array<mixed> $redirectUris Passport's redirectUris accessor always returns an array */
         $redirectUris = $client->getAttribute('redirect_uris');
-
-        // Passport's redirectUris Attribute always returns an array; keep the guard for stubs.
-        if (! is_array($redirectUris)) {
-            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
-        }
 
         foreach ($redirectUris as $redirectUri) {
             if (! is_string($redirectUri)) {
                 continue;
             }
 
-            // Existing rows must still satisfy registration rules (e.g. backslash / hostless forms).
+            // Existing rows must still satisfy registration rules (e.g. backslash /
+            // hostless forms, non-loopback http); passing them means the parse succeeded.
             if (! $this->isAcceptableForRegistration($redirectUri)) {
-                return true; // @pest-mutate-ignore: RemoveEarlyReturn — hostOf throws on the same URI; still true
+                return true;
             }
 
-            try {
-                $host = $this->hostOf($redirectUri);
-            } catch (InvalidArgumentException) {
-                return true; // @pest-mutate-ignore: TrueToFalse
-            }
+            $host = $this->hostOf($redirectUri);
 
             if ($host !== null && $this->isHostBlocked($host)) {
                 return true;
@@ -241,33 +230,33 @@ final class RedirectUriGuard
         try {
             $parts = UriString::parse($redirectUri);
         } catch (Throwable $exception) {
-            throw new InvalidArgumentException('Redirect URI could not be parsed.', 0, $exception); // @pest-mutate-ignore: DecrementInteger,IncrementInteger
+            throw new InvalidArgumentException('Redirect URI could not be parsed.', previous: $exception);
         }
 
-        $scheme = $parts['scheme'] ?? null;
+        // League always returns every component key; an absent one is null.
+        $scheme = $parts['scheme'];
 
-        if (! is_string($scheme) || $scheme === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty,BooleanOrToBooleanAnd
+        if ($scheme === null) {
             throw new InvalidArgumentException('Redirect URI requires a scheme.');
         }
 
         $normalizedScheme = Str::lower($scheme);
 
-        // League always sets user/pass keys; refuse either when present.
-        if (($parts['user'] ?? null) !== null || ($parts['pass'] ?? null) !== null) { // @pest-mutate-ignore: CoalesceRemoveLeft
+        if ($parts['user'] !== null || $parts['pass'] !== null) {
             throw new InvalidArgumentException('Redirect URI must not contain userinfo.');
         }
 
-        $rawHost = $parts['host'] ?? null;
-        $hasHost = is_string($rawHost) && $rawHost !== '';
+        $rawHost = $parts['host'];
+        $hasHost = $rawHost !== null && $rawHost !== '';
 
         if ($this->isHttpFamilyScheme($normalizedScheme) && ! $hasHost) {
             throw new InvalidArgumentException('http(s) redirect URI requires a non-empty host.');
         }
 
-        $port = $this->canonicalPort($parts['port'] ?? null);
-        $path = is_string($parts['path'] ?? null) ? $parts['path'] : '';
-        $rawQuery = $parts['query'] ?? null;
-        $query = is_string($rawQuery) && $rawQuery !== '' ? $rawQuery : null;
+        $port = $parts['port'];
+        $path = $parts['path'];
+        // `cb?` and `cb` are the same redirect: an empty query is no query.
+        $query = $parts['query'] === '' ? null : $parts['query'];
 
         if (! $hasHost) {
             return new ParsedRedirectUriData($normalizedScheme, null, $port, $path, $query);
@@ -289,20 +278,6 @@ final class RedirectUriGuard
         );
     }
 
-    private function canonicalPort(mixed $port): ?int
-    {
-        if (is_int($port)) {
-            return $port;
-        }
-
-        // League UriString may yield a digit string for the port.
-        if (is_string($port) && preg_match('/^\d+$/', $port) === 1) {
-            return (int) $port; // @pest-mutate-ignore: RemoveIntegerCast,RemoveEarlyReturn — digit string → int is the branch
-        }
-
-        return null;
-    }
-
     private function isSchemeAllowedForParsed(ParsedRedirectUriData $parsed): bool
     {
         if (in_array($parsed->scheme, $this->dangerousSchemes(), true)) {
@@ -317,10 +292,6 @@ final class RedirectUriGuard
 
         if ($this->isHttpFamilyScheme($parsed->scheme)) {
             // parseCanonical never yields a null http(s) host (throws instead).
-            if ($parsed->normalizedHost === null) {
-                return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn — unreachable for http(s); parseCanonical throws first
-            }
-
             if ($parsed->scheme === 'https') {
                 return true;
             }
@@ -337,7 +308,7 @@ final class RedirectUriGuard
         $allowed = [];
 
         foreach ($customSchemes as $value) {
-            if (is_string($value) && $value !== '') { // @pest-mutate-ignore: EmptyStringToNotEmpty,BooleanAndToBooleanOr
+            if (is_string($value)) {
                 $allowed[] = Str::lower($value);
             }
         }
@@ -353,7 +324,7 @@ final class RedirectUriGuard
      */
     private function canonicalizeIpHostOrRejectAmbiguous(string $host): ?string
     {
-        if (str_contains($host, '%') || str_contains($host, "\0")) { // @pest-mutate-ignore: BooleanOrToBooleanAnd
+        if (str_contains($host, '%') || str_contains($host, "\0")) {
             throw new InvalidArgumentException('Host contains a forbidden character.');
         }
 
@@ -382,31 +353,28 @@ final class RedirectUriGuard
                 return $embeddedIpv4;
             }
 
-            $canonical = inet_ntop($packed);
-
-            if ($canonical === false) { // @pest-mutate-ignore: FalseToTrue
-                throw new InvalidArgumentException('IPv6 host could not be canonicalised.');
-            }
-
-            return Str::lower($canonical);
+            // inet_ntop writes IPv6 in lower case.
+            return $this->formatPackedIp($packed);
         }
 
-        if (strlen($packed) === 4) { // @pest-mutate-ignore: IdenticalToNotIdentical,DecrementInteger,IncrementInteger,IfNegated
-            $canonical = inet_ntop($packed);
+        // The only other inet_pton result is four IPv4 bytes.
+        $canonical = $this->formatPackedIp($packed);
 
-            if ($canonical === false) { // @pest-mutate-ignore: FalseToTrue
-                throw new InvalidArgumentException('IPv4 host could not be canonicalised.');
-            }
-
-            // inet_pton accepts octal/ambiguous spellings; only dotted-decimal may proceed.
-            if ($host !== $canonical) {
-                throw new InvalidArgumentException('Non-canonical IPv4 host forms are not allowed.');
-            }
-
-            return $canonical; // @pest-mutate-ignore: RemoveEarlyReturn
+        // inet_pton accepts octal/ambiguous spellings; only dotted-decimal may proceed.
+        if ($host !== $canonical) {
+            throw new InvalidArgumentException('Non-canonical IPv4 host forms are not allowed.');
         }
 
-        return null;
+        return $canonical;
+    }
+
+    /**
+     * inet_ntop fails only on a length other than 4 or 16 bytes, which
+     * inet_pton never produces; the cast only narrows the type.
+     */
+    private function formatPackedIp(string $packedAddress): string
+    {
+        return (string) inet_ntop($packedAddress); // @pest-mutate-ignore: RemoveStringCast
     }
 
     /**
@@ -472,7 +440,7 @@ final class RedirectUriGuard
         $isNat64WellKnown = str_starts_with($packed, "\x00\x64\xff\x9b\x00\x00\x00\x00\x00\x00\x00\x00");
         // 64:ff9b:1::/48 — prefix bytes 0..5 then six zero bytes; tested via [64:ff9b:1::a.b.c.d].
         $isNat64Local = str_starts_with($packed, "\x00\x64\xff\x9b\x00\x01")
-            && substr($packed, 6, 6) === "\x00\x00\x00\x00\x00\x00"; // @pest-mutate-ignore: IdenticalToNotIdentical,DecrementInteger,IncrementInteger,UnwrapSubstr — prefix already pins 64:ff9b:1; wrong substr cannot match a real NAT64-local address under the suite
+            && substr($packed, 6, 6) === "\x00\x00\x00\x00\x00\x00";
 
         if ($isIpv4Compatible && substr($packed, 0, 15) === str_repeat("\x00", 15)) {
             return null;
@@ -482,14 +450,12 @@ final class RedirectUriGuard
             return null;
         }
 
-        $ipv4 = inet_ntop(substr($packed, 12));
-
-        return $ipv4 === false ? null : $ipv4; // @pest-mutate-ignore: FalseToTrue,TernaryNegated
+        return $this->formatPackedIp(substr($packed, 12));
     }
 
     private function isHttpFamilyScheme(string $normalizedScheme): bool
     {
-        return $normalizedScheme === 'http' || $normalizedScheme === 'https'; // @pest-mutate-ignore: BooleanOrToBooleanAnd
+        return $normalizedScheme === 'http' || $normalizedScheme === 'https';
     }
 
     /**
@@ -506,7 +472,7 @@ final class RedirectUriGuard
 
     private function unwrapIpv6Host(string $host): string
     {
-        if (str_starts_with($host, '[') && str_ends_with($host, ']')) { // @pest-mutate-ignore: BooleanAndToBooleanOr
+        if (str_starts_with($host, '[') && str_ends_with($host, ']')) {
             return substr($host, 1, -1);
         }
 

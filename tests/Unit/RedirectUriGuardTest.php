@@ -130,3 +130,37 @@ it('blocks only the host itself for an exact-mode entry, and subdomains for the 
         ->and($guard->isHostBlocked('app.wide.test'))->toBeTrue()
         ->and($guard->isHostBlocked('notwide.test'))->toBeFalse();
 });
+
+it('refuses relative and userinfo redirect URIs', function (string $redirectUri): void {
+    expect((new RedirectUriGuard)->isAcceptableForRegistration($redirectUri))->toBeFalse();
+})->with([
+    'path only' => ['/callback'],
+    'scheme-relative' => ['//app.example/callback'],
+    'user without password' => ['https://user@app.example/callback'],
+    'user and password' => ['https://user:secret@app.example/callback'],
+]);
+
+it('treats an empty query as no query, and any other query as different', function (): void {
+    $guard = new RedirectUriGuard;
+
+    expect($guard->areExactlyEqual('https://app.example/cb?', 'https://app.example/cb'))->toBeTrue()
+        ->and($guard->areExactlyEqual('https://app.example/cb?x', 'https://app.example/cb'))->toBeFalse();
+});
+
+it('skips non-string custom schemes in the allow-list', function (): void {
+    config()->set('mcp.custom_schemes', [5, null, 'MyApp']);
+
+    expect((new RedirectUriGuard)->isAcceptableForRegistration('myapp://callback'))->toBeTrue()
+        ->and((new RedirectUriGuard)->isAcceptableForRegistration('otherapp://callback'))->toBeFalse();
+});
+
+it('flags a stored redirect that no longer passes registration even when its host is not blocked', function (): void {
+    $client = new Client;
+    $client->setRawAttributes(['redirect_uris' => json_encode(['http://app.example/callback'], JSON_THROW_ON_ERROR)]);
+
+    expect((new RedirectUriGuard(new BlockedHostCatalog([])))->clientHasBlockedRedirectHost($client))->toBeTrue();
+});
+
+it('refuses a host with only one IPv6 bracket', function (string $host): void {
+    expect(fn () => (new RedirectUriGuard)->normalizeHost($host))->toThrow(InvalidArgumentException::class);
+})->with(['[::1', '::1]']);

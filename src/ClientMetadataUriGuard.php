@@ -51,7 +51,7 @@ final class ClientMetadataUriGuard
         }
 
         // parseCanonical guarantees a host for http(s); the cast only satisfies PHPStan.
-        $host = (string) $parsedUri->normalizedHost; // @pest-mutate-ignore: RemoveStringCast — never null for http(s)
+        $host = (string) $parsedUri->normalizedHost; // @pest-mutate-ignore: RemoveStringCast
 
         if (filter_var($host, FILTER_VALIDATE_IP) === false) {
             return $this->isPublicHostname($host);
@@ -113,7 +113,8 @@ final class ClientMetadataUriGuard
 
     private function bitsOf(string $ipAddress): string
     {
-        $packedAddress = (string) inet_pton($ipAddress); // @pest-mutate-ignore: RemoveStringCast — callers pass validated IP literals
+        // Callers pass validated IP literals, so inet_pton never returns false; the cast only narrows the type.
+        $packedAddress = (string) inet_pton($ipAddress); // @pest-mutate-ignore: RemoveStringCast
 
         $bits = '';
 
@@ -135,7 +136,8 @@ final class ClientMetadataUriGuard
             ['100.64.0.0', 10], // shared address space (CGNAT), RFC 6598
             ['192.0.0.0', 24], // IETF protocol assignments, RFC 6890
             ['198.18.0.0', 15], // benchmarking, RFC 2544
-            ['224.0.0.0', 4], // IPv4 multicast
+            // A /3 only adds 240.0.0.0/4, which filter_var's reserved flag already refuses.
+            ['224.0.0.0', 4], // IPv4 multicast @pest-mutate-ignore: DecrementInteger
             ['ff00::', 8], // IPv6 multicast
             ['2002::', 16], // 6to4 embeds an IPv4 address, RFC 3056
             ['2001::', 32], // Teredo embeds an obfuscated IPv4 address, RFC 4380

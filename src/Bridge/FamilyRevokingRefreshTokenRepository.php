@@ -59,6 +59,7 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
 
         $affectedRows = $passportConnection->transaction(function () use ($tokenId): int {
             // Serialize concurrent rotators on engines that support row locks.
+            // Mutation runs on SQLite, which has no row lock to observe.
             $refreshQuery = Passport::refreshToken()->newQuery()->whereKey($tokenId);
             $refreshQuery->lockForUpdate()->first(); // @pest-mutate-ignore: RemoveMethodCall
 
@@ -70,7 +71,7 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
 
         if ($affectedRows === 0) {
             $this->revokeFamilyForRefreshToken($tokenId);
-            Log::warning('MCP OAuth refresh refused: reuse or race (CAS miss).'); // @pest-mutate-ignore: RemoveMethodCall
+            Log::warning('MCP OAuth refresh refused: reuse or race (CAS miss).');
 
             throw OAuthServerException::invalidRefreshToken(self::CLIENT_INVALID_REFRESH_HINT);
         }
@@ -78,8 +79,12 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
         // League revokes the old access token before this call; when a binding
         // is present, only the grant status tells us a concurrent loser already
         // ran family revoke. Unbound tokens skip this (binding listener PR).
-        if ($this->refreshTokenHasGrantBinding($tokenId) && ! $this->boundGrantIsActiveForRefreshToken($tokenId)) {
-            Log::warning('MCP OAuth refresh refused: bound grant already revoked.'); // @pest-mutate-ignore: RemoveMethodCall
+        $grantId = $this->grantIdFromBinding(
+            $this->accessTokenForRefreshToken($tokenId)?->getAttribute($this->bindingColumn()),
+        );
+
+        if ($grantId !== null && ! $this->grantIsActive($grantId)) {
+            Log::warning('MCP OAuth refresh refused: bound grant already revoked.');
 
             throw OAuthServerException::invalidRefreshToken(self::CLIENT_INVALID_REFRESH_HINT);
         }
@@ -88,8 +93,8 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
     /**
      * {@inheritdoc}
      *
-     * Missing, already-revoked, or unbound / inactive grant (S59) → true and
-     * family revoke for the revoked / unbound cases.
+     * Missing → true. Already revoked, or an access token without an active
+     * bound grant (S59) → family revoke, then true.
      */
     public function isRefreshTokenRevoked(string $tokenId): bool
     {
@@ -100,15 +105,8 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
             return true;
         }
 
-        if ($this->modelAttributeIsTrue($refreshToken, 'revoked')) {
-            $this->revokeFamilyForRefreshToken($tokenId);
-
-            return true; // @pest-mutate-ignore: RemoveEarlyReturn
-        }
-
-        $accessTokenId = $this->modelStringAttribute($refreshToken, 'access_token_id');
-
-        if ($accessTokenId === null || ! $this->accessTokenHasActiveBoundGrant($accessTokenId)) { // @pest-mutate-ignore: IdenticalToNotIdentical
+        if ($refreshToken->getAttribute('revoked') === true
+            || ! $this->accessTokenHasActiveBoundGrant($refreshToken->getAttribute('access_token_id'))) {
             $this->revokeFamilyForRefreshToken($tokenId);
 
             return true;
@@ -132,10 +130,13 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
             return;
         }
 
-        $accessTokenId = $this->modelStringAttribute($refreshToken, 'access_token_id');
+        $accessTokenId = $refreshToken->getAttribute('access_token_id');
 
+        // Passport's column is not null, but a custom refresh-token model may
+        // allow it: `where(..., null)` would become `whereNull` and revoke the
+        // orphaned refresh tokens of every user.
         if ($accessTokenId === null) {
-            return; // @pest-mutate-ignore: RemoveEarlyReturn
+            return;
         }
 
         /** @var Token|null $accessToken */
@@ -151,36 +152,25 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
 
         $bindingColumn = $this->bindingColumn();
         $bindingValue = $accessToken->getAttribute($bindingColumn);
-        $clientId = $this->modelStringAttribute($accessToken, 'client_id');
+        /** @var string $clientId non-null uuid column in Passport's schema */
+        $clientId = $accessToken->getAttribute('client_id');
+        /** @var int|string|null $userIdentifier */
         $userIdentifier = $accessToken->getAttribute('user_id');
-
-        if ($clientId === null) {
-            return; // @pest-mutate-ignore: RemoveEarlyReturn
-        }
 
         $familyQuery = Passport::token()->newQuery()
             ->where('client_id', $clientId)
             ->where('user_id', $userIdentifier);
 
         if ($bindingValue === null) {
-            $familyQuery->whereNull($bindingColumn); // @pest-mutate-ignore: RemoveMethodCall
+            $familyQuery->whereNull($bindingColumn);
         } else {
             $familyQuery->where($bindingColumn, $bindingValue);
         }
 
-        $familyAccessTokenIds = [];
+        // The access token matches its own family query, so the list is never empty.
+        $familyAccessTokenIds = $familyQuery->pluck('id')->all();
 
-        foreach ($familyQuery->pluck('id') as $familyAccessTokenId) {
-            if (is_string($familyAccessTokenId) && $familyAccessTokenId !== '') { // @pest-mutate-ignore: BooleanAndToBooleanOr,EmptyStringToNotEmpty
-                $familyAccessTokenIds[] = $familyAccessTokenId;
-            }
-        }
-
-        if ($familyAccessTokenIds === []) {
-            $familyAccessTokenIds = [$accessTokenId]; // @pest-mutate-ignore: RemoveArrayItem
-        }
-
-        $revokedTokenCount = 0; // @pest-mutate-ignore: DecrementInteger,IncrementInteger
+        $revokedTokenCount = 0;
         $passportConnection = Passport::token()->getConnection();
 
         $passportConnection->transaction(function () use ($familyAccessTokenIds, &$revokedTokenCount): void {
@@ -201,7 +191,7 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
             $this->grantStore->revoke($grantId, null, RevocationReason::Reuse);
 
             $eventDispatcher = $this->events;
-            $eventUserIdentifier = $this->stringifyUserIdentifier($userIdentifier);
+            $eventUserIdentifier = (string) $userIdentifier;
 
             $passportConnection->afterCommit(static function () use (
                 $eventDispatcher,
@@ -221,63 +211,30 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
     }
 
     /**
-     * S59: refresh is usable only while its access token carries a binding to
-     * a grant that {@see GrantStore::find()} still reports as not revoked.
+     * S59: refresh is usable only while its access token is live and carries
+     * a binding to a grant that {@see GrantStore::find()} still reports as
+     * not revoked.
      */
-    private function accessTokenHasActiveBoundGrant(string $accessTokenId): bool
+    private function accessTokenHasActiveBoundGrant(mixed $accessTokenId): bool
     {
         /** @var Token|null $accessToken */
         $accessToken = Passport::token()->newQuery()->whereKey($accessTokenId)->first();
 
-        if ($accessToken === null || $this->modelAttributeIsTrue($accessToken, 'revoked')) { // @pest-mutate-ignore: IfNegated
+        if ($accessToken === null || $accessToken->getAttribute('revoked') === true) {
             return false;
         }
 
-        return $this->bindingOnAccessTokenMapsToActiveGrant($accessToken);
+        $grantId = $this->grantIdFromBinding($accessToken->getAttribute($this->bindingColumn()));
+
+        return $grantId !== null && $this->grantIsActive($grantId);
     }
 
     /**
-     * After a CAS win: League has already marked the old access token revoked,
-     * so only the grant row decides whether a concurrent family revoke landed.
+     * Only called after a CAS win, so the refresh token row exists.
      */
-    private function boundGrantIsActiveForRefreshToken(string $refreshTokenId): bool
-    {
-        $accessToken = $this->accessTokenForRefreshToken($refreshTokenId);
-
-        if ($accessToken === null) {
-            return false; // @pest-mutate-ignore: RemoveEarlyReturn,FalseToTrue
-        }
-
-        return $this->bindingOnAccessTokenMapsToActiveGrant($accessToken);
-    }
-
-    private function refreshTokenHasGrantBinding(string $refreshTokenId): bool
-    {
-        $accessToken = $this->accessTokenForRefreshToken($refreshTokenId);
-
-        if ($accessToken === null) {
-            return false; // @pest-mutate-ignore: RemoveEarlyReturn,FalseToTrue
-        }
-
-        $bindingValue = $accessToken->getAttribute($this->bindingColumn());
-
-        return $this->grantIdFromBinding($bindingValue) !== null; // @pest-mutate-ignore: NotIdenticalToIdentical
-    }
-
     private function accessTokenForRefreshToken(string $refreshTokenId): ?Token
     {
-        /** @var RefreshToken|null $refreshToken */
-        $refreshToken = Passport::refreshToken()->newQuery()->whereKey($refreshTokenId)->first();
-
-        if ($refreshToken === null) {
-            return null; // @pest-mutate-ignore: RemoveEarlyReturn
-        }
-
-        $accessTokenId = $this->modelStringAttribute($refreshToken, 'access_token_id');
-
-        if ($accessTokenId === null) {
-            return null; // @pest-mutate-ignore: RemoveEarlyReturn
-        }
+        $accessTokenId = Passport::refreshToken()->newQuery()->whereKey($refreshTokenId)->value('access_token_id');
 
         /** @var Token|null $accessToken */
         $accessToken = Passport::token()->newQuery()->whereKey($accessTokenId)->first();
@@ -285,80 +242,35 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
         return $accessToken;
     }
 
-    private function bindingOnAccessTokenMapsToActiveGrant(Token $accessToken): bool
+    private function grantIsActive(string $grantId): bool
     {
-        $bindingValue = $accessToken->getAttribute($this->bindingColumn());
-
-        if ($bindingValue === null || $bindingValue === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty,BooleanOrToBooleanAnd
-            return false;
-        }
-
-        return $this->grantIdMapsToActiveGrant($bindingValue);
-    }
-
-    /**
-     * @param  mixed  $bindingValue  non-empty binding from the access token
-     */
-    private function grantIdMapsToActiveGrant(mixed $bindingValue): bool
-    {
-        $grantId = $this->grantIdFromBinding($bindingValue);
-
-        if ($grantId === null) {
-            return false; // @pest-mutate-ignore: RemoveEarlyReturn,FalseToTrue
-        }
-
         $grant = $this->grantStore->find($grantId);
 
-        return $grant !== null && ! $grant->revoked; // @pest-mutate-ignore: BooleanAndToBooleanOr,NotIdenticalToIdentical
+        return $grant !== null && ! $grant->revoked;
     }
 
     private function bindingColumn(): string
     {
         $column = $this->config->get('mcp-oauth.grant_binding_column', 'api_key_id');
 
-        return is_string($column) && $column !== '' ? $column : 'api_key_id'; // @pest-mutate-ignore: EmptyStringToNotEmpty,BooleanAndToBooleanOr,NotIdenticalToIdentical,TernaryNegated
+        return is_string($column) && $column !== '' ? $column : 'api_key_id';
     }
 
     /**
      * Products write {@see GrantStore::bindingKey()} into the binding column;
      * that value must be resolvable with {@see GrantStore::find()} (typically
-     * the grant's public UUID).
+     * the grant's public UUID, or an integer key).
      */
     private function grantIdFromBinding(mixed $bindingValue): ?string
     {
-        if (is_string($bindingValue) && $bindingValue !== '') { // @pest-mutate-ignore: EmptyStringToNotEmpty,BooleanAndToBooleanOr
+        if (is_string($bindingValue) && $bindingValue !== '') {
             return $bindingValue;
         }
 
         if (is_int($bindingValue)) {
-            return (string) $bindingValue; // @pest-mutate-ignore: RemoveStringCast,RemoveEarlyReturn
+            return (string) $bindingValue;
         }
 
         return null;
-    }
-
-    private function modelAttributeIsTrue(RefreshToken|Token $model, string $attribute): bool
-    {
-        return $model->getAttribute($attribute) === true; // @pest-mutate-ignore: IdenticalToNotIdentical,TrueToFalse
-    }
-
-    private function modelStringAttribute(RefreshToken|Token $model, string $attribute): ?string
-    {
-        $value = $model->getAttribute($attribute);
-
-        return is_string($value) && $value !== '' ? $value : null; // @pest-mutate-ignore: EmptyStringToNotEmpty,BooleanAndToBooleanOr
-    }
-
-    private function stringifyUserIdentifier(mixed $userIdentifier): string
-    {
-        if (is_string($userIdentifier)) {
-            return $userIdentifier; // @pest-mutate-ignore: RemoveEarlyReturn
-        }
-
-        if (is_int($userIdentifier)) {
-            return (string) $userIdentifier;
-        }
-
-        return ''; // @pest-mutate-ignore: EmptyStringToNotEmpty
     }
 }

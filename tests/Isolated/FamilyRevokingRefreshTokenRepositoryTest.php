@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Laravel\Passport\Bridge\RefreshTokenRepository as PassportRefreshTokenRepository;
 use Laravel\Passport\Passport;
@@ -545,4 +546,136 @@ it('stops the League-order race loser before any new tokens are issued', functio
         @unlink($sqliteRacePath.'-wal');
         @unlink($sqliteRacePath.'-shm');
     }
+});
+
+it('logs a CAS miss without putting it in the client hint', function (): void {
+    Log::spy();
+
+    /** @var FakeGrantStore $grantStore */
+    $grantStore = app(GrantStore::class);
+    $family = seedBoundFamily($grantStore);
+    $repository = app(FamilyRevokingRefreshTokenRepository::class);
+    $repository->revokeRefreshToken($family['refreshTokenId']);
+
+    expect(fn () => $repository->revokeRefreshToken($family['refreshTokenId']))->toThrow(OAuthServerException::class);
+
+    Log::shouldHaveReceived('warning')->once()->with('MCP OAuth refresh refused: reuse or race (CAS miss).');
+});
+
+it('logs a refresh refused because the bound grant was revoked meanwhile', function (): void {
+    Log::spy();
+
+    /** @var FakeGrantStore $grantStore */
+    $grantStore = app(GrantStore::class);
+    $family = seedBoundFamily($grantStore);
+    $grantStore->revoke($family['grant']->id, null, RevocationReason::User);
+    $repository = app(FamilyRevokingRefreshTokenRepository::class);
+
+    expect(fn () => $repository->revokeRefreshToken($family['refreshTokenId']))->toThrow(OAuthServerException::class);
+
+    Log::shouldHaveReceived('warning')->once()->with('MCP OAuth refresh refused: bound grant already revoked.');
+});
+
+it('S59: refuses refresh for an unbound access token and revokes only the unbound family', function (): void {
+    /** @var FakeGrantStore $grantStore */
+    $grantStore = app(GrantStore::class);
+    $family = seedBoundFamily($grantStore);
+    Passport::token()->newQuery()->whereKey($family['accessTokenId'])->update(['api_key_id' => null]);
+    $repository = app(FamilyRevokingRefreshTokenRepository::class);
+
+    expect($repository->isRefreshTokenRevoked($family['refreshTokenId']))->toBeTrue()
+        ->and(Passport::token()->newQuery()->whereKey($family['accessTokenId'])->value('revoked'))->toBeTrue()
+        ->and(Passport::refreshToken()->newQuery()->whereKey($family['refreshTokenId'])->value('revoked'))->toBeTrue()
+        // Same client and user, but bound to a grant: another family.
+        ->and(Passport::token()->newQuery()->whereKey($family['siblingAccessTokenId'])->value('revoked'))->toBeFalse()
+        ->and($grantStore->revocations)->toBe([]);
+});
+
+it('treats an empty binding as no binding', function (): void {
+    /** @var FakeGrantStore $grantStore */
+    $grantStore = app(GrantStore::class);
+    $family = seedBoundFamily($grantStore);
+    Passport::token()->newQuery()->whereKey($family['accessTokenId'])->update(['api_key_id' => '']);
+    $repository = app(FamilyRevokingRefreshTokenRepository::class);
+
+    $repository->revokeRefreshToken($family['refreshTokenId']);
+
+    expect(Passport::refreshToken()->newQuery()->whereKey($family['refreshTokenId'])->value('revoked'))->toBeTrue()
+        ->and($grantStore->revocations)->toBe([]);
+});
+
+it('resolves an integer binding to the grant it names', function (): void {
+    Event::fake([McpRefreshTokenReused::class]);
+    Schema::table('oauth_access_tokens', function (Blueprint $table): void {
+        $table->unsignedBigInteger('grant_number')->nullable();
+    });
+    config(['mcp-oauth.grant_binding_column' => 'grant_number']);
+
+    /** @var FakeGrantStore $grantStore */
+    $grantStore = app(GrantStore::class);
+    $family = seedBoundFamily($grantStore, '7');
+    Passport::token()->newQuery()->update(['grant_number' => 7, 'api_key_id' => null]);
+    $repository = app(FamilyRevokingRefreshTokenRepository::class);
+
+    expect($repository->isRefreshTokenRevoked($family['refreshTokenId']))->toBeFalse();
+
+    $repository->revokeRefreshToken($family['refreshTokenId']);
+
+    expect(fn () => $repository->revokeRefreshToken($family['refreshTokenId']))->toThrow(OAuthServerException::class);
+
+    expect($grantStore->revocations)->toHaveCount(1)
+        ->and($grantStore->revocations[0]['grantId'])->toBe('7')
+        ->and(Passport::token()->newQuery()->whereKey($family['siblingAccessTokenId'])->value('revoked'))->toBeTrue();
+
+    Event::assertDispatched(McpRefreshTokenReused::class, fn (McpRefreshTokenReused $event): bool => $event->grantId === '7');
+});
+
+it('falls back to api_key_id when the binding column is not configured', function (mixed $configuredColumn): void {
+    config(['mcp-oauth.grant_binding_column' => $configuredColumn]);
+
+    /** @var FakeGrantStore $grantStore */
+    $grantStore = app(GrantStore::class);
+    $family = seedBoundFamily($grantStore);
+    $repository = app(FamilyRevokingRefreshTokenRepository::class);
+
+    expect($repository->isRefreshTokenRevoked($family['refreshTokenId']))->toBeFalse();
+})->with([
+    'null' => [null],
+    'empty string' => [''],
+]);
+
+it('rotates a refresh token whose access token row was purged', function (): void {
+    /** @var FakeGrantStore $grantStore */
+    $grantStore = app(GrantStore::class);
+    $family = seedBoundFamily($grantStore);
+    Passport::token()->newQuery()->whereKey($family['accessTokenId'])->delete();
+    $repository = app(FamilyRevokingRefreshTokenRepository::class);
+
+    $repository->revokeRefreshToken($family['refreshTokenId']);
+
+    expect(Passport::refreshToken()->newQuery()->whereKey($family['refreshTokenId'])->value('revoked'))->toBeTrue()
+        ->and($grantStore->revocations)->toBe([]);
+});
+
+it('leaves other refresh tokens alone when a custom schema allows a null access_token_id', function (): void {
+    Schema::dropIfExists('oauth_refresh_tokens');
+    Schema::create('oauth_refresh_tokens', function (Blueprint $table): void {
+        $table->string('id', 80)->primary();
+        $table->string('access_token_id', 80)->nullable()->index();
+        $table->boolean('revoked');
+        $table->dateTime('expires_at')->nullable();
+    });
+
+    foreach (['orphan-refresh-of-one-user', 'orphan-refresh-of-another-user'] as $orphanRefreshTokenId) {
+        Passport::refreshToken()->forceFill([
+            'id' => $orphanRefreshTokenId,
+            'access_token_id' => null,
+            'revoked' => false,
+            'expires_at' => now()->addDay(),
+        ])->save();
+    }
+
+    app(FamilyRevokingRefreshTokenRepository::class)->revokeFamilyForRefreshToken('orphan-refresh-of-one-user');
+
+    expect(Passport::refreshToken()->newQuery()->whereKey('orphan-refresh-of-another-user')->value('revoked'))->toBeFalse();
 });

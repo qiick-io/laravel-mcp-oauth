@@ -22,11 +22,16 @@ final class McpOAuthServer
 {
     public const string WIRE_SCOPE = Registrar::OAUTH_SCOPE;
 
-    /** @var list<string> */
-    public const array SUPPORTED_GRANT_TYPES = ['authorization_code', 'refresh_token'];
+    /*
+     * pcov never covers a constant declaration, so mutation cannot run tests
+     * against these two; McpOAuthServerTest pins both values instead.
+     */
 
     /** @var list<string> */
-    public const array SUPPORTED_CODE_CHALLENGE_METHODS = ['S256'];
+    public const array SUPPORTED_GRANT_TYPES = ['authorization_code', 'refresh_token']; // @pest-mutate-ignore: RemoveArrayItem
+
+    /** @var list<string> */
+    public const array SUPPORTED_CODE_CHALLENGE_METHODS = ['S256']; // @pest-mutate-ignore: RemoveArrayItem
 
     public function __construct(
         private readonly ConfigRepository $config,
@@ -36,7 +41,7 @@ final class McpOAuthServer
 
     public function isEnabled(): bool
     {
-        if (! (bool) $this->config->get('mcp-oauth.enabled', false)) { // @pest-mutate-ignore: RemoveBooleanCast
+        if (! $this->config->get('mcp-oauth.enabled', false)) {
             return false;
         }
 
@@ -153,7 +158,8 @@ final class McpOAuthServer
             return (bool) $mcpEnabled();
         }
 
-        if (is_string($mcpEnabled) && $mcpEnabled !== '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
+        // An empty key names no config entry, so it reads the `false` default.
+        if (is_string($mcpEnabled)) {
             return (bool) $this->config->get($mcpEnabled, false);
         }
 
