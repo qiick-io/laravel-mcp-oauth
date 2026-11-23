@@ -876,3 +876,90 @@ it('revokes a token whose grant disappears while it is being bound', function ()
 
     expect(DB::table('oauth_access_tokens')->where('client_id', $client->getKey())->where('revoked', false)->count())->toBe(0);
 });
+
+// --- Second re-review of #16: only registered clients reach the endpoints -----
+
+it('refuses a code exchange for a client the package did not register (probes A, B)', function (bool $isGrantRevokedFirst): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $code, 'user' => $user] = $this->obtainAuthorizationCode($client);
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->delete();
+
+    if ($isGrantRevokedFirst) {
+        $grant = $this->grantStore()->activeFor((string) $client->getKey(), (string) $user->getKey());
+        $this->grantStore()->revoke($grant->id, null, RevocationReason::User);
+    }
+
+    postToken($this, $this->codeExchange($client, $code))
+        ->assertStatus(401)
+        ->assertExactJson(INVALID_CLIENT_BODY);
+
+    // No token is minted that nothing would bind, revoke on replay or scope to /mcp.
+    expect(DB::table('oauth_access_tokens')->count())->toBe(0);
+})->with(['code replayed later' => [false], 'grant revoked before the exchange' => [true]]);
+
+it('refuses a refresh for a client the package did not register (probe H)', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $tokens = issueTokens($this, $client);
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->delete();
+
+    postToken($this, refreshRequest($client, $tokens['refresh_token']))
+        ->assertStatus(401)
+        ->assertExactJson(INVALID_CLIENT_BODY);
+});
+
+it('refuses the refresh token of a winner whose code was replayed after it bound its token (N1)', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $code] = $this->obtainAuthorizationCode($client);
+    $hookedGrantStore = hookGrantStore($this);
+    $replay = static function () use ($client): void {
+        $codeId = (string) DB::table('oauth_auth_codes')->where('client_id', $client->getKey())->value('id');
+        app(RevokeAuthCodeTokensAction::class)->execute($codeId);
+    };
+    // The replay lands after the winner's second read of its grant.
+    $hookedGrantStore->afterNextFind = static function () use ($hookedGrantStore, $replay): void {
+        $hookedGrantStore->afterNextFind = $replay;
+    };
+
+    $winner = postToken($this, $this->codeExchange($client, $code))->assertOk();
+
+    postToken($this, refreshRequest($client, (string) $winner->json('refresh_token')))
+        ->assertStatus(400)
+        ->assertExactJson(INVALID_GRANT_BODY);
+
+    expect(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe(0);
+});
+
+it('revokes the token of a code consumed with no active grant, even if a consent lands before it is bound (N3)', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $code, 'user' => $user] = $this->obtainAuthorizationCode($client);
+    $grant = $this->grantStore()->activeFor((string) $client->getKey(), (string) $user->getKey());
+    $this->grantStore()->revoke($grant->id, null, RevocationReason::User);
+    $hookedGrantStore = hookGrantStore($this);
+    // The code is consumed with no active grant; a new consent lands before its token is bound.
+    $hookedGrantStore->afterNextActiveFor = function () use ($grant): void {
+        $this->grantStore()->seed(new GrantRecord(
+            id: '0195f0a0-0000-7000-8000-0000000000c3',
+            clientId: $grant->clientId,
+            userIdentifier: $grant->userIdentifier,
+            revoked: false,
+            scopes: ['mcp:read'],
+            authorizedAt: null,
+            lastUsedAt: null,
+        ));
+    };
+
+    postToken($this, $this->codeExchange($client, $code))->assertOk();
+
+    $tokenRow = DB::table('oauth_access_tokens')->where('client_id', $client->getKey())->sole();
+
+    expect((bool) $tokenRow->revoked)->toBeTrue()
+        ->and($tokenRow->api_key_id)->toBeNull();
+});

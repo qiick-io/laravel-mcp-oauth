@@ -193,6 +193,36 @@ it('records every registered client as an MCP client in oauth_client_metadata', 
         ->and($metadata->client_uri)->toBe('https://app.example');
 });
 
+it('leaves no client behind when its metadata row cannot be written (S1)', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+    Schema::drop('oauth_client_metadata');
+
+    try {
+        $this->postJson('/oauth/register', [
+            'client_name' => 'Cursor',
+            'redirect_uris' => ['https://app.example/callback'],
+        ])->assertStatus(500)->assertJsonPath('error', 'server_error');
+
+        expect(Client::query()->count())->toBe(0);
+    } finally {
+        (require __DIR__.'/../../database/migrations/2026_11_22_100000_create_oauth_client_metadata_table.php')->up();
+    }
+});
+
+it('accepts only https for logo_uri and client_uri, which a consent page may show (N5)', function (string $field): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $this->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+        $field => 'http://app.example/page',
+    ])->assertStatus(400)->assertJsonPath('error', 'invalid_client_metadata');
+
+    expect(Client::query()->count())->toBe(0);
+})->with(['logo_uri', 'client_uri']);
+
 it('refuses a fragment redirect_uri via the guard before Passport create (B3)', function (): void {
     enableMcpOAuthWithKeys();
     McpOAuthRoutes::register();

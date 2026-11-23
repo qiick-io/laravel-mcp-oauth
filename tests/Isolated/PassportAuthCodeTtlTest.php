@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Carbon\CarbonInterval;
+use Laravel\Passport\Bridge\AuthCodeRepository;
+use Laravel\Passport\Bridge\RefreshTokenRepository;
 use Laravel\Passport\Passport;
 use Laravel\Passport\PersonalAccessTokenFactory;
 use League\OAuth2\Server\AuthorizationServer;
@@ -10,6 +12,7 @@ use League\OAuth2\Server\Grant\AuthCodeGrant;
 use League\OAuth2\Server\Grant\ClientCredentialsGrant;
 use League\OAuth2\Server\Grant\RefreshTokenGrant;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
+use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\McpOAuthServiceProvider;
 use Qiick\McpOAuth\Testing\FakeConsentProvider;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
@@ -189,4 +192,21 @@ it('leaves the product\'s Passport grants alone while OAuth is off', function ()
 
     expect(array_keys($enabledGrantTypes))->toContain('password')
         ->and(array_keys($enabledGrantTypes))->toContain('client_credentials');
+});
+
+it('leaves Passport\'s repositories alone and needs no GrantStore while OAuth is off (S2)', function (): void {
+    config([
+        'mcp-oauth.enabled' => false,
+        'passport.private_key' => passportTestKeyContents('oauth-private.key'),
+        'passport.public_key' => passportTestKeyContents('oauth-public.key'),
+    ]);
+    $this->app->offsetUnset(GrantStore::class);
+    $this->app->forgetInstance(AuthorizationServer::class);
+
+    $authCodeRepository = $this->app->make(AuthCodeRepository::class);
+    $refreshTokenRepository = $this->app->make(RefreshTokenRepository::class);
+
+    expect($authCodeRepository::class)->toBe(AuthCodeRepository::class)
+        ->and($refreshTokenRepository::class)->toBe(RefreshTokenRepository::class)
+        ->and(fn () => $this->app->make(AuthorizationServer::class))->not->toThrow(Exception::class);
 });
