@@ -73,6 +73,7 @@ abstract class PackageTestCase extends TestCase
     {
         // Persistent engines keep tables across Pest cases; wipe before each boot.
         Schema::dropIfExists('oauth_consent_records');
+        Schema::dropIfExists('oauth_auth_code_exchanges');
         Schema::dropIfExists('oauth_blocked_redirect_hosts');
         Schema::dropIfExists('oauth_client_metadata');
         Schema::dropIfExists('users');

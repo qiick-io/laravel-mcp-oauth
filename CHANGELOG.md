@@ -94,6 +94,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AccessTokenCreated` binds each new token to `GrantStore::activeFor()`
   (`bindingKey()` in `grant_binding_column`, `audience` = the MCP resource) or
   revokes it at once when no grant is active (S54).
+- One-shot authorization codes (RFC 9700 §4.5): `OneShotAuthCodeRepository`
+  consumes a code with an atomic update the first time league asks about it,
+  so a failed exchange (wrong verifier, redirect URI or client) burns it and
+  only one of two parallel exchanges wins. A code presented again, before or
+  after it expired, revokes the grant it was consumed under and every token
+  bound to it (RFC 6749 §4.1.2), never a newer consent's; new package table
+  `oauth_auth_code_exchanges` records that grant.
 - Fail-closed boot (S81): with `mcp-oauth.enabled` on, boot throws
   `InvalidMcpOAuthConfigException` naming a missing `ConsentView`,
   `ConsentProvider` or `GrantStore` binding.

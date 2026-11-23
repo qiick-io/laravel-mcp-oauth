@@ -3,6 +3,10 @@
 # One pest --mutate invocation per class (pcov). Never --covered-only, never
 # || true, never method-level @pest-mutate-ignore. Empty list = scaffold no-op
 # until feature classes land.
+#
+# CI splits the list into parallel shards: MUTATE_SHARD=i MUTATE_SHARDS=n runs
+# the classes at positions i, i+n, i+2n, … (1-based). Without them, every
+# class runs, as locally.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -13,7 +17,9 @@ CLASSES=(
   'Qiick\McpOAuth\Actions\BindAccessTokenAction'
   'Qiick\McpOAuth\Actions\DenyConsentAction'
   'Qiick\McpOAuth\Actions\RecordConsentDecisionAction'
+  'Qiick\McpOAuth\Actions\RevokeAuthCodeTokensAction'
   'Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository'
+  'Qiick\McpOAuth\Bridge\OneShotAuthCodeRepository'
   'Qiick\McpOAuth\ClientMetadataUriGuard'
   'Qiick\McpOAuth\ClientThrottleKey'
   'Qiick\McpOAuth\Http\Controllers\ApproveClientController'
@@ -24,6 +30,7 @@ CLASSES=(
   'Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware'
   'Qiick\McpOAuth\Http\Middleware\ValidateAuthorizationRequestMiddleware'
   'Qiick\McpOAuth\Http\Middleware\ValidateTokenRequestMiddleware'
+  'Qiick\McpOAuth\Internal\GrantBindingColumn'
   'Qiick\McpOAuth\Internal\PassportUserIdentifier'
   'Qiick\McpOAuth\McpOAuthReadiness'
   'Qiick\McpOAuth\McpOAuthRoutes'
@@ -38,6 +45,8 @@ CLASSES=(
 )
 
 MIN="${MUTATE_MIN:-95}"
+SHARD="${MUTATE_SHARD:-1}"
+SHARDS="${MUTATE_SHARDS:-1}"
 
 if [[ "${#CLASSES[@]}" -eq 0 ]]; then
   echo "No mutation target classes yet (scaffold). Skipping."
@@ -46,8 +55,13 @@ fi
 
 status=0
 
-for class in "${CLASSES[@]}"; do
-  echo "==> mutate ${class} (min=${MIN})"
+for index in "${!CLASSES[@]}"; do
+  if (( index % SHARDS != SHARD - 1 )); then
+    continue
+  fi
+
+  class="${CLASSES[$index]}"
+  echo "==> mutate ${class} (min=${MIN}, shard ${SHARD}/${SHARDS})"
   if ! vendor/bin/pest --mutate --min="${MIN}" --class="${class}"; then
     status=1
   fi

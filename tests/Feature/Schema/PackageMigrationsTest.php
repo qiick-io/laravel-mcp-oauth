@@ -165,6 +165,11 @@ it('S4: oauth_consent_records is append-only evidence with every consent column'
     expect(Schema::hasColumn('oauth_consent_records', 'updated_at'))->toBeFalse();
 });
 
+it('records the grant each authorization code was consumed under', function (): void {
+    expect(Schema::hasTable('oauth_auth_code_exchanges'))->toBeTrue()
+        ->and(Schema::getColumnListing('oauth_auth_code_exchanges'))->toEqualCanonicalizing(['auth_code_id', 'grant_id', 'created_at']);
+});
+
 it('S2: CIMD runtime is off by default while schema columns exist', function (): void {
     expect(config('mcp-oauth.cimd.enabled'))->toBeFalse()
         ->and(Schema::hasColumn('oauth_client_metadata', 'metadata_document_url'))->toBeTrue()

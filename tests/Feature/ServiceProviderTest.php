@@ -45,7 +45,7 @@ it('lets an app publish migrations under mcp-oauth-migrations', function (): voi
     $published = database_path('migrations');
     $migrationFiles = glob($published.'/*_create_oauth_*_table.php') ?: [];
 
-    expect($migrationFiles)->toHaveCount(3);
+    expect($migrationFiles)->toHaveCount(4);
 
     foreach ($migrationFiles as $migrationFile) {
         unlink($migrationFile);

@@ -7,7 +7,7 @@ namespace Qiick\McpOAuth\Actions;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\GrantStore;
-use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
+use Qiick\McpOAuth\Internal\GrantBindingColumn;
 use Qiick\McpOAuth\McpOAuthServer;
 
 /**
@@ -46,22 +46,8 @@ final class BindAccessTokenAction
         }
 
         $accessTokenQuery->update([
-            $this->bindingColumn() => $this->grantStore->bindingKey($grant),
+            GrantBindingColumn::from($this->config) => $this->grantStore->bindingKey($grant),
             'audience' => $this->mcpOAuthServer->resourceIdentifier(),
         ]);
-    }
-
-    /**
-     * @throws InvalidMcpOAuthConfigException when the column is not a non-empty string
-     */
-    private function bindingColumn(): string
-    {
-        $bindingColumn = $this->config->get('mcp-oauth.grant_binding_column');
-
-        if (! is_string($bindingColumn) || $bindingColumn === '') {
-            throw InvalidMcpOAuthConfigException::invalidGrantBindingColumn();
-        }
-
-        return $bindingColumn;
     }
 }

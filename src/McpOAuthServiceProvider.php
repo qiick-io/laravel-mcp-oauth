@@ -10,12 +10,14 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Inertia\Inertia;
+use Laravel\Passport\Bridge\AuthCodeRepository as PassportAuthCodeRepository;
 use Laravel\Passport\Bridge\RefreshTokenRepository as PassportRefreshTokenRepository;
 use Laravel\Passport\Client;
 use Laravel\Passport\Events\AccessTokenCreated;
@@ -25,7 +27,9 @@ use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Grant\AuthCodeGrant;
 use League\OAuth2\Server\Grant\ClientCredentialsGrant;
 use Qiick\McpOAuth\Actions\BindAccessTokenAction;
+use Qiick\McpOAuth\Actions\RevokeAuthCodeTokensAction;
 use Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository;
+use Qiick\McpOAuth\Bridge\OneShotAuthCodeRepository;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\ConsentView;
@@ -93,6 +97,16 @@ final class McpOAuthServiceProvider extends ServiceProvider
                 $app->make(Dispatcher::class),
                 $app->make(GrantStore::class),
                 $app->make(ConfigRepository::class),
+            );
+        });
+
+        // One-shot codes, and a code presented again revokes its tokens (RFC 9700 §4.5).
+        $this->app->bind(PassportAuthCodeRepository::class, OneShotAuthCodeRepository::class);
+        $this->app->bind(RevokeAuthCodeTokensAction::class, static function (Application $app): RevokeAuthCodeTokensAction {
+            return new RevokeAuthCodeTokensAction(
+                $app->make(GrantStore::class),
+                $app->make(ConfigRepository::class),
+                Passport::tokenEncryptionKey($app->make(Encrypter::class)),
             );
         });
 
