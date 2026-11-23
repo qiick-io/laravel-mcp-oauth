@@ -36,8 +36,9 @@ final class McpOAuthRoutes
         Route::middleware([EnsureMcpOAuthEnabledMiddleware::class])->group(static function (): void {
             // Non-POST methods share the off-gate. When OAuth is on they 405;
             // when off the middleware already answered the router's 404.
+            // The router adds HEAD to every GET route.
             Route::match(
-                ['GET', 'HEAD', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+                ['GET', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
                 'oauth/register',
                 static function (): never {
                     throw new MethodNotAllowedHttpException(['POST']);
