@@ -13,6 +13,7 @@ use Illuminate\Testing\TestResponse;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
 use League\OAuth2\Server\AuthorizationServer;
+use League\OAuth2\Server\CryptTrait;
 use Qiick\McpOAuth\Actions\BindAccessTokenAction;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
@@ -492,3 +493,128 @@ it('answers every refused refresh with the same invalid_grant body', function (C
         return refreshRequest($client, $tokens['refresh_token']);
     }],
 ]);
+
+// --- One-shot codes and code reuse (RFC 6749 §4.1.2, RFC 9700 §4.5) --------
+
+/**
+ * Re-encrypts a real code with another expiry, as league would have issued it
+ * earlier: league checks expiry against PHP's time(), which travel() cannot move.
+ */
+function expireAuthorizationCode(string $code): string
+{
+    $codec = new class(Passport::tokenEncryptionKey(app('encrypter')))
+    {
+        use CryptTrait;
+
+        public function __construct(string $encryptionKey)
+        {
+            $this->setEncryptionKey($encryptionKey);
+        }
+
+        public function reseal(string $encryptedCode): string
+        {
+            $payload = json_decode($this->decrypt($encryptedCode), true);
+            $payload['expire_time'] = time() - 60;
+
+            return $this->encrypt((string) json_encode($payload));
+        }
+    };
+
+    return $codec->reseal($code);
+}
+
+it('burns the code on a failed exchange, so the right verifier cannot follow', function (array $failedAttempt): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $code] = $this->obtainAuthorizationCode($client);
+
+    postToken($this, $this->codeExchange($client, $code, $failedAttempt))->assertStatus(400);
+
+    postToken($this, $this->codeExchange($client, $code))
+        ->assertStatus(400)
+        ->assertExactJson(INVALID_GRANT_BODY);
+
+    expect(DB::table('oauth_access_tokens')->count())->toBe(0);
+})->with([
+    'wrong verifier' => [['code_verifier' => str_repeat('w', 43)]],
+    'missing verifier' => [['code_verifier' => null]],
+    'other redirect_uri' => [['redirect_uri' => 'https://app.example/other']],
+]);
+
+it('revokes every token issued with a code when the code comes back', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $code, 'user' => $user] = $this->obtainAuthorizationCode($client);
+    $firstPair = postToken($this, $this->codeExchange($client, $code))->assertOk();
+    postToken($this, refreshRequest($client, (string) $firstPair->json('refresh_token')))->assertOk();
+    $grant = $this->grantStore()->activeFor((string) $client->getKey(), (string) $user->getKey());
+
+    postToken($this, $this->codeExchange($client, $code))
+        ->assertStatus(400)
+        ->assertExactJson(INVALID_GRANT_BODY);
+
+    expect(DB::table('oauth_access_tokens')->count())->toBe(2)
+        ->and(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe(0)
+        ->and(DB::table('oauth_refresh_tokens')->where('revoked', false)->count())->toBe(0)
+        ->and($this->grantStore()->find($grant->id)?->revoked)->toBeTrue()
+        ->and(collect($this->grantStore()->revocations)->last())->toMatchArray([
+            'grantId' => $grant->id,
+            'reason' => RevocationReason::Reuse,
+        ]);
+});
+
+it('revokes the tokens of a code replayed after it expired', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $code] = $this->obtainAuthorizationCode($client);
+    postToken($this, $this->codeExchange($client, $code))->assertOk();
+
+    postToken($this, $this->codeExchange($client, expireAuthorizationCode($code)))
+        ->assertStatus(400)
+        ->assertExactJson(INVALID_GRANT_BODY);
+
+    expect(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe(0)
+        ->and(DB::table('oauth_refresh_tokens')->where('revoked', false)->count())->toBe(0);
+});
+
+it('leaves an expired code that was never exchanged, and its user, alone', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $firstCode, 'user' => $user] = $this->obtainAuthorizationCode($client);
+    ['code' => $secondCode] = $this->obtainAuthorizationCode($client, $user);
+    postToken($this, $this->codeExchange($client, $secondCode))->assertOk();
+
+    postToken($this, $this->codeExchange($client, expireAuthorizationCode($firstCode)))
+        ->assertStatus(400)
+        ->assertExactJson(INVALID_GRANT_BODY);
+
+    expect(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe(1)
+        ->and($this->grantStore()->activeFor((string) $client->getKey(), (string) $user->getKey()))->not->toBeNull();
+});
+
+it('does not revoke a newer consent when an older code comes back', function (bool $isOlderCodeExchanged): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $olderCode, 'user' => $user] = $this->obtainAuthorizationCode($client);
+
+    if ($isOlderCodeExchanged) {
+        postToken($this, $this->codeExchange($client, $olderCode))->assertOk();
+    }
+
+    ['code' => $newerCode] = $this->obtainAuthorizationCode($client, $user);
+    postToken($this, $this->codeExchange($client, $newerCode))->assertOk();
+    $newerGrant = $this->grantStore()->activeFor((string) $client->getKey(), (string) $user->getKey());
+
+    postToken($this, $this->codeExchange($client, $olderCode))
+        ->assertStatus(400)
+        ->assertExactJson(INVALID_GRANT_BODY);
+
+    expect($this->grantStore()->find($newerGrant->id)?->revoked)->toBeFalse()
+        ->and(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe(1)
+        ->and(DB::table('oauth_refresh_tokens')->where('revoked', false)->count())->toBe(1);
+})->with(['older code exchanged' => [true], 'older code never exchanged' => [false]]);

@@ -211,14 +211,14 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
     }
 
     /**
-     * Runs authorize → consent → approve for a new user and returns the code
-     * the client receives.
+     * Runs authorize → consent → approve (for a new user unless one is given)
+     * and returns the code the client receives.
      *
      * @return array{code: string, user: TestUser}
      */
-    public function obtainAuthorizationCode(Client $client): array
+    public function obtainAuthorizationCode(Client $client, ?TestUser $user = null): array
     {
-        $user = $this->createUser();
+        $user ??= $this->createUser();
 
         $consentPage = $this->actingAs($user)
             ->get($this->authorizeUrl($client), ['X-Inertia' => 'true'])
