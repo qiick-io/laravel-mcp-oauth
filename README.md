@@ -50,6 +50,17 @@ The service provider is auto-discovered. Products implement the contracts
 `McpOAuthRoutes::register()` from their MCP routes file, and keep OAuth off
 until keys exist and the admin switch is flipped.
 
+`McpOAuthRoutes::register()` serves DCR, authorize, token, revocation (RFC 7009)
+and the RFC 8414 / RFC 9728 discovery documents. Do not also call
+`Mcp::oauthRoutes()`: its documents are built from the request `Host` and sit
+outside the off-gate, and its `oauth/register` would replace the package's.
+
+Schedule the prune of authorization-code exchanges whose grant is gone:
+
+```php
+Schedule::command('mcp-oauth:prune-auth-code-exchanges')->daily()->onOneServer();
+```
+
 ## Threat model (short)
 
 | Threat | Mitigation |

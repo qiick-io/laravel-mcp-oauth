@@ -128,6 +128,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (RFC 6749 §2.3), challenges in the scheme the client used, and the
   per-client throttle keys on the body (query for authorize) or Basic id,
   lower-cased.
+- Token revocation (RFC 7009): `POST oauth/revoke` (`mcp.oauth.revoke`) inside
+  the off-gate, stateless, `throttle:mcp-oauth-revoke`; client authentication
+  as at the token endpoint (registered clients only, never Basic and body
+  together, a confidential client's secret checked). A refresh token revokes
+  its family and the grant (new `RevocationReason::Client`); an access token
+  revokes itself and the refresh tokens issued with it, not the grant. The
+  refresh tokens are deleted, so a later presentation is refused as unknown and
+  never read as reuse. Always 200 for unknown, forged, dead or foreign tokens.
+  New event `McpTokenRevoked`.
+- Discovery (RFC 8414, RFC 9728): `/.well-known/oauth-authorization-server`
+  (root and nested) and `/.well-known/oauth-protected-resource` (root and the
+  MCP path only), built from `APP_URL`, 404 with OAuth off. They replace
+  `Mcp::oauthRoutes()`, which a product must not call.
+- `mcp-oauth:prune-auth-code-exchanges {--dry-run}` deletes the
+  `oauth_auth_code_exchanges` rows whose grant is revoked or gone.
 - Fail-closed boot (S81): with `mcp-oauth.enabled` on, boot throws
   `InvalidMcpOAuthConfigException` naming a missing `ConsentView`,
   `ConsentProvider` or `GrantStore` binding.

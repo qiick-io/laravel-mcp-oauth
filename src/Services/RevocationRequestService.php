@@ -10,12 +10,15 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 
 /**
  * Reads `POST oauth/revoke` (RFC 7009 §2.1): the `token`, and the client that
  * sends it, authenticated as at the token endpoint (RFC 6749 §2.3). The
- * client id comes from the body or the HTTP Basic username; a confidential
- * client must also present its secret, in the body or as the Basic password.
+ * client id comes from the body or the HTTP Basic username, never both; a
+ * confidential client must also present its secret, in the body or as the
+ * Basic password. Only a client the package registered (its
+ * `oauth_client_metadata` row) can revoke: no other client holds MCP tokens.
  * A public client (every DCR client) is identified by its id alone, which is
  * enough: it can only revoke tokens that were issued to it.
  *
@@ -36,7 +39,15 @@ final class RevocationRequestService
     public function authenticatedClient(Request $request): Client
     {
         $bodyParameters = $request->request->all();
-        $clientId = $bodyParameters['client_id'] ?? $request->getUser();
+        $basicClientId = $request->getUser();
+        $hasBodyCredentials = ($bodyParameters['client_id'] ?? null) !== null || ($bodyParameters['client_secret'] ?? null) !== null;
+
+        // RFC 6749 §2.3: one authentication method per request, never Basic and the body together.
+        if ($basicClientId !== null && $hasBodyCredentials) {
+            throw new HttpResponseException($this->tokenErrorResponses->refusal('invalid_request'));
+        }
+
+        $clientId = $bodyParameters['client_id'] ?? $basicClientId;
         $clientSecret = $bodyParameters['client_secret'] ?? $request->getPassword();
 
         if (! is_string($clientId) || $clientId === '') {
@@ -49,7 +60,9 @@ final class RevocationRequestService
             ? Passport::client()->newQuery()->whereKey($clientId)->where('revoked', false)->first()
             : null;
 
-        if ($client === null || ! $this->presentsItsSecret($client, $clientSecret)) {
+        if ($client === null
+            || ! OAuthClientMetadata::isRegisteredClient($client)
+            || ! $this->presentsItsSecret($client, $clientSecret)) {
             throw new HttpResponseException($this->tokenErrorResponses->invalidClient($request));
         }
 
