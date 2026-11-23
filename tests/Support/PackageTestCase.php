@@ -71,8 +71,14 @@ abstract class PackageTestCase extends TestCase
 
     protected function defineDatabaseMigrations(): void
     {
-        // Persistent engines keep tables across Pest cases; wipe before each boot.
+        // Persistent engines keep tables across Pest cases and runs; wipe before
+        // each boot, Passport's too (the flow test cases create them again).
+        foreach (['oauth_auth_codes', 'oauth_access_tokens', 'oauth_refresh_tokens', 'oauth_clients', 'oauth_device_codes'] as $passportTable) {
+            Schema::dropIfExists($passportTable);
+        }
+
         Schema::dropIfExists('oauth_consent_records');
+        Schema::dropIfExists('oauth_auth_code_exchanges');
         Schema::dropIfExists('oauth_blocked_redirect_hosts');
         Schema::dropIfExists('oauth_client_metadata');
         Schema::dropIfExists('users');

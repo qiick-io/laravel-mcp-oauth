@@ -10,18 +10,20 @@ use LogicException;
 use Qiick\McpOAuth\Http\Controllers\ApproveClientController;
 use Qiick\McpOAuth\Http\Controllers\AuthorizeClientController;
 use Qiick\McpOAuth\Http\Controllers\DenyClientController;
+use Qiick\McpOAuth\Http\Controllers\IssueTokenController;
 use Qiick\McpOAuth\Http\Controllers\RegisterClientController;
 use Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware;
 use Qiick\McpOAuth\Http\Middleware\ValidateAuthorizationRequestMiddleware;
+use Qiick\McpOAuth\Http\Middleware\ValidateTokenRequestMiddleware;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 
 /**
  * Registers the package OAuth HTTP surface the product calls from routes/mcp.php
- * (design §5.2): DCR and the authorization endpoint with consent; token,
- * revoke and discovery land in follow-up PRs. Throws when a foreign `passport.*` route is
+ * (design §5.2): DCR, the token endpoint and the authorization endpoint with
+ * consent; revoke and discovery land in follow-up PRs. Throws when a foreign `passport.*` route is
  * already present (Signaculum guard, design §3.3).
  *
- * Every HTTP method for `oauth/register` sits behind
+ * Every HTTP method for `oauth/register`, `oauth/token` and `oauth/authorize` sits behind
  * {@see EnsureMcpOAuthEnabledMiddleware} so that, with OAuth off, the path is
  * indistinguishable from a route that was never registered (design §4.2).
  *
@@ -49,11 +51,28 @@ final class McpOAuthRoutes
                 ->middleware('throttle:mcp-oauth-register')
                 ->name('mcp.oauth.register');
 
+            self::registerTokenRoutes();
             self::registerAuthorizationRoutes();
         });
 
         // ->name() is applied after addRoute; rebuild so Route::has() sees it.
         Route::getRoutes()->refreshNameLookups();
+    }
+
+    /**
+     * Token endpoint (design §5.2 item 6). Stateless: no `web` group, so no
+     * session and no CSRF, as RFC 6749 §3.2 expects of a client-facing API.
+     * The throttle runs before the request checks, so refusals count too.
+     */
+    private static function registerTokenRoutes(): void
+    {
+        Route::match(['GET', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], 'oauth/token', static function (): never {
+            throw new MethodNotAllowedHttpException(['POST']);
+        });
+
+        Route::post('oauth/token', [IssueTokenController::class, 'issueToken'])
+            ->middleware(['throttle:mcp-oauth-token', ValidateTokenRequestMiddleware::class])
+            ->name('passport.token');
     }
 
     /**

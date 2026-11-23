@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
+use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\ClientThrottleKey;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
@@ -19,6 +20,7 @@ use Qiick\McpOAuth\Events\McpPassportKeysMissing;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
 use Qiick\McpOAuth\Testing\FakeAdminSwitch;
 use Qiick\McpOAuth\Tests\Support\PassportBootedTestCase;
@@ -158,7 +160,10 @@ it('registers a public client through the redirect URI guard', function (): void
 
     $response->assertCreated()
         ->assertJsonPath('token_endpoint_auth_method', 'none')
-        ->assertJsonPath('redirect_uris.0', 'https://app.example/callback');
+        ->assertJsonPath('redirect_uris.0', 'https://app.example/callback')
+        // Metadata the client did not send is not answered as null.
+        ->assertJsonMissingPath('logo_uri')
+        ->assertJsonMissingPath('client_uri');
 
     expect(Client::query()->where('revoked', false)->count())->toBe(1);
 
@@ -166,6 +171,102 @@ it('registers a public client through the redirect URI guard', function (): void
         return $event->displayHosts === ['app.example'];
     });
 });
+
+it('records every registered client as an MCP client in oauth_client_metadata', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $response = $this->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+        'logo_uri' => 'https://app.example/logo.png',
+        'client_uri' => 'https://app.example',
+    ])->assertCreated()
+        ->assertJsonPath('logo_uri', 'https://app.example/logo.png')
+        ->assertJsonPath('client_uri', 'https://app.example');
+
+    $metadata = OAuthClientMetadata::query()->where('client_id', $response->json('client_id'))->sole();
+
+    expect($metadata->registration_source)->toBe('dcr')
+        ->and($metadata->token_endpoint_auth_method)->toBe('none')
+        ->and($metadata->client_id_issued_at)->not->toBeNull()
+        ->and($metadata->logo_uri)->toBe('https://app.example/logo.png')
+        ->and($metadata->client_uri)->toBe('https://app.example');
+});
+
+it('leaves no client behind when its metadata row cannot be written (S1)', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+    Schema::drop('oauth_client_metadata');
+
+    try {
+        $this->postJson('/oauth/register', [
+            'client_name' => 'Cursor',
+            'redirect_uris' => ['https://app.example/callback'],
+        ])->assertStatus(500)->assertJsonPath('error', 'server_error');
+
+        expect(Client::query()->count())->toBe(0);
+    } finally {
+        (require __DIR__.'/../../database/migrations/2026_11_22_100000_create_oauth_client_metadata_table.php')->up();
+    }
+});
+
+it('closes its transaction whatever laravel/mcp answers', function (array $body, int $status): void {
+    Event::fake([McpClientRegistered::class]);
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+    $passportConnection = Passport::client()->getConnection();
+    $transactionLevelBefore = $passportConnection->transactionLevel();
+
+    $this->postJson('/oauth/register', $body)->assertStatus($status);
+
+    expect($passportConnection->transactionLevel())->toBe($transactionLevelBefore);
+    // Only a registration that happened is announced.
+    Event::assertDispatchedTimes(McpClientRegistered::class, $status === 201 ? 1 : 0);
+})->with([
+    'registered' => [['client_name' => 'Cursor', 'redirect_uris' => ['https://app.example/callback']], 201],
+    'refused by laravel/mcp validation' => [['client_name' => 'Cursor'], 400],
+]);
+
+it('closes its transaction when laravel/mcp lets an exception out (U2)', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+    // laravel/mcp resolves the ClientRepository outside its own try.
+    app()->bind(ClientRepository::class, static fn () => throw new RuntimeException('client repository unavailable'));
+    $passportConnection = Passport::client()->getConnection();
+    $transactionLevelBefore = $passportConnection->transactionLevel();
+
+    expect(fn () => $this->withoutExceptionHandling()->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+    ]))->toThrow(RuntimeException::class, 'client repository unavailable');
+
+    expect($passportConnection->transactionLevel())->toBe($transactionLevelBefore);
+});
+
+it('accepts an upper-case HTTPS scheme for logo_uri', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $this->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+        'logo_uri' => 'HTTPS://app.example/logo.png',
+    ])->assertCreated();
+});
+
+it('accepts only https for logo_uri and client_uri, which a consent page may show (N5)', function (string $field): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $this->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+        $field => 'http://app.example/page',
+    ])->assertStatus(400)->assertJsonPath('error', 'invalid_client_metadata');
+
+    expect(Client::query()->count())->toBe(0);
+})->with(['logo_uri', 'client_uri']);
 
 it('refuses a fragment redirect_uri via the guard before Passport create (B3)', function (): void {
     enableMcpOAuthWithKeys();
@@ -222,6 +323,8 @@ it('answers 503 when the global client cap is reached', function (): void {
 it('counts the cap on the client model Passport writes to', function (): void {
     enableMcpOAuthWithKeys();
     config()->set('mcp-oauth.registrations_global_cap', 1);
+    // Persistent engines keep tables across runs.
+    Schema::dropIfExists('product_oauth_clients');
     Schema::create('product_oauth_clients', function (Blueprint $table): void {
         $table->uuid('id')->primary();
         $table->nullableMorphs('owner');
@@ -251,11 +354,11 @@ it('counts the cap on the client model Passport writes to', function (): void {
             'redirect_uris' => ['https://app.example/callback'],
         ])->assertStatus(503)
             ->assertJsonPath('error', 'temporarily_unavailable');
+        expect(SeparateTableClient::query()->count())->toBe(1);
     } finally {
         Passport::useClientModel(Client::class);
+        Schema::dropIfExists('product_oauth_clients');
     }
-
-    expect(SeparateTableClient::query()->count())->toBe(1);
 });
 
 it('refuses a subdomain of a blocked host only when the row matches subdomains', function (): void {

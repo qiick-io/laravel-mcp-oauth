@@ -83,6 +83,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   user picks one when they have several). Default `InertiaConsentView` renders
   `oauth/authorize` when Inertia is installed; props and form fields are in
   `docs/consent-page.md`. `FakeConsentProvider`, and `FakeGrantStore::replace()`.
+- Token endpoint (design §5.2 item 6, §8.4): `POST oauth/token`
+  (`passport.token`) inside the off-gate, stateless, with
+  `throttle:mcp-oauth-token` and `ValidateTokenRequestMiddleware`: only the
+  `authorization_code` (PKCE `S256`) and `refresh_token` grants, even when
+  Passport enables another one; the exact `resource` on both; a client named
+  in the body or in HTTP Basic must be a UUID with no blocked redirect host.
+  Every refusal is one fixed RFC 6749 §5.2 body per error code with no `hint`;
+  league's code, client and redirect mismatches answer `invalid_grant`.
+  `AccessTokenCreated` binds each new token to `GrantStore::activeFor()`
+  (`bindingKey()` in `grant_binding_column`, `audience` = the MCP resource) or
+  revokes it at once when no grant is active (S54).
+- One-shot authorization codes (RFC 9700 §4.5): `OneShotAuthCodeRepository`
+  consumes a code with an atomic update the first time league asks about it,
+  so a failed exchange (wrong verifier, redirect URI or client) burns it and
+  only one of two parallel exchanges wins. A code presented again, before or
+  after it expired, revokes the grant it was consumed under and every token
+  bound to it (RFC 6749 §4.1.2), never a newer consent's; new package table
+  `oauth_auth_code_exchanges` records that grant. The grant is revoked before
+  its tokens, an already revoked grant is left as it is, and the token of a
+  code exchange is bound to the grant its code was consumed under.
+- Only MCP clients reach `oauth/authorize` and `oauth/token`: a Passport
+  client with no `oauth_client_metadata` row is refused as `invalid_client`,
+  so every token minted there is bound. **Upgrade:** clients registered via
+  DCR before this version have no row and are refused; they must register
+  again (or the product backfills a `registration_source = dcr` row for them).
+  DCR writes the client and its row in one transaction;
+  `oauth_client_metadata` and `oauth_auth_code_exchanges` live on
+  `passport.connection`, like Passport's tables. With `mcp-oauth.enabled` off,
+  Passport keeps its own auth-code and refresh-token repositories and needs no
+  `GrantStore`.
+- Only tokens of MCP clients are bound, and only while `mcp-oauth.enabled` is
+  on. An MCP client is one with an `oauth_client_metadata` row, which DCR now
+  writes (`registration_source = dcr`, `token_endpoint_auth_method = none`,
+  `client_id_issued_at`, and the `logo_uri` / `client_uri` it echoes, https
+  only); the
+  product's own Passport clients and their `createToken()` tokens are left
+  alone. A token is bound first and its grant read again, so a concurrent
+  replay of its code always ends with the token revoked. While OAuth is on,
+  the AuthorizationServer keeps only the MCP grants (password, implicit and
+  client credentials are removed even if Passport enables them); off, the
+  product's Passport grants stay.
+  The token endpoint refuses HTTP Basic and body credentials together
+  (RFC 6749 §2.3), challenges in the scheme the client used, and the
+  per-client throttle keys on the body (query for authorize) or Basic id,
+  lower-cased.
+- Fail-closed boot (S81): with `mcp-oauth.enabled` on, boot throws
+  `InvalidMcpOAuthConfigException` naming a missing `ConsentView`,
+  `ConsentProvider` or `GrantStore` binding.
 
 - `mcp_auth_failures_per_minute` kept as a raw env string and validated with
   `BoundedPositiveInt` at boot (same digit-only fail-closed path as TTLs /

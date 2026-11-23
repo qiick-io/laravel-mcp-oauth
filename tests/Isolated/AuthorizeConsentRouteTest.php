@@ -22,6 +22,7 @@ use Qiick\McpOAuth\Events\McpConsentApproved;
 use Qiick\McpOAuth\Events\McpConsentDenied;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
 use Qiick\McpOAuth\Testing\FakeConsentProvider;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
@@ -235,6 +236,20 @@ it('refuses unknown, malformed and revoked clients as JSON', function (string $c
     'empty' => [''],
     'revoked' => ['revoked'],
 ]);
+
+it('refuses as JSON a Passport client the package did not register', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    // A product's own authorization_code client, or a client from before DCR wrote its row.
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->delete();
+
+    $this->actingAs($this->createUser())
+        ->get($this->authorizeUrl($client))
+        ->assertStatus(400)
+        ->assertHeaderMissing('Location')
+        ->assertJsonPath('error', 'invalid_client');
+});
 
 it('refuses a client with a blocked redirect host as JSON', function (): void {
     $this->enableOAuth();

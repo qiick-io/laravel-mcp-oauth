@@ -3,11 +3,19 @@
 declare(strict_types=1);
 
 use Carbon\CarbonInterval;
+use Laravel\Passport\Bridge\AuthCodeRepository;
+use Laravel\Passport\Bridge\RefreshTokenRepository;
+use Laravel\Passport\Passport;
+use Laravel\Passport\PersonalAccessTokenFactory;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Grant\AuthCodeGrant;
 use League\OAuth2\Server\Grant\ClientCredentialsGrant;
 use League\OAuth2\Server\Grant\RefreshTokenGrant;
+use Qiick\McpOAuth\Contracts\ConsentProvider;
+use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\McpOAuthServiceProvider;
+use Qiick\McpOAuth\Testing\FakeConsentProvider;
+use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 use Qiick\McpOAuth\Tests\Support\PassportBootedTestCase;
 use ReflectionProperty;
 
@@ -104,8 +112,12 @@ it('retrofits auth_code_ttl when AuthorizationServer was already resolved', func
     expect(authCodeTtlMinutesFromServer($authorizationServer))->toBe(3.0);
 });
 
-it('disables ClientCredentialsGrant so Passport star scope cannot be issued', function (): void {
+it('disables ClientCredentialsGrant with OAuth on so Passport star scope cannot be issued', function (): void {
+    // OAuth on needs every adapter bound (S81).
+    app()->instance(ConsentProvider::class, new FakeConsentProvider(AuthorizeFlowTestCase::defaultConsentOptions()));
     config([
+        // Grants are stripped only while OAuth is on.
+        'mcp-oauth.enabled' => true,
         'passport.private_key' => passportTestKeyContents('oauth-private.key'),
         'passport.public_key' => passportTestKeyContents('oauth-public.key'),
     ]);
@@ -128,4 +140,73 @@ it('disables ClientCredentialsGrant so Passport star scope cannot be issued', fu
         ->and($grantClasses)->toContain(AuthCodeGrant::class)
         ->and($grantClasses)->toContain(RefreshTokenGrant::class)
         ->and(array_keys($enabledGrantTypes))->not->toContain('client_credentials');
+});
+
+it('keeps only the MCP grants on the server, and personal access on its own, whatever Passport enables', function (): void {
+    // OAuth on needs every adapter bound (S81).
+    app()->instance(ConsentProvider::class, new FakeConsentProvider(AuthorizeFlowTestCase::defaultConsentOptions()));
+    config([
+        // Grants are stripped only while OAuth is on.
+        'mcp-oauth.enabled' => true,
+        'passport.private_key' => passportTestKeyContents('oauth-private.key'),
+        'passport.public_key' => passportTestKeyContents('oauth-public.key'),
+    ]);
+    Passport::enablePasswordGrant();
+    Passport::enableImplicitGrant();
+
+    try {
+        (new McpOAuthServiceProvider($this->app))->boot();
+        $this->app->forgetInstance(AuthorizationServer::class);
+        $authorizationServer = $this->app->make(AuthorizationServer::class);
+        $enabledGrantTypes = (new ReflectionProperty($authorizationServer, 'enabledGrantTypes'))->getValue($authorizationServer);
+        // The product's createToken() runs on Passport's own personal access server.
+        $personalAccessServer = (new ReflectionProperty(PersonalAccessTokenFactory::class, 'server'))
+            ->getValue($this->app->make(PersonalAccessTokenFactory::class));
+        $personalAccessGrantTypes = (new ReflectionProperty($personalAccessServer, 'enabledGrantTypes'))->getValue($personalAccessServer);
+    } finally {
+        Passport::$passwordGrantEnabled = false;
+        Passport::$implicitGrantEnabled = false;
+    }
+
+    expect(array_keys($enabledGrantTypes))->toEqualCanonicalizing(['authorization_code', 'refresh_token'])
+        ->and(array_keys($personalAccessGrantTypes))->toContain('personal_access')
+        ->and(array_keys($personalAccessGrantTypes))->not->toContain('password');
+});
+
+it('leaves the product\'s Passport grants alone while OAuth is off', function (): void {
+    config([
+        'mcp-oauth.enabled' => false,
+        'passport.private_key' => passportTestKeyContents('oauth-private.key'),
+        'passport.public_key' => passportTestKeyContents('oauth-public.key'),
+    ]);
+    Passport::enablePasswordGrant();
+
+    try {
+        (new McpOAuthServiceProvider($this->app))->boot();
+        $this->app->forgetInstance(AuthorizationServer::class);
+        $authorizationServer = $this->app->make(AuthorizationServer::class);
+        $enabledGrantTypes = (new ReflectionProperty($authorizationServer, 'enabledGrantTypes'))->getValue($authorizationServer);
+    } finally {
+        Passport::$passwordGrantEnabled = false;
+    }
+
+    expect(array_keys($enabledGrantTypes))->toContain('password')
+        ->and(array_keys($enabledGrantTypes))->toContain('client_credentials');
+});
+
+it('leaves Passport\'s repositories alone and needs no GrantStore while OAuth is off (S2)', function (): void {
+    config([
+        'mcp-oauth.enabled' => false,
+        'passport.private_key' => passportTestKeyContents('oauth-private.key'),
+        'passport.public_key' => passportTestKeyContents('oauth-public.key'),
+    ]);
+    $this->app->offsetUnset(GrantStore::class);
+    $this->app->forgetInstance(AuthorizationServer::class);
+
+    $authCodeRepository = $this->app->make(AuthCodeRepository::class);
+    $refreshTokenRepository = $this->app->make(RefreshTokenRepository::class);
+
+    expect($authCodeRepository::class)->toBe(AuthCodeRepository::class)
+        ->and($refreshTokenRepository::class)->toBe(RefreshTokenRepository::class)
+        ->and(fn () => $this->app->make(AuthorizationServer::class))->not->toThrow(Exception::class);
 });

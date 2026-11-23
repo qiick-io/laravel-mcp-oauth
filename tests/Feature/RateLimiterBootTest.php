@@ -52,6 +52,23 @@ it('uses HTTP Basic username as the per-client key when client_id is absent', fu
         ->and($limits[1]->key)->toBe('token:client:basic-client');
 });
 
+it('keys the per-client limit on the body or Basic client id, lower-cased, never the query', function (): void {
+    /** @var Closure(Request): list<Limit> $tokenLimiter */
+    $tokenLimiter = RateLimiter::limiter('mcp-oauth-token');
+
+    $bodyRequest = Request::create('/oauth/token?client_id=random-'.uniqid(), 'POST', ['client_id' => 'ABC-Def'], server: ['REMOTE_ADDR' => '203.0.113.10']);
+    $queryOnlyRequest = Request::create('/oauth/token?client_id=random-'.uniqid(), 'POST', server: ['REMOTE_ADDR' => '203.0.113.10']);
+    $basicRequest = Request::create('/oauth/token?client_id=random', 'POST', server: [
+        'REMOTE_ADDR' => '203.0.113.10',
+        'PHP_AUTH_USER' => 'ABC-DEF',
+        'PHP_AUTH_PW' => '',
+    ]);
+
+    expect($tokenLimiter($bodyRequest)[1]->key)->toBe('token:client:abc-def')
+        ->and($tokenLimiter($queryOnlyRequest))->toHaveCount(1)
+        ->and($tokenLimiter($basicRequest)[1]->key)->toBe('token:client:abc-def');
+});
+
 it('keeps DCR IP-only because registration has no client yet', function (): void {
     $request = Request::create('/oauth/register', 'POST', [
         'client_id' => 'should-be-ignored',

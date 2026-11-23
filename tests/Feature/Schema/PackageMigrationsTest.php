@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use LogicException;
+use Qiick\McpOAuth\Models\OAuthAuthCodeExchange;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
@@ -164,6 +165,41 @@ it('S4: oauth_consent_records is append-only evidence with every consent column'
 
     expect(Schema::hasColumn('oauth_consent_records', 'updated_at'))->toBeFalse();
 });
+
+it('records the grant each authorization code was consumed under', function (): void {
+    expect(Schema::hasTable('oauth_auth_code_exchanges'))->toBeTrue()
+        ->and(Schema::getColumnListing('oauth_auth_code_exchanges'))->toEqualCanonicalizing(['auth_code_id', 'grant_id', 'created_at']);
+});
+
+it('keeps the auth-code exchange on the Passport connection, with the code row it records', function (): void {
+    config()->set('passport.connection', 'passport-tenant');
+
+    expect((new OAuthAuthCodeExchange)->getConnectionName())->toBe('passport-tenant');
+
+    config()->set('passport.connection', null);
+
+    expect((new OAuthAuthCodeExchange)->getConnectionName())->toBeNull();
+});
+
+it('creates the tables its Passport-connection models use on passport.connection (B2)', function (string $migrationFile, string $table): void {
+    // Passport on its own database: the package tables its models read beside Passport's rows must live there too.
+    config()->set('database.connections.passport_second', [
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'prefix' => '',
+        'foreign_key_constraints' => true,
+    ]);
+    config()->set('passport.connection', 'passport_second');
+    $migration = require __DIR__.'/../../../database/migrations/'.$migrationFile;
+
+    // The migrator runs a migration on the connection the migration names, as `php artisan migrate` does.
+    (fn (object $migrationToRun) => $this->runMigration($migrationToRun, 'up'))->call(app('migrator'), $migration);
+
+    expect(Schema::connection('passport_second')->hasTable($table))->toBeTrue();
+})->with([
+    'client metadata' => ['2026_11_22_100000_create_oauth_client_metadata_table.php', 'oauth_client_metadata'],
+    'auth-code exchanges' => ['2026_11_23_100300_create_oauth_auth_code_exchanges_table.php', 'oauth_auth_code_exchanges'],
+]);
 
 it('S2: CIMD runtime is off by default while schema columns exist', function (): void {
     expect(config('mcp-oauth.cimd.enabled'))->toBeFalse()

@@ -6,6 +6,8 @@ namespace Qiick\McpOAuth\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Laravel\Passport\Client;
+use Qiick\McpOAuth\Traits\UsesPassportConnectionTrait;
 
 /**
  * Eloquent row for oauth_client_metadata (RFC 7591 side table). UUID v7 primary
@@ -16,6 +18,7 @@ use Illuminate\Database\Eloquent\Model;
 final class OAuthClientMetadata extends Model
 {
     use HasUuids;
+    use UsesPassportConnectionTrait;
 
     protected $table = 'oauth_client_metadata';
 
@@ -59,6 +62,18 @@ final class OAuthClientMetadata extends Model
         'metadata',
         'schema_version',
     ];
+
+    /**
+     * A client the package registered (DCR writes this row). Only those reach
+     * the authorize and token endpoints and get their tokens bound: a
+     * product's own Passport client never becomes an unbound MCP client.
+     */
+    public static function isRegisteredClient(Client|string $client): bool
+    {
+        $clientId = $client instanceof Client ? $client->getKey() : $client;
+
+        return self::query()->where('client_id', $clientId)->exists();
+    }
 
     /**
      * @return array<string, string>

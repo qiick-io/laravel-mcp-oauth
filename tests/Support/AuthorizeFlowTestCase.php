@@ -4,17 +4,20 @@ declare(strict_types=1);
 
 namespace Qiick\McpOAuth\Tests\Support;
 
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
+use League\OAuth2\Server\AuthorizationServer;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\ConsentOption;
 use Qiick\McpOAuth\Data\ConsentOptions;
 use Qiick\McpOAuth\McpOAuthServer;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
 use Qiick\McpOAuth\Testing\FakeAdminSwitch;
 use Qiick\McpOAuth\Testing\FakeConsentProvider;
@@ -29,7 +32,12 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
 {
     public const string REGISTERED_REDIRECT_URI = 'https://app.example/callback';
 
+    /** RFC 7636 appendix B: the S256 challenge of CODE_VERIFIER. */
     public const string CODE_CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+
+    public const string CODE_VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+
+    public const string RESOURCE = 'https://mcp-oauth.test/mcp';
 
     /** @var array{private: string, public: string}|null */
     private static ?array $passportKeyPair = null;
@@ -58,6 +66,12 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
         foreach ($passportMigrations as $passportMigration) {
             (require $passportMigration)->up();
         }
+
+        // The product-owned binding columns, as the mcp-oauth-binding-stub-uuid stub adds them.
+        Schema::table('oauth_access_tokens', function (Blueprint $table): void {
+            $table->uuid('api_key_id')->nullable()->index();
+            $table->string('audience', 512)->nullable();
+        });
     }
 
     protected function setUp(): void
@@ -82,6 +96,8 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
         app()->instance(AdminSwitch::class, new FakeAdminSwitch(isEnabled: true));
         app()->forgetInstance(McpOAuthServer::class);
         app()->forgetInstance(RedirectUriGuard::class);
+        // Its repositories depend on the gate (Passport's own while off).
+        app()->forgetInstance(AuthorizationServer::class);
 
         $consentProvider = new FakeConsentProvider($consentOptions ?? self::defaultConsentOptions());
         app()->instance(ConsentProvider::class, $consentProvider);
@@ -89,9 +105,14 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
         return $consentProvider;
     }
 
-    protected function grantStore(): FakeGrantStore
+    public function grantStore(): FakeGrantStore
     {
         $grantStore = app(GrantStore::class);
+
+        // A test may have wrapped it to hook into a request.
+        if ($grantStore instanceof HookedGrantStore) {
+            return $grantStore->grantStore;
+        }
 
         assert($grantStore instanceof FakeGrantStore);
 
@@ -123,7 +144,7 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
     /**
      * @param  list<string>  $redirectUris
      */
-    protected function createClient(array $redirectUris = [self::REGISTERED_REDIRECT_URI], bool $isRevoked = false): Client
+    public function createClient(array $redirectUris = [self::REGISTERED_REDIRECT_URI], bool $isRevoked = false): Client
     {
         $client = (new Client)->forceFill([
             'id' => (string) Str::uuid7(),
@@ -134,6 +155,12 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
             'revoked' => $isRevoked,
         ]);
         $client->save();
+        // The row DCR writes for every client it registers: this is an MCP client.
+        OAuthClientMetadata::query()->create([
+            'client_id' => $client->getKey(),
+            'registration_source' => 'dcr',
+            'token_endpoint_auth_method' => 'none',
+        ]);
 
         return $client;
     }
@@ -161,7 +188,7 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
             'scope' => 'mcp:use',
             'code_challenge' => self::CODE_CHALLENGE,
             'code_challenge_method' => 'S256',
-            'resource' => 'https://mcp-oauth.test/mcp',
+            'resource' => self::RESOURCE,
         ], $overrides);
 
         return array_filter($query, static fn (mixed $value): bool => $value !== null);
@@ -196,5 +223,51 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
             'private' => $privatePem,
             'public' => (string) $keyDetails['key'],
         ];
+    }
+
+    /**
+     * Runs authorize → consent → approve (for a new user unless one is given)
+     * and returns the code the client receives.
+     *
+     * @return array{code: string, user: TestUser}
+     */
+    public function obtainAuthorizationCode(Client $client, ?TestUser $user = null): array
+    {
+        $user ??= $this->createUser();
+
+        $consentPage = $this->actingAs($user)
+            ->get($this->authorizeUrl($client), ['X-Inertia' => 'true'])
+            ->assertOk();
+
+        $approval = $this->post('/oauth/authorize', [
+            'auth_token' => $consentPage->json('props.authToken'),
+            'scopes' => ['mcp:read'],
+            'role' => 'editor',
+            'resources' => ['news'],
+        ]);
+
+        parse_str((string) parse_url((string) $approval->headers->get('Location'), PHP_URL_QUERY), $redirectParameters);
+
+        // The token endpoint is stateless: forget the browser session.
+        $this->app['auth']->forgetGuards();
+        $this->flushSession();
+
+        return ['code' => (string) $redirectParameters['code'], 'user' => $user];
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides  null removes the parameter
+     * @return array<string, mixed>
+     */
+    public function codeExchange(Client $client, string $code, array $overrides = []): array
+    {
+        return array_filter(array_merge([
+            'grant_type' => 'authorization_code',
+            'client_id' => (string) $client->getKey(),
+            'redirect_uri' => self::REGISTERED_REDIRECT_URI,
+            'code' => $code,
+            'code_verifier' => self::CODE_VERIFIER,
+            'resource' => self::RESOURCE,
+        ], $overrides), static fn (mixed $value): bool => $value !== null);
     }
 }

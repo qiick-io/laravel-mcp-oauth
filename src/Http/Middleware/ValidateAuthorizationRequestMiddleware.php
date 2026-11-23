@@ -11,6 +11,7 @@ use Illuminate\Support\Str;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\McpOAuthServer;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -23,7 +24,9 @@ use Symfony\Component\HttpFoundation\Response;
  *   clients, which league would let through); the challenge format
  *   (RFC 7636 §4.2) is league's check;
  * - the RFC 8707 `resource` names this server's MCP endpoint;
- * - the client exists, is not revoked and none of its redirect hosts is
+ * - the client exists, is not revoked, was registered by the package (its
+ *   `oauth_client_metadata` row: a product's own Passport client never gets
+ *   an MCP token that nothing binds) and none of its redirect hosts is
  *   blocked;
  * - `redirect_uri` equals one registered URI under
  *   {@see RedirectUriGuard::areExactlyEqual()}, or is omitted while the client
@@ -101,7 +104,9 @@ final class ValidateAuthorizationRequestMiddleware
 
         $client = $this->activeClient($request->query('client_id'));
 
-        if ($client === null || $this->redirectUriGuard->clientHasBlockedRedirectHost($client)) {
+        if ($client === null
+            || ! OAuthClientMetadata::isRegisteredClient($client)
+            || $this->redirectUriGuard->clientHasBlockedRedirectHost($client)) {
             return self::oauthError('invalid_client', 'The client is unknown, revoked or blocked on this server.');
         }
 

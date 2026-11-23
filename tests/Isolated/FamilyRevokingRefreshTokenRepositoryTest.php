@@ -138,7 +138,10 @@ function issueTokensAfterRevoke(string $prefix, string $clientId, string $grantI
     return compact('accessTokenId', 'refreshTokenId');
 }
 
-it('binds Passport RefreshTokenRepository to the family-revoking implementation', function (): void {
+it('binds Passport RefreshTokenRepository to the family-revoking implementation while OAuth is on', function (): void {
+    // Off, Passport keeps its own repository (see PassportAuthCodeTtlTest, S2).
+    config()->set('mcp-oauth.enabled', true);
+
     expect(app(PassportRefreshTokenRepository::class))
         ->toBeInstanceOf(FamilyRevokingRefreshTokenRepository::class);
 });
