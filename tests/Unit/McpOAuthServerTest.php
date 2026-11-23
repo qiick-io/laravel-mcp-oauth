@@ -203,7 +203,7 @@ it('accepts mode-600, 440 and 660 key files as usable', function (int $mode): vo
     '660' => [0660],
 ]);
 
-it('accepts only the exact resource identifier, apart from a trailing slash (RFC 8707)', function (): void {
+it('compares the resource path exactly and scheme and host case-insensitively (RFC 8707, MCP)', function (): void {
     $server = makeServer(true, true);
     config()->set('app.url', 'https://mcp.example/API');
     config()->set('mcp-oauth.mcp_path', 'MCP');
@@ -211,7 +211,31 @@ it('accepts only the exact resource identifier, apart from a trailing slash (RFC
     expect($server->resourceIdentifier())->toBe('https://mcp.example/API/MCP')
         ->and($server->acceptsResource('https://mcp.example/API/MCP'))->toBeTrue()
         ->and($server->acceptsResource('https://mcp.example/API/MCP/'))->toBeTrue()
+        // MCP: implementations SHOULD accept uppercase scheme and host.
+        ->and($server->acceptsResource('https://MCP.EXAMPLE/API/MCP'))->toBeTrue()
+        ->and($server->acceptsResource('HTTPS://mcp.example/API/MCP'))->toBeTrue()
         ->and($server->acceptsResource('https://mcp.example/api/mcp'))->toBeFalse()
-        ->and($server->acceptsResource('https://MCP.EXAMPLE/API/MCP'))->toBeFalse()
-        ->and($server->acceptsResource('HTTPS://mcp.example/API/MCP'))->toBeFalse();
+        ->and($server->acceptsResource('https://mcp.example/API/MCP//'))->toBeFalse()
+        ->and($server->acceptsResource('https://mcp.example:443/API/MCP'))->toBeFalse()
+        ->and($server->acceptsResource('https://mcp.example/API/MCP?x=1'))->toBeFalse()
+        ->and($server->acceptsResource('https://mcp.example/API/MCP#x'))->toBeFalse()
+        ->and($server->acceptsResource('https://user@mcp.example/API/MCP'))->toBeFalse()
+        ->and($server->acceptsResource('https://evil.example/API/MCP'))->toBeFalse()
+        ->and($server->acceptsResource('mcp.example/API/MCP'))->toBeFalse();
+});
+
+it('accepts the lower-case host when APP_URL spells it in upper case', function (): void {
+    $server = makeServer(true, true);
+    config()->set('app.url', 'https://MCP.Example');
+
+    expect($server->acceptsResource('https://mcp.example/mcp'))->toBeTrue()
+        ->and($server->acceptsResource('https://MCP.Example/mcp'))->toBeTrue();
+});
+
+it('falls back to the default path when mcp_path is only slashes', function (): void {
+    $server = makeServer(true, true);
+    config()->set('mcp-oauth.mcp_path', '/');
+
+    expect($server->resourceIdentifier())->toBe('https://mcp-oauth.test/mcp')
+        ->and($server->acceptsResource('https://mcp-oauth.test/mcp'))->toBeTrue();
 });

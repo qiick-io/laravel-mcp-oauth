@@ -26,4 +26,11 @@ final class InvalidMcpOAuthConfigException extends InvalidArgumentException
             "mcp-oauth config [{$configKey}] value {$configuredValue} is outside the allowed range 1..{$maximum}.",
         );
     }
+
+    public static function cimdCacheBoundsReversed(int $cacheMinSeconds, int $cacheMaxSeconds): self
+    {
+        return new self(
+            "mcp-oauth config [cimd.cache_min_seconds] {$cacheMinSeconds} must not exceed [cimd.cache_max_seconds] {$cacheMaxSeconds}.",
+        );
+    }
 }

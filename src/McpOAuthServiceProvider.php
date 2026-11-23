@@ -27,6 +27,7 @@ use Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Contracts\ConsentView;
 use Qiick\McpOAuth\Contracts\GrantStore;
+use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\Http\Controllers\AuthorizeClientController;
 use Qiick\McpOAuth\Internal\BlockedHostCatalog;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
@@ -298,8 +299,17 @@ final class McpOAuthServiceProvider extends ServiceProvider
             'cimd.cache_max_seconds' => BoundedPositiveInt::CIMD_CACHE_SECONDS_MAX,
         ];
 
+        $validatedValuesByConfigKey = [];
+
         foreach ($maximumsByConfigKey as $configKey => $maximum) {
-            BoundedPositiveInt::require($config->get('mcp-oauth.'.$configKey), $configKey, $maximum);
+            $validatedValuesByConfigKey[$configKey] = BoundedPositiveInt::require($config->get('mcp-oauth.'.$configKey), $configKey, $maximum);
+        }
+
+        $cacheMinSeconds = $validatedValuesByConfigKey['cimd.cache_min_seconds'];
+        $cacheMaxSeconds = $validatedValuesByConfigKey['cimd.cache_max_seconds'];
+
+        if ($cacheMinSeconds > $cacheMaxSeconds) {
+            throw InvalidMcpOAuthConfigException::cimdCacheBoundsReversed($cacheMinSeconds, $cacheMaxSeconds);
         }
     }
 

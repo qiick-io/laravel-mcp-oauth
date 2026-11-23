@@ -22,11 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   blocks the subdomains.
 - The DCR global cap counts `Passport::client()`, the model Passport writes
   to, so a product's `Passport::useClientModel()` no longer bypasses it.
-- `McpOAuthServer::acceptsResource()` compares the resource exactly (RFC 8707);
-  only a trailing slash is ignored. Case is no longer folded, so
-  `https://app.example/API/MCP` and `https://app.example/api/mcp` are
-  different resources.
-
+- `McpOAuthServer::acceptsResource()` compares the resource path exactly
+  (RFC 8707), so `https://app.example/API/MCP` and
+  `https://app.example/api/mcp` are different resources. Scheme and host stay
+  case-insensitive, as the MCP spec asks. One trailing slash is ignored, and
+  no more than one.
+- `mcp_path = '/'` falls back to `mcp` like an empty path, instead of making
+  the resource the bare origin, which no request could ever match.
+- Boot refuses `cimd.cache_min_seconds` above `cimd.cache_max_seconds`.
 - `ClientMetadataUriGuard` starts from `RedirectUriGuard::parseCanonical()`
   (now public) and refuses internal names (single-label, `localhost`,
   `*.local`, `*.internal`), IPv6 literals embedding IPv4 (mapped, translated,
