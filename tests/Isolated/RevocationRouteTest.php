@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
@@ -11,6 +12,7 @@ use Qiick\McpOAuth\Data\RevocationReason;
 use Qiick\McpOAuth\Events\McpRefreshTokenReused;
 use Qiick\McpOAuth\Events\McpTokenRevoked;
 use Qiick\McpOAuth\McpOAuthRoutes;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 
 uses(AuthorizeFlowTestCase::class);
@@ -295,3 +297,105 @@ it('refuses a request without a client or a token as invalid_request', function 
     'no client' => [['token' => 'x']],
     'repeated client' => [['client_id' => ['a', 'b'], 'token' => 'x']],
 ]);
+
+// --- #16's client rules, and the cases mutation found untested ----------------
+
+it('refuses HTTP Basic and body credentials together (RFC 6749 §2.3)', function (array $bodyCredentials): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $tokens = tokensFor($this, $client);
+
+    postRevoke($this, ['token' => $tokens['refresh_token'], ...array_map(
+        static fn (string $value): string => $value === 'CLIENT' ? (string) $client->getKey() : $value,
+        $bodyCredentials,
+    )], ['Authorization' => 'Basic '.base64_encode($client->getKey().':')])
+        ->assertStatus(400)
+        ->assertExactJson(REVOKE_INVALID_REQUEST_BODY);
+
+    expect(DB::table('oauth_refresh_tokens')->count())->toBe(1);
+})->with([
+    'client_id in the body' => [['client_id' => 'CLIENT']],
+    'client_secret in the body' => [['client_secret' => 'anything']],
+]);
+
+it('refuses a Passport client the package did not register', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $tokens = tokensFor($this, $client);
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->delete();
+
+    postRevoke($this, ['token' => $tokens['refresh_token'], 'client_id' => (string) $client->getKey()])
+        ->assertStatus(401)
+        ->assertExactJson(REVOKE_INVALID_CLIENT_BODY);
+
+    expect(DB::table('oauth_refresh_tokens')->count())->toBe(1);
+});
+
+it('never revokes a newer consent when a token of an older one is revoked', function (): void {
+    Event::fake([McpTokenRevoked::class]);
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $olderCode, 'user' => $user] = $this->obtainAuthorizationCode($client);
+    $olderTokens = $this->withHeaders(['Accept' => 'application/json'])
+        ->post('/oauth/token', $this->codeExchange($client, $olderCode))->assertOk();
+    ['code' => $newerCode] = $this->obtainAuthorizationCode($client, $user);
+    $this->withHeaders(['Accept' => 'application/json'])->post('/oauth/token', $this->codeExchange($client, $newerCode))->assertOk();
+    $newerGrant = $this->grantStore()->activeFor((string) $client->getKey(), (string) $user->getKey());
+
+    postRevoke($this, ['token' => (string) $olderTokens->json('refresh_token'), 'client_id' => (string) $client->getKey()])->assertOk();
+
+    expect($this->grantStore()->find($newerGrant->id)?->revoked)->toBeFalse()
+        ->and(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe(1);
+    Event::assertDispatched(McpTokenRevoked::class, static fn (McpTokenRevoked $event): bool => $event->grantId === null);
+});
+
+it('names no grant when the revoked token is bound to none that is active', function (): void {
+    Event::fake([McpTokenRevoked::class]);
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $tokens = tokensFor($this, $client);
+    $grant = $this->grantStore()->activeFor((string) $client->getKey(), $tokens['user_id']);
+    $this->grantStore()->revoke($grant->id, $tokens['user_id'], RevocationReason::User);
+
+    postRevoke($this, ['token' => $tokens['access_token'], 'client_id' => (string) $client->getKey()])->assertOk();
+
+    expect(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe(0);
+    Event::assertDispatched(McpTokenRevoked::class, static fn (McpTokenRevoked $event): bool => $event->grantId === null
+        && $event->tokenType === 'access_token');
+});
+
+it('refuses an empty client_id or token even when empty strings reach the service', function (array $parameters): void {
+    ConvertEmptyStringsToNull::skipWhen(static fn (): bool => true);
+
+    try {
+        $this->enableOAuth();
+        McpOAuthRoutes::register();
+        $client = $this->createClient();
+
+        postRevoke($this, array_map(static fn (string $value): string => $value === 'CLIENT' ? (string) $client->getKey() : $value, $parameters))
+            ->assertStatus(400)
+            ->assertExactJson(REVOKE_INVALID_REQUEST_BODY);
+    } finally {
+        ConvertEmptyStringsToNull::flushState();
+    }
+})->with([
+    'empty client_id' => [['client_id' => '', 'token' => 'x']],
+    'empty token' => [['client_id' => 'CLIENT', 'token' => '']],
+]);
+
+it('treats a client stored with an empty secret as public', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $tokens = tokensFor($this, $client);
+    // Written directly: Passport's model would hash even an empty secret.
+    DB::table('oauth_clients')->where('id', $client->getKey())->update(['secret' => '']);
+
+    postRevoke($this, ['token' => $tokens['refresh_token'], 'client_id' => (string) $client->getKey()])->assertOk();
+
+    expect(DB::table('oauth_refresh_tokens')->count())->toBe(0);
+});
