@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `policy_uri` follow the `logo_uri` rules (https, public host); an unknown
   `application_type`, more than ten contacts or an over-long value is a 400
   `invalid_client_metadata`.
+- At `/mcp`, a token signed with the server key but without a `scopes` claim,
+  or with a null one, is refused as `invalid_token` instead of answering 500.
+  A scope that is not exactly `mcp:use` is compared strictly, never cast.
+- `AccessTokenAuthenticator::authenticate()` checks the Bearer of the request
+  it is given, not the container's current request. Its constructor no longer
+  takes the container.
 - Every integer config key is a raw env string validated at boot:
   `registrations_global_cap`, `unused_client_retention_hours`,
   `revoked_retention_days` and the `cimd.*` numbers no longer go through

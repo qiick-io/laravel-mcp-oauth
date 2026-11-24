@@ -98,6 +98,10 @@ final class McpBearerDoorMiddleware
             return $next($request);
         }
 
+        // Not a failure for the brake, unlike design §5.3 step 4 says: the
+        // credential was never judged, and counting it would let anyone drain
+        // the brake with junk tokens while the keys are missing and then lock
+        // the address's API-key users out.
         if ($this->mcpOAuthServer->isEnabled() && ! $this->mcpOAuthServer->hasPassportKeys()) {
             return new JsonResponse(
                 ['error' => 'temporarily_unavailable', 'error_description' => 'OAuth is unavailable because Passport keys are missing.'],
