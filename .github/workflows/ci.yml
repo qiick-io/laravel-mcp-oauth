@@ -98,17 +98,19 @@ jobs:
 
   # Mutation targets from the design §11.4: one pest --mutate invocation per
   # class (pcov, no --covered-only, no || true), split round-robin across
-  # parallel shards so no job runs near its timeout. The longest shard takes
-  # about 16 minutes; add a shard (and update MUTATE_SHARDS) before one passes
-  # 20. Locked dependencies, so every shard mutates against the same versions.
+  # parallel shards so no job runs near its timeout: the three slowest classes
+  # get a shard each (DEDICATED_CLASSES in mutate-per-class.sh), the other 34
+  # share four (a shared shard of three neared 18 minutes). Add a shared shard (matrix and MUTATE_SHARDS) before one
+  # passes 20 minutes. Locked dependencies, so every shard mutates against the
+  # same versions.
   mutation-shards:
-    name: Mutation (shard ${{ matrix.shard }}/4)
+    name: Mutation (shard ${{ matrix.shard }}/7)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7]
     steps:
       - name: Checkout
         # actions/checkout@v4.2.2
@@ -130,7 +132,7 @@ jobs:
       - name: Pest mutate (security-critical classes, per-class min 95)
         env:
           MUTATE_SHARD: ${{ matrix.shard }}
-          MUTATE_SHARDS: 4
+          MUTATE_SHARDS: 7
         run: bash scripts/mutate-per-class.sh
 
   # One stable check name over every shard, for branch protection: it fails

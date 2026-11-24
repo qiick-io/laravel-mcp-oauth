@@ -50,6 +50,29 @@ The service provider is auto-discovered. Products implement the contracts
 `McpOAuthRoutes::register()` from their MCP routes file, and keep OAuth off
 until keys exist and the admin switch is flipped.
 
+`McpOAuthRoutes::register()` serves DCR, authorize, token, revocation (RFC 7009)
+and the RFC 8414 / RFC 9728 discovery documents. Do not also call
+`Mcp::oauthRoutes()`: its documents are built from the request `Host` and sit
+outside the off-gate, and its `oauth/register` would replace the package's.
+
+Browser-based MCP clients (the MCP inspector, for example) call these endpoints
+cross-origin. The package sets no CORS headers itself: add the paths to the
+product's `config/cors.php`, where Laravel's `HandleCors` answers the preflight
+before routing:
+
+```php
+'paths' => ['api/*', '.well-known/*', 'oauth/register', 'oauth/token', 'oauth/revoke'],
+```
+
+The `/mcp` 401 challenge stays laravel/mcp's plain `Bearer` one for now: clients
+find the discovery documents at the well-known paths.
+
+Schedule the prune of authorization-code exchanges whose grant is gone:
+
+```php
+Schedule::command('mcp-oauth:prune-auth-code-exchanges')->daily()->onOneServer();
+```
+
 ## Threat model (short)
 
 | Threat | Mitigation |

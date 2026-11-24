@@ -16,4 +16,6 @@ enum RevocationReason: string
     case Reuse = 'reuse';
     case Reconsent = 'reconsent';
     case Owner = 'owner';
+    /** The client revoked its refresh token (RFC 7009). */
+    case Client = 'client';
 }

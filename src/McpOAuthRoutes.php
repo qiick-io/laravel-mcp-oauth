@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth;
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 use Laravel\Mcp\Server\Middleware\AddAuthorizationFramingHeaders;
 use LogicException;
 use Qiick\McpOAuth\Http\Controllers\ApproveClientController;
+use Qiick\McpOAuth\Http\Controllers\AuthorizationServerMetadataController;
 use Qiick\McpOAuth\Http\Controllers\AuthorizeClientController;
 use Qiick\McpOAuth\Http\Controllers\DenyClientController;
 use Qiick\McpOAuth\Http\Controllers\IssueTokenController;
+use Qiick\McpOAuth\Http\Controllers\ProtectedResourceMetadataController;
 use Qiick\McpOAuth\Http\Controllers\RegisterClientController;
+use Qiick\McpOAuth\Http\Controllers\RevokeTokenController;
 use Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware;
 use Qiick\McpOAuth\Http\Middleware\ValidateAuthorizationRequestMiddleware;
 use Qiick\McpOAuth\Http\Middleware\ValidateTokenRequestMiddleware;
@@ -19,11 +23,12 @@ use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 
 /**
  * Registers the package OAuth HTTP surface the product calls from routes/mcp.php
- * (design §5.2): DCR, the token endpoint and the authorization endpoint with
- * consent; revoke and discovery land in follow-up PRs. Throws when a foreign `passport.*` route is
+ * (design §5.2): DCR, the token, revocation and authorization endpoints with
+ * consent, and the RFC 8414 / RFC 9728 discovery documents. It replaces
+ * `Mcp::oauthRoutes()`; the product does not call that. Throws when a foreign `passport.*` route is
  * already present (Signaculum guard, design §3.3).
  *
- * Every HTTP method for `oauth/register`, `oauth/token` and `oauth/authorize` sits behind
+ * Every route, every HTTP method of `oauth/*` included, sits behind
  * {@see EnsureMcpOAuthEnabledMiddleware} so that, with OAuth off, the path is
  * indistinguishable from a route that was never registered (design §4.2).
  *
@@ -52,7 +57,9 @@ final class McpOAuthRoutes
                 ->name('mcp.oauth.register');
 
             self::registerTokenRoutes();
+            self::registerRevocationRoutes();
             self::registerAuthorizationRoutes();
+            self::registerDiscoveryRoutes();
         });
 
         // ->name() is applied after addRoute; rebuild so Route::has() sees it.
@@ -73,6 +80,54 @@ final class McpOAuthRoutes
         Route::post('oauth/token', [IssueTokenController::class, 'issueToken'])
             ->middleware(['throttle:mcp-oauth-token', ValidateTokenRequestMiddleware::class])
             ->name('passport.token');
+    }
+
+    /**
+     * RFC 7009 revocation (standards review S1). Stateless like the token
+     * endpoint, with its own `mcp-oauth-revoke` limiter.
+     */
+    private static function registerRevocationRoutes(): void
+    {
+        Route::match(['GET', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], 'oauth/revoke', static function (): never {
+            throw new MethodNotAllowedHttpException(['POST']);
+        });
+
+        Route::post('oauth/revoke', RevokeTokenController::class)
+            ->middleware('throttle:mcp-oauth-revoke')
+            ->name('mcp.oauth.revoke');
+    }
+
+    /**
+     * RFC 8414 and RFC 9728 documents (design §5.2 items 2–4). They replace
+     * `Mcp::oauthRoutes()`, which a product must not call: its documents are
+     * built from the request Host and sit outside the off-gate. Both documents
+     * are served at the root and at the MCP path only; any other nested path
+     * is a 404, so no other resource or issuer is advertised.
+     */
+    private static function registerDiscoveryRoutes(): void
+    {
+        $mcpOAuthServer = app(McpOAuthServer::class);
+        $mcpPath = Str::after($mcpOAuthServer->resourceIdentifier(), $mcpOAuthServer->issuer().'/');
+
+        Route::get('.well-known/oauth-authorization-server', AuthorizationServerMetadataController::class)
+            ->name('mcp.oauth.authorization-server');
+
+        // Some MCP clients look for it under the resource path; any other path
+        // would name an issuer that is not this one (RFC 8414 §3.3).
+        Route::get('.well-known/oauth-authorization-server/'.$mcpPath, AuthorizationServerMetadataController::class)
+            ->name('mcp.oauth.authorization-server.mcp');
+
+        Route::get('.well-known/oauth-protected-resource', ProtectedResourceMetadataController::class)
+            ->name('mcp.oauth.protected-resource');
+
+        // Not named `mcp.oauth.protected-resource.nested`: laravel/mcp's
+        // AddWwwAuthenticateHeader adds a `resource_metadata` pointer to the
+        // /mcp 401 as soon as a route has that name, built from the request
+        // host and shown even while OAuth is off (when it would lead to a 404).
+        // The package's own challenge comes with the /mcp door; until then
+        // clients find these documents at the well-known paths.
+        Route::get('.well-known/oauth-protected-resource/'.$mcpPath, ProtectedResourceMetadataController::class)
+            ->name('mcp.oauth.protected-resource.mcp');
     }
 
     /**

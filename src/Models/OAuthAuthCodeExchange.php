@@ -11,9 +11,8 @@ use Qiick\McpOAuth\Traits\UsesPassportConnectionTrait;
  * The grant an authorization code was consumed under, so a code presented
  * again can revoke the tokens issued with it (OneShotAuthCodeRepository).
  *
- * ponytail: rows are never pruned yet; one is needed only while a token
- * issued with the code can live (the refresh-token TTL). The prune command
- * that lands with the admin pages should delete older rows.
+ * A row is needed only while its grant is active;
+ * `mcp-oauth:prune-auth-code-exchanges` deletes the others.
  *
  * @property string $auth_code_id
  * @property string $grant_id
