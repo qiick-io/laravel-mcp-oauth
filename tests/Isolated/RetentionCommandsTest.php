@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
+use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
 use Qiick\McpOAuth\Events\McpRevokedRecordsPurged;
@@ -16,6 +17,7 @@ use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
+use Qiick\McpOAuth\Tests\Support\HookedGrantStore;
 
 uses(AuthorizeFlowTestCase::class);
 
@@ -243,8 +245,10 @@ it('only counts unused clients with --dry-run', function (): void {
     Event::assertNotDispatched(McpUnusedClientsPruned::class);
 });
 
-it('prunes unused clients across more than one chunk', function (): void {
+it('prunes unused clients across more than one chunk of 100', function (): void {
     $this->enableOAuth();
+    $hookedGrantStore = new HookedGrantStore($this->grantStore());
+    app()->instance(GrantStore::class, $hookedGrantStore);
 
     foreach (range(1, 120) as $clientNumber) {
         clientRegisteredHoursAgo($this, 25);
@@ -254,7 +258,9 @@ it('prunes unused clients across more than one chunk', function (): void {
         ->expectsOutput('Pruned 120 unused clients registered before '.now()->subHours(24)->toIso8601String().'.')
         ->assertSuccessful();
 
-    expect(Client::query()->count())->toBe(0);
+    // One everAuthorized() question per chunk, never the whole table at once.
+    expect(Client::query()->count())->toBe(0)
+        ->and($hookedGrantStore->everAuthorizedBatchSizes)->toBe([100, 20]);
 });
 
 // --- mcp-oauth:check --------------------------------------------------------------
@@ -299,5 +305,14 @@ it('fails beside a foreign Passport route (design §3.3)', function (): void {
 
     $this->artisan('mcp-oauth:check')
         ->expectsOutputToContain('Foreign Passport routes: passport.device')
+        ->assertFailed();
+});
+
+it('reports an incomplete env key pair as env keys that are not usable', function (): void {
+    $this->enableOAuth();
+    config()->set('passport.private_key', '');
+
+    $this->artisan('mcp-oauth:check')
+        ->expectsOutputToContain('Passport keys: env, missing or unusable')
         ->assertFailed();
 });

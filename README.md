@@ -84,10 +84,18 @@ before the package: every Bearer is an API key, and a 401 says
 `Bearer realm="mcp", error="invalid_token"`. With OAuth on, every 401 and 403
 points at the protected resource metadata built from `APP_URL`.
 
-Schedule the prune of authorization-code exchanges whose grant is gone:
+Schedule the retention jobs. `mcp-oauth:purge-revoked` deletes what was revoked
+more than `revoked_retention_days` (90) ago: clients the package registered,
+the product's grants (through `GrantStore::purgeRevokedBefore()`, which may keep
+rows under a legal hold) and consent records. `mcp-oauth:prune-unused-clients`
+deletes DCR clients nobody authorised within `unused_client_retention_hours`
+(24). Every command takes `--dry-run`. `mcp-oauth:check` reports whether OAuth
+is on and ready and exits 1 when it is on but not ready:
 
 ```php
 Schedule::command('mcp-oauth:prune-auth-code-exchanges')->daily()->onOneServer();
+Schedule::command('mcp-oauth:purge-revoked')->daily()->onOneServer();
+Schedule::command('mcp-oauth:prune-unused-clients')->hourly()->onOneServer();
 ```
 
 ## Threat model (short)

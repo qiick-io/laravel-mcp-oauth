@@ -163,6 +163,38 @@ final class McpOAuthRoutes
     }
 
     /**
+     * The `passport.*` routes this package registers; any other is foreign.
+     */
+    private const array PACKAGE_PASSPORT_ROUTE_NAMES = [
+        'passport.token',
+        'passport.authorizations.authorize',
+        'passport.authorizations.approve',
+        'passport.authorizations.deny',
+        'passport.authorizations.unsupported-method',
+    ];
+
+    /**
+     * `passport.*` routes registered by someone else, such as a Passport IdP
+     * (design §3.3), for `mcp-oauth:check`.
+     *
+     * @return list<string>
+     */
+    public static function foreignPassportRouteNames(): array
+    {
+        $foreignRouteNames = [];
+
+        foreach (Route::getRoutes()->getRoutes() as $route) {
+            $routeName = $route->getName();
+
+            if (is_string($routeName) && str_starts_with($routeName, 'passport.') && ! in_array($routeName, self::PACKAGE_PASSPORT_ROUTE_NAMES, true)) {
+                $foreignRouteNames[] = $routeName;
+            }
+        }
+
+        return $foreignRouteNames;
+    }
+
+    /**
      * Until this package registers its own `passport.*` names (token /
      * authorize / revoke), any existing `passport.*` route means a foreign
      * Passport IdP is already wired (Signaculum guard, design §3.3).

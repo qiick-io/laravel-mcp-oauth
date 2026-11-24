@@ -86,13 +86,23 @@ final class HookedGrantStore implements GrantStore
         $this->grantStore->revoke($grantId, $actorIdentifier, $reason);
     }
 
+    public function purgeRevokedBefore(\DateTimeImmutable $cutoff): int
+    {
+        return $this->grantStore->purgeRevokedBefore($cutoff);
+    }
+
     public function revokeAllForClient(string $clientId, ?string $actorIdentifier): void
     {
         $this->grantStore->revokeAllForClient($clientId, $actorIdentifier);
     }
 
+    /** @var list<int> how many client ids each everAuthorized() call was asked about */
+    public array $everAuthorizedBatchSizes = [];
+
     public function everAuthorized(array $clientIds): array
     {
+        $this->everAuthorizedBatchSizes[] = count($clientIds);
+
         return $this->grantStore->everAuthorized($clientIds);
     }
 

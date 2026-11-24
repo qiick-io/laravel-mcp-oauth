@@ -31,7 +31,10 @@ use Qiick\McpOAuth\Actions\RevokeAuthCodeTokensAction;
 use Qiick\McpOAuth\Actions\RevokeTokenAction;
 use Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository;
 use Qiick\McpOAuth\Bridge\OneShotAuthCodeRepository;
+use Qiick\McpOAuth\Console\McpOAuthCheckCommand;
 use Qiick\McpOAuth\Console\PruneAuthCodeExchangesCommand;
+use Qiick\McpOAuth\Console\PruneUnusedClientsCommand;
+use Qiick\McpOAuth\Console\PurgeRevokedRecordsCommand;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Contracts\ApiKeyDoor;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
@@ -188,7 +191,12 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->assertAdaptersBoundWhileEnabled();
 
         if ($this->app->runningInConsole()) {
-            $this->commands([PruneAuthCodeExchangesCommand::class]);
+            $this->commands([
+                PruneAuthCodeExchangesCommand::class,
+                PurgeRevokedRecordsCommand::class,
+                PruneUnusedClientsCommand::class,
+                McpOAuthCheckCommand::class,
+            ]);
 
             $this->publishes([
                 __DIR__.'/../config/mcp-oauth.php' => config_path('mcp-oauth.php'),
