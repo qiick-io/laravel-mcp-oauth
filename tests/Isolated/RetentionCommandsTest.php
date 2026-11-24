@@ -282,6 +282,7 @@ it('reports a ready server with its issuer, resource and key source', function (
         ->expectsOutputToContain('Issuer: https://mcp-oauth.test')
         ->expectsOutputToContain('Resource: https://mcp-oauth.test/mcp')
         ->expectsOutputToContain('Passport keys: env, usable')
+        ->expectsOutputToContain('Foreign Passport routes: none')
         ->assertSuccessful();
 });
 
