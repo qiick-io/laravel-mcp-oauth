@@ -21,6 +21,7 @@ DEDICATED_CLASSES=(
 )
 
 CLASSES=(
+  'Qiick\McpOAuth\AccessTokenAuthenticator'
   'Qiick\McpOAuth\Actions\ApproveConsentAction'
   'Qiick\McpOAuth\Actions\BindAccessTokenAction'
   'Qiick\McpOAuth\Actions\DenyConsentAction'
@@ -42,6 +43,8 @@ CLASSES=(
   'Qiick\McpOAuth\Http\Controllers\RegisterClientController'
   'Qiick\McpOAuth\Http\Controllers\RevokeTokenController'
   'Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware'
+  'Qiick\McpOAuth\Http\Middleware\McpBearerDoorMiddleware'
+  'Qiick\McpOAuth\Http\Middleware\McpChallengeMiddleware'
   'Qiick\McpOAuth\Http\Middleware\ValidateAuthorizationRequestMiddleware'
   'Qiick\McpOAuth\Http\Middleware\ValidateTokenRequestMiddleware'
   'Qiick\McpOAuth\Internal\ConsumedAuthCodeGrant'

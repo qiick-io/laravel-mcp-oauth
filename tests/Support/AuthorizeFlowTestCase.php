@@ -12,16 +12,22 @@ use Illuminate\Support\Str;
 use Laravel\Passport\Client;
 use League\OAuth2\Server\AuthorizationServer;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
+use Qiick\McpOAuth\Contracts\ApiKeyDoor;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
+use Qiick\McpOAuth\Contracts\GrantAuthorizer;
 use Qiick\McpOAuth\Contracts\GrantStore;
+use Qiick\McpOAuth\Contracts\McpCredentialBinder;
 use Qiick\McpOAuth\Data\ConsentOption;
 use Qiick\McpOAuth\Data\ConsentOptions;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
 use Qiick\McpOAuth\Testing\FakeAdminSwitch;
+use Qiick\McpOAuth\Testing\FakeApiKeyDoor;
 use Qiick\McpOAuth\Testing\FakeConsentProvider;
+use Qiick\McpOAuth\Testing\FakeGrantAuthorizer;
 use Qiick\McpOAuth\Testing\FakeGrantStore;
+use Qiick\McpOAuth\Testing\FakeMcpCredentialBinder;
 
 /**
  * Boots Passport with its real tables, a signed-in-capable user model, a
@@ -101,6 +107,10 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
 
         $consentProvider = new FakeConsentProvider($consentOptions ?? self::defaultConsentOptions());
         app()->instance(ConsentProvider::class, $consentProvider);
+        // The /mcp door's adapters (S81 requires them once OAuth is on).
+        app()->instance(ApiKeyDoor::class, new FakeApiKeyDoor(['ak_valid']));
+        app()->instance(McpCredentialBinder::class, new FakeMcpCredentialBinder);
+        app()->instance(GrantAuthorizer::class, new FakeGrantAuthorizer);
 
         return $consentProvider;
     }

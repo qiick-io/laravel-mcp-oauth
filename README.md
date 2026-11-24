@@ -64,8 +64,25 @@ before routing:
 'paths' => ['api/*', '.well-known/*', 'oauth/register', 'oauth/token', 'oauth/revoke'],
 ```
 
-The `/mcp` 401 challenge stays laravel/mcp's plain `Bearer` one for now: clients
-find the discovery documents at the well-known paths.
+Mount the package's door and challenge on the product's `/mcp` route. The
+door replaces the product's own `/mcp` authentication middleware and sits
+before its throttle; the challenge replaces laravel/mcp's
+`AddWwwAuthenticateHeader`, which would overwrite the RFC 6750 error code:
+
+```php
+Mcp::web('/mcp', ProductServer::class)
+    ->withoutMiddleware(AddWwwAuthenticateHeader::class)
+    ->middleware([McpChallengeMiddleware::class, McpBearerDoorMiddleware::class, 'throttle:mcp']);
+```
+
+The door takes an API key through the product's `ApiKeyDoor` and an OAuth
+access token through `AccessTokenAuthenticator` (audience, client, blocked
+hosts, bound grant, `mcp:use`, then the product's `GrantAuthorizer`, on every
+call), binds either through `McpCredentialBinder`, and answers 429 to an address
+that failed `mcp_auth_failures_per_minute` times. With OAuth off it behaves as
+before the package: every Bearer is an API key, and a 401 says
+`Bearer realm="mcp", error="invalid_token"`. With OAuth on, every 401 and 403
+points at the protected resource metadata built from `APP_URL`.
 
 Schedule the prune of authorization-code exchanges whose grant is gone:
 
@@ -81,6 +98,9 @@ Schedule::command('mcp-oauth:prune-auth-code-exchanges')->daily()->onOneServer()
 | Hostile redirect hosts | League URI only; ASCII hosts; UTS #46; exact/subdomain block |
 | Host-header discovery poisoning | Issuer and resource from `APP_URL` only |
 | Refresh-token theft / races | Atomic rotation; family + grant revocation; live binding required |
+| Code replay | One-shot codes; a replay revokes the grant and every token issued with it |
+| A token used after revocation | `/mcp` re-checks token, audience, client, blocked hosts and bound grant on every call; nothing cached |
+| Credential guessing at `/mcp` | Per-address failure brake (429 before the credential is read) |
 | Missing Passport keys | 503 `temporarily_unavailable`; switch refuses to turn on |
 
 Full table: design §16.

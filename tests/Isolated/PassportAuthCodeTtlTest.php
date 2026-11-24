@@ -11,10 +11,16 @@ use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Grant\AuthCodeGrant;
 use League\OAuth2\Server\Grant\ClientCredentialsGrant;
 use League\OAuth2\Server\Grant\RefreshTokenGrant;
+use Qiick\McpOAuth\Contracts\ApiKeyDoor;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
+use Qiick\McpOAuth\Contracts\GrantAuthorizer;
 use Qiick\McpOAuth\Contracts\GrantStore;
+use Qiick\McpOAuth\Contracts\McpCredentialBinder;
 use Qiick\McpOAuth\McpOAuthServiceProvider;
+use Qiick\McpOAuth\Testing\FakeApiKeyDoor;
 use Qiick\McpOAuth\Testing\FakeConsentProvider;
+use Qiick\McpOAuth\Testing\FakeGrantAuthorizer;
+use Qiick\McpOAuth\Testing\FakeMcpCredentialBinder;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 use Qiick\McpOAuth\Tests\Support\PassportBootedTestCase;
 use ReflectionProperty;
@@ -115,6 +121,9 @@ it('retrofits auth_code_ttl when AuthorizationServer was already resolved', func
 it('disables ClientCredentialsGrant with OAuth on so Passport star scope cannot be issued', function (): void {
     // OAuth on needs every adapter bound (S81).
     app()->instance(ConsentProvider::class, new FakeConsentProvider(AuthorizeFlowTestCase::defaultConsentOptions()));
+    app()->instance(GrantAuthorizer::class, new FakeGrantAuthorizer);
+    app()->instance(ApiKeyDoor::class, new FakeApiKeyDoor);
+    app()->instance(McpCredentialBinder::class, new FakeMcpCredentialBinder);
     config([
         // Grants are stripped only while OAuth is on.
         'mcp-oauth.enabled' => true,
@@ -145,6 +154,9 @@ it('disables ClientCredentialsGrant with OAuth on so Passport star scope cannot 
 it('keeps only the MCP grants on the server, and personal access on its own, whatever Passport enables', function (): void {
     // OAuth on needs every adapter bound (S81).
     app()->instance(ConsentProvider::class, new FakeConsentProvider(AuthorizeFlowTestCase::defaultConsentOptions()));
+    app()->instance(GrantAuthorizer::class, new FakeGrantAuthorizer);
+    app()->instance(ApiKeyDoor::class, new FakeApiKeyDoor);
+    app()->instance(McpCredentialBinder::class, new FakeMcpCredentialBinder);
     config([
         // Grants are stripped only while OAuth is on.
         'mcp-oauth.enabled' => true,
