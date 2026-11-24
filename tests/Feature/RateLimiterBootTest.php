@@ -118,7 +118,7 @@ it('answers 429 with Retry-After when a limiter is exceeded', function (): void 
     $this->post('/_mcp-oauth-test/token', ['client_id' => 'c1'])
         ->assertStatus(429)
         ->assertHeader('Retry-After')
-        ->assertJsonPath('error', 'temporarily_unavailable');
+        ->assertExactJson(['error' => 'temporarily_unavailable', 'error_description' => 'Too many requests. Try again later.']);
 });
 
 it('rejects invalid rate limit config at boot', function (): void {
