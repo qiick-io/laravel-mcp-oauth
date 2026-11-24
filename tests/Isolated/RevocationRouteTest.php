@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Testing\TestResponse;
 use Laravel\Passport\Client;
+use Laravel\Passport\Passport;
+use League\OAuth2\Server\CryptTrait;
 use Qiick\McpOAuth\Data\RevocationReason;
 use Qiick\McpOAuth\Events\McpRefreshTokenReused;
 use Qiick\McpOAuth\Events\McpTokenRevoked;
@@ -398,4 +400,92 @@ it('treats a client stored with an empty secret as public', function (): void {
     postRevoke($this, ['token' => $tokens['refresh_token'], 'client_id' => (string) $client->getKey()])->assertOk();
 
     expect(DB::table('oauth_refresh_tokens')->count())->toBe(0);
+});
+
+// --- Review of #20: a dead refresh token, as /oauth/token would treat it ------
+
+/**
+ * Re-encrypts a real refresh token with another expiry, as league would have
+ * issued it earlier: league checks expiry against PHP's time().
+ */
+function expireRefreshToken(string $refreshToken): string
+{
+    $codec = new class(Passport::tokenEncryptionKey(app('encrypter')))
+    {
+        use CryptTrait;
+
+        public function __construct(string $encryptionKey)
+        {
+            $this->setEncryptionKey($encryptionKey);
+        }
+
+        public function reseal(string $encryptedToken): string
+        {
+            $payload = json_decode($this->decrypt($encryptedToken), true);
+            $payload['expire_time'] = time() - 60;
+
+            return $this->encrypt((string) json_encode($payload));
+        }
+    };
+
+    return $codec->reseal($refreshToken);
+}
+
+it('treats a rotated refresh token as reuse, as the token endpoint does (B1)', function (): void {
+    Event::fake([McpTokenRevoked::class, McpRefreshTokenReused::class]);
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $tokens = tokensFor($this, $client);
+    refreshWith($this, $client, $tokens['refresh_token'])->assertOk();
+    $grant = $this->grantStore()->activeFor((string) $client->getKey(), $tokens['user_id']);
+
+    postRevoke($this, ['token' => $tokens['refresh_token'], 'client_id' => (string) $client->getKey()])
+        ->assertOk();
+
+    // A theft signal, never the client's own revocation.
+    expect(collect($this->grantStore()->revocations)->pluck('reason')->all())->toBe([RevocationReason::Reuse])
+        ->and($this->grantStore()->find($grant->id)?->revoked)->toBeTrue()
+        ->and(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe(0);
+    Event::assertDispatched(McpRefreshTokenReused::class);
+    Event::assertNotDispatched(McpTokenRevoked::class);
+});
+
+it('changes nothing for an expired or already revoked refresh token (RFC 7009 §2.2)', function (string $case): void {
+    Event::fake([McpTokenRevoked::class, McpRefreshTokenReused::class]);
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $tokens = tokensFor($this, $client);
+    $token = $tokens['refresh_token'];
+
+    if ($case === 'expired') {
+        $token = expireRefreshToken($token);
+    } else {
+        // Revoked through this endpoint: its row is gone, the access token revoked.
+        postRevoke($this, ['token' => $tokens['access_token'], 'client_id' => (string) $client->getKey()])->assertOk();
+        Event::fake([McpTokenRevoked::class, McpRefreshTokenReused::class]);
+    }
+
+    $liveAccessTokensBefore = DB::table('oauth_access_tokens')->where('revoked', false)->count();
+
+    postRevoke($this, ['token' => $token, 'client_id' => (string) $client->getKey()])->assertOk();
+
+    expect(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe($liveAccessTokensBefore)
+        ->and($this->grantStore()->revocations)->toBe([]);
+    Event::assertNotDispatched(McpTokenRevoked::class);
+    Event::assertNotDispatched(McpRefreshTokenReused::class);
+})->with(['expired', 'already revoked']);
+
+it('accepts only the form-encoded body RFC 7009 defines', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $tokens = tokensFor($this, $client);
+
+    $this->postJson('/oauth/revoke', ['token' => $tokens['refresh_token'], 'client_id' => (string) $client->getKey()])
+        ->assertStatus(400)
+        ->assertExactJson(REVOKE_INVALID_REQUEST_BODY);
+
+    expect(DB::table('oauth_refresh_tokens')->count())->toBe(1);
 });

@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Route;
+use Laravel\Mcp\Server\Middleware\AddWwwAuthenticateHeader;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 
@@ -106,3 +108,29 @@ it('with OAuth off answers every discovery document like a missing route', funct
     '/.well-known/oauth-protected-resource',
     '/.well-known/oauth-protected-resource/mcp',
 ]);
+
+it('serves the nested authorization server document only for the MCP path', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+
+    // RFC 8414 §3.3: the issuer has no path, so another nested path would name the wrong issuer.
+    $this->getJson('/.well-known/oauth-authorization-server/tenant/other')->assertNotFound();
+});
+
+it('leaves the /mcp challenge of laravel/mcp as if the package were absent', function (bool $isOAuthEnabled): void {
+    if ($isOAuthEnabled) {
+        $this->enableOAuth();
+    } else {
+        config()->set('mcp-oauth.enabled', false);
+    }
+
+    McpOAuthRoutes::register();
+    Route::get('/mcp', static fn () => response('', 401))
+        ->middleware(AddWwwAuthenticateHeader::class);
+
+    // Off, a discovery pointer would lead to a 404; on, laravel/mcp would build it from the request host.
+    // The package's own challenge comes with the /mcp door; clients find the documents at the well-known paths.
+    $this->get('/mcp')
+        ->assertStatus(401)
+        ->assertHeader('WWW-Authenticate', 'Bearer realm="mcp", error="invalid_token"');
+})->with(['OAuth off' => [false], 'OAuth on' => [true]]);
