@@ -49,6 +49,7 @@ CLASSES=(
   'Qiick\McpOAuth\Internal\GrantBindingColumn'
   'Qiick\McpOAuth\Internal\PassportUserIdentifier'
   'Qiick\McpOAuth\McpOAuthReadiness'
+  'Qiick\McpOAuth\McpOAuthServiceProvider'
   'Qiick\McpOAuth\Services\AuthorizationResponseService'
   'Qiick\McpOAuth\Services\ConsentDecisionService'
   'Qiick\McpOAuth\Services\ConsentPageService'

@@ -55,19 +55,16 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
      */
     public function revokeRefreshToken(string $tokenId): void
     {
-        $passportConnection = Passport::refreshToken()->getConnection();
-
-        $affectedRows = $passportConnection->transaction(function () use ($tokenId): int {
-            // Serialize concurrent rotators on engines that support row locks.
-            // Mutation runs on SQLite, which has no row lock to observe.
-            $refreshQuery = Passport::refreshToken()->newQuery()->whereKey($tokenId);
-            $refreshQuery->lockForUpdate()->first(); // @pest-mutate-ignore: RemoveMethodCall
-
-            return Passport::refreshToken()->newQuery()
-                ->whereKey($tokenId)
-                ->where('revoked', false)
-                ->update(['revoked' => true]);
-        });
+        // The conditional UPDATE is the compare-and-set: a concurrent rotator
+        // waits on the row lock the winner's UPDATE holds, then re-reads the
+        // row and matches nothing (PostgreSQL READ COMMITTED, InnoDB's
+        // locking read; SQLite serialises writers), or fails with a
+        // serialisation error under PostgreSQL REPEATABLE READ. Either way at
+        // most one rotation succeeds, so no separate lock is taken.
+        $affectedRows = Passport::refreshToken()->newQuery()
+            ->whereKey($tokenId)
+            ->where('revoked', false)
+            ->update(['revoked' => true]);
 
         if ($affectedRows === 0) {
             $this->revokeFamilyForRefreshToken($tokenId);
