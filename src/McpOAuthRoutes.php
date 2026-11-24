@@ -57,7 +57,11 @@ final class McpOAuthRoutes
                 ->name('mcp.oauth.register');
 
             self::registerTokenRoutes();
-            self::registerRevocationRoutes();
+
+            if (app(McpOAuthServer::class)->revocationEndpointUrl() !== null) {
+                self::registerRevocationRoutes();
+            }
+
             self::registerAuthorizationRoutes();
             self::registerDiscoveryRoutes();
         });

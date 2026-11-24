@@ -290,14 +290,14 @@ it('builds the RFC 8414 and RFC 9728 documents from APP_URL', function (): void 
         'authorization_endpoint' => 'https://mcp-oauth.test/oauth/authorize',
         'token_endpoint' => 'https://mcp-oauth.test/oauth/token',
         'registration_endpoint' => 'https://mcp-oauth.test/oauth/register',
+        'revocation_endpoint' => 'https://mcp-oauth.test/oauth/revoke',
         'scopes_supported' => ['mcp:use'],
         'response_types_supported' => ['code'],
         'grant_types_supported' => ['authorization_code', 'refresh_token'],
         'code_challenge_methods_supported' => ['S256'],
         'token_endpoint_auth_methods_supported' => $clientAuthenticationMethods,
-        'authorization_response_iss_parameter_supported' => true,
-        'revocation_endpoint' => 'https://mcp-oauth.test/oauth/revoke',
         'revocation_endpoint_auth_methods_supported' => $clientAuthenticationMethods,
+        'authorization_response_iss_parameter_supported' => true,
     ])->and($server->protectedResourceMetadata())->toBe([
         'resource' => 'https://mcp-oauth.test/api/mcp',
         'authorization_servers' => ['https://mcp-oauth.test'],
@@ -305,3 +305,18 @@ it('builds the RFC 8414 and RFC 9728 documents from APP_URL', function (): void 
         'bearer_methods_supported' => ['header'],
     ]);
 });
+
+it('serves no revocation endpoint unless revocation_enabled is exactly true', function (mixed $isRevocationEnabled): void {
+    $server = makeServer(true, true);
+    config()->set('mcp-oauth.revocation_enabled', $isRevocationEnabled);
+
+    expect($server->revocationEndpointUrl())->toBeNull()
+        ->and($server->authorizationServerMetadata())
+        ->not->toHaveKey('revocation_endpoint')
+        ->not->toHaveKey('revocation_endpoint_auth_methods_supported')
+        ->toHaveKey('token_endpoint_auth_methods_supported');
+})->with([
+    'off' => [false],
+    'a string' => ['yes'],
+    'null' => [null],
+]);
