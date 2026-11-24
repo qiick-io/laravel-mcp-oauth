@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
@@ -569,6 +570,7 @@ it('stores and returns application_type, inferring it when the client sends none
 })->with([
     'native, sent' => ['native', ['http://127.0.0.1:33418/callback'], 'native'],
     'web, sent' => ['web', ['https://app.example/callback'], 'web'],
+    'web, sent with a loopback redirect' => ['web', ['http://127.0.0.1:33418/callback'], 'web'],
     'none, loopback only' => [null, ['http://localhost:8765/callback'], 'native'],
     'none, private-use scheme' => [null, ['cursor://anysphere.cursor-retrieval/oauth/callback'], 'native'],
     'none, https' => [null, ['https://app.example/callback'], 'web'],
@@ -608,7 +610,9 @@ it('refuses client fields it cannot accept (RFC 7591 §3.2.2)', function (array 
         'client_name' => 'Cursor',
         'redirect_uris' => ['https://app.example/callback'],
         ...$field,
-    ])->assertStatus(400)->assertJsonPath('error', 'invalid_client_metadata');
+    ])->assertStatus(400)
+        ->assertJsonPath('error', 'invalid_client_metadata')
+        ->assertJsonPath('error_description', fn (mixed $description): bool => is_string($description) && $description !== '');
 
     expect(Client::query()->count())->toBe(0);
 })->with([
@@ -616,12 +620,17 @@ it('refuses client fields it cannot accept (RFC 7591 §3.2.2)', function (array 
     'application_type not a string' => [['application_type' => ['native']]],
     'tos_uri over http' => [['tos_uri' => 'http://app.example/terms']],
     'policy_uri on a private address' => [['policy_uri' => 'https://10.0.0.1/privacy']],
-    'contacts not a list' => [['contacts' => 'security@app.example']],
+    'tos_uri over 2048 characters' => [['tos_uri' => 'https://app.example/'.str_repeat('t', 2029)]],
+    'policy_uri over 2048 characters' => [['policy_uri' => 'https://app.example/'.str_repeat('p', 2029)]],
+    'contacts a string' => [['contacts' => 'a@b.c']],
+    'contacts an object' => [['contacts' => ['security' => 'a@b.c']]],
     'a contact that is not a string' => [['contacts' => [42]]],
     'an empty contact' => [['contacts' => ['']]],
     'more than ten contacts' => [['contacts' => array_map(static fn (int $contactNumber): string => "c{$contactNumber}@app.example", range(1, 11))]],
     'a contact over 320 characters' => [['contacts' => [str_repeat('a', 309).'@app.example']]],
     'software_id not a string' => [['software_id' => ['x']]],
+    'software_id over 255 characters' => [['software_id' => str_repeat('i', 256)]],
+    'software_version not a string' => [['software_version' => [2]]],
     'software_version over 255 characters' => [['software_version' => str_repeat('9', 256)]],
 ]);
 
@@ -644,3 +653,14 @@ it('returns no client field the client did not send, or sent as null', function 
     'none sent' => [[]],
     'every one null' => [array_fill_keys(['application_type', 'tos_uri', 'policy_uri', 'contacts', 'software_id', 'software_version'], null)],
 ]);
+
+it('refuses an empty contact even without ConvertEmptyStringsToNull', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $this->withoutMiddleware(ConvertEmptyStringsToNull::class)->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+        'contacts' => [''],
+    ])->assertStatus(400)->assertJsonPath('error', 'invalid_client_metadata');
+});

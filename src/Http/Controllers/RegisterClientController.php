@@ -91,10 +91,12 @@ final class RegisterClientController extends OAuthRegisterController
             }
         }
 
+        // The URI loop above already refused a non-string URI, and `in`
+        // refuses an array, so no `string` rule is needed on those fields.
         $additionalFieldsValidator = Validator::make($request->all(), [
-            'application_type' => ['nullable', 'string', 'in:web,native'],
-            'tos_uri' => ['nullable', 'string', 'max:2048'],
-            'policy_uri' => ['nullable', 'string', 'max:2048'],
+            'application_type' => ['nullable', 'in:web,native'],
+            'tos_uri' => ['max:2048'],
+            'policy_uri' => ['max:2048'],
             'contacts' => ['nullable', 'list', 'max:10'],
             'contacts.*' => ['required', 'string', 'max:320'],
             'software_id' => ['nullable', 'string', 'max:255'],
