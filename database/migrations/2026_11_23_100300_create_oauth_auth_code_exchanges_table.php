@@ -12,6 +12,10 @@ use Illuminate\Support\Facades\Schema;
  * came from, and its tables are never altered, so a code presented again
  * finds here the grant whose tokens it must revoke. One row per code, written
  * once when the code is consumed.
+ *
+ * M7 exception: keyed by Passport's code id, not a UUID. The row is technical,
+ * never leaves the database and never appears on the wire, so a public id
+ * would identify nothing anyone asks for.
  */
 return new class extends Migration
 {
@@ -29,6 +33,8 @@ return new class extends Migration
         Schema::create('oauth_auth_code_exchanges', function (Blueprint $table): void {
             $table->string('auth_code_id', 100)->primary();
             $table->uuid('grant_id')->index();
+            $table->json('metadata')->nullable();
+            $table->unsignedSmallInteger('schema_version')->default(1);
             $table->timestamp('created_at')->useCurrent()->index();
         });
     }
