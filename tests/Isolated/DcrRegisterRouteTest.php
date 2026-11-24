@@ -536,3 +536,111 @@ it('refuses an oversized registration body with 413', function (): void {
 
     expect(Client::query()->count())->toBe(0);
 });
+
+// --- RFC 7591 response and client fields (M4, S7) ----------------------------
+
+it('returns client_id_issued_at as epoch seconds (RFC 7591 §3.2.1)', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+    $this->travelTo(now()->startOfSecond());
+
+    $response = $this->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+    ])->assertCreated()
+        ->assertJsonPath('client_id_issued_at', now()->getTimestamp());
+
+    expect(OAuthClientMetadata::query()->where('client_id', $response->json('client_id'))->sole()->client_id_issued_at?->getTimestamp())
+        ->toBe(now()->getTimestamp());
+});
+
+it('stores and returns application_type, inferring it when the client sends none (S7)', function (?string $sent, array $redirectUris, string $expected): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $response = $this->postJson('/oauth/register', array_filter([
+        'client_name' => 'Cursor',
+        'redirect_uris' => $redirectUris,
+        'application_type' => $sent,
+    ], static fn (mixed $value): bool => $value !== null))->assertCreated()
+        ->assertJsonPath('application_type', $expected);
+
+    expect(OAuthClientMetadata::query()->where('client_id', $response->json('client_id'))->sole()->application_type)->toBe($expected);
+})->with([
+    'native, sent' => ['native', ['http://127.0.0.1:33418/callback'], 'native'],
+    'web, sent' => ['web', ['https://app.example/callback'], 'web'],
+    'none, loopback only' => [null, ['http://localhost:8765/callback'], 'native'],
+    'none, private-use scheme' => [null, ['cursor://anysphere.cursor-retrieval/oauth/callback'], 'native'],
+    'none, https' => [null, ['https://app.example/callback'], 'web'],
+    'none, https and loopback' => [null, ['https://app.example/callback', 'http://127.0.0.1/callback'], 'web'],
+]);
+
+it('stores and returns the other RFC 7591 client fields it accepts', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+    $fields = [
+        'tos_uri' => 'https://app.example/terms',
+        'policy_uri' => 'https://app.example/privacy',
+        'contacts' => ['security@app.example', 'ops@app.example'],
+        'software_id' => '4NRB1-0XZABZI9E6-5SM3R',
+        'software_version' => '2.1.0',
+    ];
+
+    $response = $this->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+        ...$fields,
+    ])->assertCreated();
+
+    $metadata = OAuthClientMetadata::query()->where('client_id', $response->json('client_id'))->sole();
+
+    foreach ($fields as $field => $value) {
+        $response->assertJsonPath($field, $value);
+        expect($metadata->{$field})->toBe($value);
+    }
+});
+
+it('refuses client fields it cannot accept (RFC 7591 §3.2.2)', function (array $field): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $this->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+        ...$field,
+    ])->assertStatus(400)->assertJsonPath('error', 'invalid_client_metadata');
+
+    expect(Client::query()->count())->toBe(0);
+})->with([
+    'an unknown application_type' => [['application_type' => 'desktop']],
+    'application_type not a string' => [['application_type' => ['native']]],
+    'tos_uri over http' => [['tos_uri' => 'http://app.example/terms']],
+    'policy_uri on a private address' => [['policy_uri' => 'https://10.0.0.1/privacy']],
+    'contacts not a list' => [['contacts' => 'security@app.example']],
+    'a contact that is not a string' => [['contacts' => [42]]],
+    'an empty contact' => [['contacts' => ['']]],
+    'more than ten contacts' => [['contacts' => array_map(static fn (int $contactNumber): string => "c{$contactNumber}@app.example", range(1, 11))]],
+    'a contact over 320 characters' => [['contacts' => [str_repeat('a', 309).'@app.example']]],
+    'software_id not a string' => [['software_id' => ['x']]],
+    'software_version over 255 characters' => [['software_version' => str_repeat('9', 256)]],
+]);
+
+it('returns no client field the client did not send, or sent as null', function (array $sentFields): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $this->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+        ...$sentFields,
+    ])->assertCreated()
+        ->assertJsonPath('application_type', 'web')
+        ->assertJsonMissingPath('tos_uri')
+        ->assertJsonMissingPath('policy_uri')
+        ->assertJsonMissingPath('contacts')
+        ->assertJsonMissingPath('software_id')
+        ->assertJsonMissingPath('software_version');
+})->with([
+    'none sent' => [[]],
+    'every one null' => [array_fill_keys(['application_type', 'tos_uri', 'policy_uri', 'contacts', 'software_id', 'software_version'], null)],
+]);
