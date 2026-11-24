@@ -168,7 +168,23 @@ it('S4: oauth_consent_records is append-only evidence with every consent column'
 
 it('records the grant each authorization code was consumed under', function (): void {
     expect(Schema::hasTable('oauth_auth_code_exchanges'))->toBeTrue()
-        ->and(Schema::getColumnListing('oauth_auth_code_exchanges'))->toEqualCanonicalizing(['auth_code_id', 'grant_id', 'created_at']);
+        ->and(Schema::getColumnListing('oauth_auth_code_exchanges'))->toEqualCanonicalizing(['auth_code_id', 'grant_id', 'metadata', 'schema_version', 'created_at']);
+});
+
+it('M7: an auth-code exchange carries metadata and schema_version 1, keyed by the code id instead of a UUID', function (): void {
+    OAuthAuthCodeExchange::query()->create(['auth_code_id' => 'code-1', 'grant_id' => (string) Str::uuid7()]);
+    OAuthAuthCodeExchange::query()->create([
+        'auth_code_id' => 'code-2',
+        'grant_id' => (string) Str::uuid7(),
+        'metadata' => ['vendor' => 'test'],
+    ]);
+
+    $plain = OAuthAuthCodeExchange::query()->findOrFail('code-1');
+    $withMetadata = OAuthAuthCodeExchange::query()->findOrFail('code-2');
+
+    expect($plain->metadata)->toBeNull()
+        ->and($plain->schema_version)->toBe(1)
+        ->and($withMetadata->metadata)->toBe(['vendor' => 'test']);
 });
 
 it('keeps the auth-code exchange on the Passport connection, with the code row it records', function (): void {
