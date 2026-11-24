@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- DCR answers with `client_id_issued_at` (epoch seconds), which RFC 7591
+  §3.2.1 requires, and stores and returns `application_type`, `tos_uri`,
+  `policy_uri`, `contacts`, `software_id` and `software_version`. A client that
+  sends no `application_type` gets `native` when every redirect URI is
+  loopback http or a private-use scheme, `web` otherwise. `tos_uri` and
+  `policy_uri` follow the `logo_uri` rules (https, public host); an unknown
+  `application_type`, more than ten contacts or an over-long value is a 400
+  `invalid_client_metadata`.
 - Every integer config key is a raw env string validated at boot:
   `registrations_global_cap`, `unused_client_retention_hours`,
   `revoked_retention_days` and the `cimd.*` numbers no longer go through
