@@ -99,9 +99,10 @@ jobs:
   # Mutation targets from the design §11.4: one pest --mutate invocation per
   # class (pcov, no --covered-only, no || true), split round-robin across
   # parallel shards so no job runs near its timeout. Five shards for 37
-  # classes; the longest took about 18 minutes with four. Add a shard (matrix
-  # and MUTATE_SHARDS) before one passes 20. Locked dependencies, so every
-  # shard mutates against the same versions.
+  # classes, balanced by the class order in mutate-per-class.sh (about 11 to
+  # 16 minutes each). Rebalance or add a shard (matrix and MUTATE_SHARDS)
+  # before one passes 20. Locked dependencies, so every shard mutates against
+  # the same versions.
   mutation-shards:
     name: Mutation (shard ${{ matrix.shard }}/5)
     runs-on: ubuntu-latest
