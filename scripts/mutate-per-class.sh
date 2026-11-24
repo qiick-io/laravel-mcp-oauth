@@ -15,15 +15,13 @@ cd "$ROOT"
 # rest are dealt round-robin over the other shards. A new class goes in
 # CLASSES; move it to DEDICATED_CLASSES (and add a shard) only if it is that slow.
 DEDICATED_CLASSES=(
-  'Qiick\McpOAuth\AccessTokenAuthenticator'
-  'Qiick\McpOAuth\Http\Middleware\McpBearerDoorMiddleware'
-  'Qiick\McpOAuth\Http\Middleware\McpChallengeMiddleware'
-  'Qiick\McpOAuth\McpOAuthRoutes'
-  'Qiick\McpOAuth\McpOAuthServer'
   'Qiick\McpOAuth\RedirectUriGuard'
+  'Qiick\McpOAuth\McpOAuthServer'
+  'Qiick\McpOAuth\McpOAuthRoutes'
 )
 
 CLASSES=(
+  'Qiick\McpOAuth\AccessTokenAuthenticator'
   'Qiick\McpOAuth\Actions\ApproveConsentAction'
   'Qiick\McpOAuth\Actions\BindAccessTokenAction'
   'Qiick\McpOAuth\Actions\DenyConsentAction'
@@ -45,6 +43,8 @@ CLASSES=(
   'Qiick\McpOAuth\Http\Controllers\RegisterClientController'
   'Qiick\McpOAuth\Http\Controllers\RevokeTokenController'
   'Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware'
+  'Qiick\McpOAuth\Http\Middleware\McpBearerDoorMiddleware'
+  'Qiick\McpOAuth\Http\Middleware\McpChallengeMiddleware'
   'Qiick\McpOAuth\Http\Middleware\ValidateAuthorizationRequestMiddleware'
   'Qiick\McpOAuth\Http\Middleware\ValidateTokenRequestMiddleware'
   'Qiick\McpOAuth\Internal\ConsumedAuthCodeGrant'
