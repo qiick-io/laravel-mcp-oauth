@@ -14,7 +14,11 @@ use Laravel\Passport\Bridge\Client as BridgeClient;
 use Laravel\Passport\Bridge\Scope;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
+use Lcobucci\JWT\Configuration;
+use Lcobucci\JWT\Signer\Key\InMemory;
+use Lcobucci\JWT\Signer\Rsa\Sha256;
 use League\OAuth2\Server\CryptKey;
+use Qiick\McpOAuth\AccessTokenAuthenticator;
 use Qiick\McpOAuth\Contracts\ApiKeyDoor;
 use Qiick\McpOAuth\Contracts\GrantAuthorizer;
 use Qiick\McpOAuth\Contracts\McpCredentialBinder;
@@ -105,6 +109,39 @@ function signedAccessTokenLike(string $realToken, array $scopes, CarbonImmutable
     $accessToken->setPrivateKey(new CryptKey((string) config('passport.private_key'), null, false));
 
     return $accessToken->toString();
+}
+
+/**
+ * A token signed with the server's key but without league's `scopes` claim,
+ * or with it null: only a holder of the private key can make one, and the
+ * door must still refuse it as invalid rather than fail (#22 review N1).
+ */
+function signedAccessTokenWithoutScopes(bool $hasNullScopesClaim): string
+{
+    $realTokenId = (string) Passport::token()->newQuery()->value('id');
+    $realRow = (array) DB::table('oauth_access_tokens')->where('id', $realTokenId)->first();
+    $tokenId = Str::random(80);
+    DB::table('oauth_access_tokens')->insert([...$realRow, 'id' => $tokenId, 'scopes' => '[]']);
+
+    $jwtConfiguration = Configuration::forAsymmetricSigner(
+        new Sha256,
+        InMemory::plainText((string) config('passport.private_key')),
+        InMemory::plainText((string) config('passport.public_key')),
+    );
+    $now = CarbonImmutable::now()->toDateTimeImmutable();
+    $builder = $jwtConfiguration->builder()
+        ->permittedFor((string) $realRow['client_id'])
+        ->identifiedBy($tokenId)
+        ->issuedAt($now)
+        ->canOnlyBeUsedAfter($now)
+        ->expiresAt($now->modify('+1 hour'))
+        ->relatedTo((string) $realRow['user_id']);
+
+    if ($hasNullScopesClaim) {
+        $builder = $builder->withClaim('scopes', null);
+    }
+
+    return $builder->getToken($jwtConfiguration->signer(), $jwtConfiguration->signingKey())->toString();
 }
 
 function refusedChallenge(string $description): string
@@ -258,7 +295,25 @@ it('refuses a token with a description that says why (S60)', function (Closure $
         return $issued['access_token'];
     }, 'The access token was revoked.'],
     'scopes other than mcp:use' => [static fn ($testCase, array $issued): string => signedAccessTokenLike($issued['access_token'], ['mcp:use', 'admin'], CarbonImmutable::now()->addHour()), 'The access token is not valid.'],
+    'no scopes claim' => [static fn (): string => signedAccessTokenWithoutScopes(false), 'The access token is not valid.'],
+    'a null scopes claim' => [static fn (): string => signedAccessTokenWithoutScopes(true), 'The access token is not valid.'],
 ]);
+
+it('validates the Bearer of the request it is given, not the current one (#22 review N4)', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    ['access_token' => $accessToken] = mcpAccessToken($this);
+    $requestWith = static fn (string $bearer): Request => Request::create('/mcp', 'POST', server: ['HTTP_AUTHORIZATION' => 'Bearer '.$bearer]);
+    $authenticator = app(AccessTokenAuthenticator::class);
+
+    app()->instance('request', $requestWith($accessToken));
+
+    expect($authenticator->authenticate($requestWith('not-a-token')))->toBeInstanceOf(AuthorizationDecision::class);
+
+    app()->instance('request', $requestWith('not-a-token'));
+
+    expect($authenticator->authenticate($requestWith($accessToken)))->toBeInstanceOf(GrantRecord::class);
+});
 
 it('renders the product\'s refusal: 403 insufficient_scope or 401 invalid_token', function (AuthorizationDecision $decision, int $status, string $challenge): void {
     $this->enableOAuth();
