@@ -492,3 +492,22 @@ it('accepts only the form-encoded body RFC 7009 defines', function (): void {
 
     expect(DB::table('oauth_refresh_tokens')->count())->toBe(1);
 });
+
+it('changes nothing for a refresh token whose access token was purged', function (): void {
+    Event::fake([McpTokenRevoked::class, McpRefreshTokenReused::class]);
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $tokens = tokensFor($this, $client);
+    $grant = $this->grantStore()->activeFor((string) $client->getKey(), $tokens['user_id']);
+    // passport:purge removed the access token row; its refresh token row is still there.
+    DB::table('oauth_access_tokens')->delete();
+
+    postRevoke($this, ['token' => $tokens['refresh_token'], 'client_id' => (string) $client->getKey()])->assertOk();
+
+    expect($this->grantStore()->find($grant->id)?->revoked)->toBeFalse()
+        ->and($this->grantStore()->revocations)->toBe([])
+        ->and(DB::table('oauth_refresh_tokens')->count())->toBe(1);
+    Event::assertNotDispatched(McpTokenRevoked::class);
+    Event::assertNotDispatched(McpRefreshTokenReused::class);
+});
