@@ -155,8 +155,10 @@ final class McpOAuthServer
      * Whether `client_id` may be a Client ID Metadata Document URL (S2).
      *
      * ponytail: always false until the fetcher lands on qiick/laravel-outbound;
-     * then it reads `mcp-oauth.cimd.enabled`. Advertising it with no handler
-     * would make clients send URLs the server cannot resolve (M2).
+     * then it reads `mcp-oauth.cimd.enabled` and authorizationServerMetadata()
+     * adds `client_id_metadata_document_supported` when it is true.
+     * Advertising it with no handler would make clients send URLs the server
+     * cannot resolve (M2).
      */
     public function supportsClientIdMetadataDocuments(): bool
     {
@@ -194,10 +196,6 @@ final class McpOAuthServer
 
         if ($revocationEndpointUrl === null) {
             unset($metadata['revocation_endpoint'], $metadata['revocation_endpoint_auth_methods_supported']);
-        }
-
-        if ($this->supportsClientIdMetadataDocuments()) {
-            $metadata['client_id_metadata_document_supported'] = true;
         }
 
         return $metadata;
