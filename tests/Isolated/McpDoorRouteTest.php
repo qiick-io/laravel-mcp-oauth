@@ -144,7 +144,8 @@ it('asks for credentials with the resource metadata and the scope, without an er
 
     callMcp($this, null)
         ->assertStatus(401)
-        ->assertHeader('WWW-Authenticate', 'Bearer realm="mcp", resource_metadata="'.RESOURCE_METADATA_URL.'", scope="mcp:use"');
+        ->assertHeader('WWW-Authenticate', 'Bearer realm="mcp", scope="mcp:use", resource_metadata="'.RESOURCE_METADATA_URL.'"')
+        ->assertExactJson(['message' => 'Authentication required.']);
 });
 
 it('lets a valid OAuth token in and binds its grant', function (): void {
@@ -153,7 +154,10 @@ it('lets a valid OAuth token in and binds its grant', function (): void {
     registerMcpRoute();
     ['access_token' => $accessToken, 'grant' => $grant] = mcpAccessToken($this);
 
-    callMcp($this, $accessToken)->assertOk()->assertJsonPath('credential', GrantRecord::class);
+    callMcp($this, $accessToken)
+        ->assertOk()
+        ->assertJsonPath('credential', GrantRecord::class)
+        ->assertHeaderMissing('WWW-Authenticate');
 
     expect(app(McpCredentialBinder::class)->boundGrants)->toHaveCount(1)
         ->and(app(McpCredentialBinder::class)->boundGrants[0]->id)->toBe($grant->id)
@@ -181,7 +185,8 @@ it('answers 503 for an OAuth token while the keys are missing, and still takes A
 
     callMcp($this, 'eyJhbGciOiJSUzI1NiJ9.e30.c2ln')
         ->assertStatus(503)
-        ->assertJsonPath('error', 'temporarily_unavailable');
+        ->assertHeaderMissing('WWW-Authenticate')
+        ->assertExactJson(['error' => 'temporarily_unavailable', 'error_description' => 'OAuth is unavailable because Passport keys are missing.']);
     callMcp($this, 'ak_valid')->assertOk();
 });
 
@@ -262,29 +267,43 @@ it('renders the product\'s refusal: 403 insufficient_scope or 401 invalid_token'
     registerMcpRoute();
     ['access_token' => $accessToken] = mcpAccessToken($this);
 
-    callMcp($this, $accessToken)->assertStatus($status)->assertHeader('WWW-Authenticate', $challenge);
+    callMcp($this, $accessToken)
+        ->assertStatus($status)
+        ->assertHeader('WWW-Authenticate', $challenge)
+        ->assertExactJson(['error' => $decision->error, 'error_description' => $decision->description]);
 })->with([
     'insufficient scope' => [AuthorizationDecision::insufficientScope('mcp:write', 'Writing needs mcp:write.'), 403, 'Bearer realm="mcp", error="insufficient_scope", error_description="Writing needs mcp:write.", scope="mcp:write", resource_metadata="'.RESOURCE_METADATA_URL.'"'],
     'owner lost access' => [AuthorizationDecision::invalidToken('The owner no longer holds this grant.'), 401, 'Bearer realm="mcp", error="invalid_token", error_description="The owner no longer holds this grant.", resource_metadata="'.RESOURCE_METADATA_URL.'"'],
+    'a description with quotes (RFC 6750 §3)' => [AuthorizationDecision::invalidToken('Ask the "owner" \\ admin.'), 401, 'Bearer realm="mcp", error="invalid_token", error_description="Ask the \'owner\' \' admin.", resource_metadata="'.RESOURCE_METADATA_URL.'"'],
 ]);
 
 // --- The failure brake (S74) --------------------------------------------------------
 
-it('answers 429 before reading the credential once an address has failed too often (S74)', function (): void {
+it('answers 429 before reading the credential once an address has failed too often (S74)', function (?string $failingBearer): void {
     $this->enableOAuth();
+    app()->instance(ApiKeyDoor::class, new FakeApiKeyDoor(['ak_valid'], ['ak_forbidden']));
     config()->set('mcp-oauth.mcp_auth_failures_per_minute', 3);
     McpOAuthRoutes::register();
     registerMcpRoute();
 
     foreach (range(1, 3) as $attempt) {
-        callMcp($this, 'ak_unknown')->assertStatus(401);
+        expect(callMcp($this, $failingBearer)->getStatusCode())->toBeIn([401, 403]);
     }
 
-    $brakeResponse = callMcp($this, 'ak_valid')->assertStatus(429);
+    $brakeResponse = callMcp($this, 'ak_valid')
+        ->assertStatus(429)
+        ->assertExactJson(['error' => 'temporarily_unavailable', 'error_description' => 'Too many failed attempts. Try again later.']);
 
-    expect($brakeResponse->headers->has('Retry-After'))->toBeTrue()
-        ->and(app(ApiKeyDoor::class)->authenticatedBearers)->toBe(['ak_unknown', 'ak_unknown', 'ak_unknown']);
-});
+    // The key the design names: one counter per address, whatever the credential.
+    expect(RateLimiter::attempts('mcp-auth-failures:127.0.0.1'))->toBe(3)
+        ->and((int) $brakeResponse->headers->get('Retry-After'))->toBeGreaterThan(0)
+        ->and(app(ApiKeyDoor::class)->authenticatedBearers)->not->toContain('ak_valid');
+})->with([
+    'unknown API keys (the product\'s 401)' => ['ak_unknown'],
+    'forbidden API keys (the product\'s 403)' => ['ak_forbidden'],
+    'no credentials' => [null],
+    'refused OAuth tokens' => ['not-a-jwt'],
+]);
 
 it('does not count a successful call as a failure', function (): void {
     $this->enableOAuth();
@@ -296,3 +315,49 @@ it('does not count a successful call as a failure', function (): void {
         callMcp($this, 'ak_valid')->assertOk();
     }
 });
+
+it('answers a Bearer with no token like no credentials', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    registerMcpRoute();
+
+    $this->withHeaders(['Accept' => 'application/json', 'Authorization' => 'Bearer '])
+        ->post('/mcp', ['jsonrpc' => '2.0', 'method' => 'tools/list', 'id' => 1])
+        ->assertStatus(401)
+        ->assertHeader('WWW-Authenticate', 'Bearer realm="mcp", scope="mcp:use", resource_metadata="'.RESOURCE_METADATA_URL.'"');
+});
+
+it('with OAuth off takes any Bearer the product accepts, API-key-shaped or not', function (): void {
+    config()->set('mcp-oauth.enabled', false);
+    app()->instance(ApiKeyDoor::class, new FakeApiKeyDoor(['legacy-opaque-key']));
+    app()->instance(McpCredentialBinder::class, $binder = new FakeMcpCredentialBinder);
+    McpOAuthRoutes::register();
+    registerMcpRoute();
+
+    callMcp($this, 'legacy-opaque-key')->assertOk();
+
+    expect($binder->boundApiKeys)->toHaveCount(1);
+});
+
+it('names insufficient_scope when the product refuses an API key with 403', function (): void {
+    $this->enableOAuth();
+    app()->instance(ApiKeyDoor::class, new FakeApiKeyDoor([], ['ak_forbidden']));
+    McpOAuthRoutes::register();
+    registerMcpRoute();
+
+    callMcp($this, 'ak_forbidden')
+        ->assertStatus(403)
+        ->assertHeader('WWW-Authenticate', 'Bearer realm="mcp", error="insufficient_scope", resource_metadata="'.RESOURCE_METADATA_URL.'"');
+});
+
+it('judges the wire scopes as a set: repeated mcp:use is fine, none is not', function (array $scopes, int $status): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    registerMcpRoute();
+    $issued = mcpAccessToken($this);
+
+    callMcp($this, signedAccessTokenLike($issued['access_token'], $scopes, CarbonImmutable::now()->addHour()))->assertStatus($status);
+})->with([
+    'mcp:use twice' => [['mcp:use', 'mcp:use'], 200],
+    'no scope' => [[], 401],
+]);

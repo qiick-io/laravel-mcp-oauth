@@ -148,6 +148,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Mcp::oauthRoutes()`, which a product must not call.
 - `mcp-oauth:prune-auth-code-exchanges {--dry-run}` deletes the
   `oauth_auth_code_exchanges` rows whose grant is revoked or gone.
+- The `/mcp` Bearer door (design §5.3, §8.5): `McpBearerDoorMiddleware`
+  selects the product's `ApiKeyDoor` or the package's `AccessTokenAuthenticator`
+  (`@api`), which re-checks on every call the token, its audience, the client
+  (registered, not revoked, no blocked host), the bound active grant, the wire
+  scope `mcp:use` and the product's `GrantAuthorizer`; refusals are RFC 6750
+  `invalid_token` (expired, revoked or not valid) or the product's
+  `insufficient_scope`. A per-address failure brake answers 429 before the
+  credential is read. `McpChallengeMiddleware` replaces laravel/mcp's
+  `AddWwwAuthenticateHeader`: OAuth off, the plain challenge as before; on,
+  `resource_metadata` from `APP_URL` and `scope="mcp:use"` when no credential
+  was sent. With OAuth on, boot also requires `GrantAuthorizer`, `ApiKeyDoor`
+  and `McpCredentialBinder`. Test doubles: `FakeApiKeyDoor`,
+  `FakeMcpCredentialBinder`, `FakeGrantAuthorizer`.
 - Fail-closed boot (S81): with `mcp-oauth.enabled` on, boot throws
   `InvalidMcpOAuthConfigException` naming a missing `ConsentView`,
   `ConsentProvider` or `GrantStore` binding.

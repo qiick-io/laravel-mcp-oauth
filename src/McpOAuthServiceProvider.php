@@ -33,9 +33,12 @@ use Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository;
 use Qiick\McpOAuth\Bridge\OneShotAuthCodeRepository;
 use Qiick\McpOAuth\Console\PruneAuthCodeExchangesCommand;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
+use Qiick\McpOAuth\Contracts\ApiKeyDoor;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\ConsentView;
+use Qiick\McpOAuth\Contracts\GrantAuthorizer;
 use Qiick\McpOAuth\Contracts\GrantStore;
+use Qiick\McpOAuth\Contracts\McpCredentialBinder;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\Http\Controllers\AuthorizeClientController;
 use Qiick\McpOAuth\Internal\BlockedHostCatalog;
@@ -231,6 +234,9 @@ final class McpOAuthServiceProvider extends ServiceProvider
             ConsentView::class => 'Install inertiajs/inertia-laravel for the default consent page, or bind your own ConsentView.',
             ConsentProvider::class => 'Bind the product ConsentProvider that says what a user may grant.',
             GrantStore::class => 'Bind the product GrantStore that stores consented grants.',
+            GrantAuthorizer::class => 'Bind the product GrantAuthorizer that decides what an OAuth grant may do at /mcp.',
+            ApiKeyDoor::class => 'Bind the product ApiKeyDoor that authenticates its API keys at /mcp.',
+            McpCredentialBinder::class => 'Bind the product McpCredentialBinder that puts the credential on the /mcp request.',
         ];
 
         foreach ($remediesByContract as $contract => $remedy) {

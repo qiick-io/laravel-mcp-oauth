@@ -15,9 +15,12 @@ cd "$ROOT"
 # rest are dealt round-robin over the other shards. A new class goes in
 # CLASSES; move it to DEDICATED_CLASSES (and add a shard) only if it is that slow.
 DEDICATED_CLASSES=(
-  'Qiick\McpOAuth\RedirectUriGuard'
-  'Qiick\McpOAuth\McpOAuthServer'
+  'Qiick\McpOAuth\AccessTokenAuthenticator'
+  'Qiick\McpOAuth\Http\Middleware\McpBearerDoorMiddleware'
+  'Qiick\McpOAuth\Http\Middleware\McpChallengeMiddleware'
   'Qiick\McpOAuth\McpOAuthRoutes'
+  'Qiick\McpOAuth\McpOAuthServer'
+  'Qiick\McpOAuth\RedirectUriGuard'
 )
 
 CLASSES=(

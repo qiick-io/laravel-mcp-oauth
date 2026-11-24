@@ -2,13 +2,19 @@
 
 declare(strict_types=1);
 
+use Qiick\McpOAuth\Contracts\ApiKeyDoor;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\ConsentView;
+use Qiick\McpOAuth\Contracts\GrantAuthorizer;
 use Qiick\McpOAuth\Contracts\GrantStore;
+use Qiick\McpOAuth\Contracts\McpCredentialBinder;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\McpOAuthServiceProvider;
+use Qiick\McpOAuth\Testing\FakeApiKeyDoor;
 use Qiick\McpOAuth\Testing\FakeConsentProvider;
+use Qiick\McpOAuth\Testing\FakeGrantAuthorizer;
 use Qiick\McpOAuth\Testing\FakeGrantStore;
+use Qiick\McpOAuth\Testing\FakeMcpCredentialBinder;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 use Qiick\McpOAuth\Views\InertiaConsentView;
 
@@ -22,6 +28,9 @@ function bindEveryAdapter(): void
     app()->instance(ConsentProvider::class, new FakeConsentProvider(AuthorizeFlowTestCase::defaultConsentOptions()));
     app()->bind(ConsentView::class, InertiaConsentView::class);
     app()->singleton(GrantStore::class, FakeGrantStore::class);
+    app()->instance(GrantAuthorizer::class, new FakeGrantAuthorizer);
+    app()->instance(ApiKeyDoor::class, new FakeApiKeyDoor);
+    app()->instance(McpCredentialBinder::class, new FakeMcpCredentialBinder);
 }
 
 it('boots without adapters while OAuth is off', function (): void {
@@ -45,7 +54,14 @@ it('fails boot with OAuth on and an adapter missing, naming it', function (strin
 
     expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
         ->toThrow(InvalidMcpOAuthConfigException::class, $contract);
-})->with([ConsentView::class, ConsentProvider::class, GrantStore::class]);
+})->with([
+    ConsentView::class,
+    ConsentProvider::class,
+    GrantStore::class,
+    GrantAuthorizer::class,
+    ApiKeyDoor::class,
+    McpCredentialBinder::class,
+]);
 
 it('tells a product without Inertia how to get a consent page', function (): void {
     config()->set('mcp-oauth.enabled', true);

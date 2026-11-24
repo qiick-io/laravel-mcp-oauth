@@ -60,6 +60,7 @@ return [
         // Root @api services use design names (not Services\*Service).
         'Services' => [
             'Qiick\McpOAuth\McpOAuthServer',
+            'Qiick\McpOAuth\AccessTokenAuthenticator',
             'Qiick\McpOAuth\RedirectUriGuard',
             'Qiick\McpOAuth\ClientMetadataUriGuard',
             'Qiick\McpOAuth\ClientThrottleKey',

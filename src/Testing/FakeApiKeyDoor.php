@@ -10,8 +10,8 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 
 /**
  * In-memory {@see ApiKeyDoor} for package tests and product fakes: a key has
- * the shape `ak_…`, and only the keys it was given authenticate. Any other
- * key is the product's 401.
+ * the shape `ak_…`, and only the keys it was given authenticate. A forbidden
+ * key is the product's 403, any other key its 401.
  *
  * @api
  */
@@ -22,9 +22,11 @@ final class FakeApiKeyDoor implements ApiKeyDoor
 
     /**
      * @param  list<string>  $validApiKeys
+     * @param  list<string>  $forbiddenApiKeys  known keys the product refuses with 403
      */
     public function __construct(
         private readonly array $validApiKeys = [],
+        private readonly array $forbiddenApiKeys = [],
     ) {}
 
     public function isApiKeyShaped(string $bearer): bool
@@ -35,6 +37,10 @@ final class FakeApiKeyDoor implements ApiKeyDoor
     public function authenticate(Request $request, string $bearer): object
     {
         $this->authenticatedBearers[] = $bearer;
+
+        if (in_array($bearer, $this->forbiddenApiKeys, true)) {
+            throw new HttpException(403, 'This API key may not use MCP.');
+        }
 
         if (! in_array($bearer, $this->validApiKeys, true)) {
             throw new HttpException(401, 'Unknown API key.');
