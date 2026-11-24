@@ -336,7 +336,7 @@ it('refuses a Passport client the package did not register', function (): void {
 });
 
 it('never revokes a newer consent when a token of an older one is revoked', function (): void {
-    Event::fake([McpTokenRevoked::class]);
+    Event::fake([McpTokenRevoked::class, McpRefreshTokenReused::class]);
     $this->enableOAuth();
     McpOAuthRoutes::register();
     $client = $this->createClient();
@@ -351,7 +351,10 @@ it('never revokes a newer consent when a token of an older one is revoked', func
 
     expect($this->grantStore()->find($newerGrant->id)?->revoked)->toBeFalse()
         ->and(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe(1);
-    Event::assertDispatched(McpTokenRevoked::class, static fn (McpTokenRevoked $event): bool => $event->grantId === null);
+    // The re-consent revoked that older refresh token, so it comes back as
+    // reuse of the older family, as at the token endpoint; the newer consent stays.
+    Event::assertDispatched(McpRefreshTokenReused::class, static fn (McpRefreshTokenReused $event): bool => $event->grantId !== $newerGrant->id);
+    Event::assertNotDispatched(McpTokenRevoked::class);
 });
 
 it('names no grant when the revoked token is bound to none that is active', function (): void {

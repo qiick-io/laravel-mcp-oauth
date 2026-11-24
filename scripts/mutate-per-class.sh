@@ -65,6 +65,11 @@ DEDICATED_COUNT="${#DEDICATED_CLASSES[@]}"
 
 # Locally (one shard) every class runs; in CI, shards 1..DEDICATED_COUNT take
 # one dedicated class each and the other shards share CLASSES.
+if (( SHARD < 1 || SHARD > SHARDS )); then
+  echo "MUTATE_SHARD must be between 1 and MUTATE_SHARDS (${SHARDS})." >&2
+  exit 1
+fi
+
 if (( SHARDS == 1 )); then
   SELECTED_CLASSES=("${DEDICATED_CLASSES[@]}" "${CLASSES[@]}")
 elif (( SHARDS <= DEDICATED_COUNT )); then
@@ -81,6 +86,12 @@ else
       SELECTED_CLASSES+=("${CLASSES[$index]}")
     fi
   done
+fi
+
+# A shard that mutates nothing would pass green; it means a misconfiguration.
+if (( ${#SELECTED_CLASSES[@]} == 0 )); then
+  echo "Shard ${SHARD}/${SHARDS} selected no class to mutate." >&2
+  exit 1
 fi
 
 status=0

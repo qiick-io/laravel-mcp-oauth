@@ -8,11 +8,13 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Events\Dispatcher;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
+use Laravel\Passport\RefreshToken;
 use Laravel\Passport\Token;
 use League\OAuth2\Server\CryptTrait;
 use League\OAuth2\Server\Exception\OAuthServerException;
 use League\OAuth2\Server\ResourceServer;
 use Psr\Http\Message\ServerRequestInterface;
+use Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
@@ -36,9 +38,14 @@ use Throwable;
  * one is simply unknown (S58), so the client's own revocation is never
  * mistaken for theft.
  *
- * A token that is unknown, already dead, forged or another client's changes
- * nothing, and the endpoint answers 200 either way (RFC 7009 §2.2). The
- * `token_type_hint` is not needed: a refresh token is the one that decrypts.
+ * A refresh token is judged as the token endpoint would judge it: expired or
+ * unknown changes nothing (RFC 7009 §2.2); a rotated one, already revoked,
+ * is reuse and revokes its family under RevocationReason::Reuse through
+ * FamilyRevokingRefreshTokenRepository, so presenting a stolen token here
+ * leaves the same theft signal as presenting it at `oauth/token`. Any other
+ * token that is unknown, dead, forged or another client's changes nothing,
+ * and the endpoint answers 200 either way. The `token_type_hint` is not
+ * needed: a refresh token is the one that decrypts.
  */
 final class RevokeTokenAction
 {
@@ -46,6 +53,7 @@ final class RevokeTokenAction
 
     public function __construct(
         private readonly GrantStore $grantStore,
+        private readonly FamilyRevokingRefreshTokenRepository $familyRevokingRefreshTokens,
         private readonly ResourceServer $resourceServer,
         private readonly ConfigRepository $config,
         private readonly Dispatcher $events,
@@ -68,13 +76,32 @@ final class RevokeTokenAction
     }
 
     /**
-     * @param  array{client_id: string, refresh_token_id: string, access_token_id: string}  $refreshTokenPayload
+     * @param  array{client_id: string, refresh_token_id: string, access_token_id: string, expire_time: int}  $refreshTokenPayload
      */
     private function revokeRefreshToken(Client $client, array $refreshTokenPayload): void
     {
-        $accessToken = $refreshTokenPayload['client_id'] === $client->getKey()
-            ? Passport::token()->newQuery()->find($refreshTokenPayload['access_token_id'])
-            : null;
+        // Another client's token, or one league would refuse as expired: nothing to do.
+        if ($refreshTokenPayload['client_id'] !== $client->getKey() || $refreshTokenPayload['expire_time'] < time()) {
+            return;
+        }
+
+        /** @var RefreshToken|null $refreshToken */
+        $refreshToken = Passport::refreshToken()->newQuery()->find($refreshTokenPayload['refresh_token_id']);
+
+        // Unknown, or already revoked through this endpoint (its row is deleted, S58).
+        if ($refreshToken === null) {
+            return;
+        }
+
+        // A rotated token coming back is reuse here too, as at the token endpoint:
+        // the theft signal (RevocationReason::Reuse, McpRefreshTokenReused) is kept.
+        if ($refreshToken->getAttribute('revoked') === true) {
+            $this->familyRevokingRefreshTokens->revokeFamilyForRefreshToken($refreshTokenPayload['refresh_token_id']);
+
+            return;
+        }
+
+        $accessToken = Passport::token()->newQuery()->find($refreshTokenPayload['access_token_id']);
 
         if (! $accessToken instanceof Token) {
             return;
@@ -105,9 +132,10 @@ final class RevokeTokenAction
     private function revokeAccessToken(Client $client, string $token, ServerRequestInterface $psrRequest): void
     {
         try {
-            // Signature, expiry and revocation, exactly as /mcp checks them.
+            // Signature, expiry and revocation, exactly as /mcp checks them. League
+            // strips an optional `Bearer ` prefix, so the bare token is enough.
             $validatedRequest = $this->resourceServer->validateAuthenticatedRequest(
-                $psrRequest->withHeader('Authorization', 'Bearer '.$token), // @pest-mutate-ignore: ConcatRemoveLeft — league strips an optional `Bearer ` prefix, so the header is read the same without it
+                $psrRequest->withHeader('Authorization', $token),
             );
         } catch (OAuthServerException) {
             return;
@@ -177,12 +205,12 @@ final class RevokeTokenAction
      * League's refresh tokens are encrypted with Passport's key; anything
      * that does not decrypt is not one.
      *
-     * @return array{client_id: string, refresh_token_id: string, access_token_id: string}|null
+     * @return array{client_id: string, refresh_token_id: string, access_token_id: string, expire_time: int}|null
      */
     private function refreshTokenPayloadOf(string $token): ?array
     {
         try {
-            /** @var array{client_id: string, refresh_token_id: string, access_token_id: string} $payload league's own refresh-token payload */
+            /** @var array{client_id: string, refresh_token_id: string, access_token_id: string, expire_time: int} $payload league's own refresh-token payload */
             $payload = json_decode($this->decrypt($token), true, flags: JSON_THROW_ON_ERROR);
         } catch (Throwable) {
             return null;

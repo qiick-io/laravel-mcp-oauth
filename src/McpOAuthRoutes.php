@@ -100,9 +100,9 @@ final class McpOAuthRoutes
     /**
      * RFC 8414 and RFC 9728 documents (design §5.2 items 2–4). They replace
      * `Mcp::oauthRoutes()`, which a product must not call: its documents are
-     * built from the request Host and sit outside the off-gate. The protected
-     * resource is described at the root and at the MCP path only; any other
-     * nested path is a 404, so no other resource is advertised.
+     * built from the request Host and sit outside the off-gate. Both documents
+     * are served at the root and at the MCP path only; any other nested path
+     * is a 404, so no other resource or issuer is advertised.
      */
     private static function registerDiscoveryRoutes(): void
     {
@@ -112,15 +112,22 @@ final class McpOAuthRoutes
         Route::get('.well-known/oauth-authorization-server', AuthorizationServerMetadataController::class)
             ->name('mcp.oauth.authorization-server');
 
-        Route::get('.well-known/oauth-authorization-server/{path}', AuthorizationServerMetadataController::class)
-            ->where('path', '.*')
-            ->name('mcp.oauth.authorization-server.nested');
+        // Some MCP clients look for it under the resource path; any other path
+        // would name an issuer that is not this one (RFC 8414 §3.3).
+        Route::get('.well-known/oauth-authorization-server/'.$mcpPath, AuthorizationServerMetadataController::class)
+            ->name('mcp.oauth.authorization-server.mcp');
 
         Route::get('.well-known/oauth-protected-resource', ProtectedResourceMetadataController::class)
             ->name('mcp.oauth.protected-resource');
 
+        // Not named `mcp.oauth.protected-resource.nested`: laravel/mcp's
+        // AddWwwAuthenticateHeader adds a `resource_metadata` pointer to the
+        // /mcp 401 as soon as a route has that name, built from the request
+        // host and shown even while OAuth is off (when it would lead to a 404).
+        // The package's own challenge comes with the /mcp door; until then
+        // clients find these documents at the well-known paths.
         Route::get('.well-known/oauth-protected-resource/'.$mcpPath, ProtectedResourceMetadataController::class)
-            ->name('mcp.oauth.protected-resource.nested');
+            ->name('mcp.oauth.protected-resource.mcp');
     }
 
     /**

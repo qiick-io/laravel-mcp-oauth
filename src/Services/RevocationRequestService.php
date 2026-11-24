@@ -38,6 +38,11 @@ final class RevocationRequestService
      */
     public function authenticatedClient(Request $request): Client
     {
+        // RFC 7009 §2.1: application/x-www-form-urlencoded, never a JSON body.
+        if ($request->isJson()) {
+            throw new HttpResponseException($this->tokenErrorResponses->refusal('invalid_request'));
+        }
+
         $bodyParameters = $request->request->all();
         $basicClientId = $request->getUser();
         $hasBodyCredentials = ($bodyParameters['client_id'] ?? null) !== null || ($bodyParameters['client_secret'] ?? null) !== null;
@@ -87,6 +92,8 @@ final class RevocationRequestService
     {
         $storedSecret = $client->getAttribute('secret');
 
+        // A public client is identified by its id alone; a secret it sends is
+        // ignored, as Passport does at the token endpoint.
         if (! is_string($storedSecret) || $storedSecret === '') {
             return true;
         }

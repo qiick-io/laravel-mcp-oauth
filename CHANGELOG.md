@@ -135,11 +135,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its family and the grant (new `RevocationReason::Client`); an access token
   revokes itself and the refresh tokens issued with it, not the grant. The
   refresh tokens are deleted, so a later presentation is refused as unknown and
-  never read as reuse. Always 200 for unknown, forged, dead or foreign tokens.
+  never read as reuse. A dead refresh token is judged as `oauth/token` judges
+  it: expired or unknown changes nothing; a rotated one is reuse (family and
+  grant revoked under `RevocationReason::Reuse`). The body must be
+  form-encoded. Always 200 for unknown, forged, dead or foreign tokens.
   New event `McpTokenRevoked`.
 - Discovery (RFC 8414, RFC 9728): `/.well-known/oauth-authorization-server`
-  (root and nested) and `/.well-known/oauth-protected-resource` (root and the
-  MCP path only), built from `APP_URL`, 404 with OAuth off. They replace
+  and `/.well-known/oauth-protected-resource`, each at the root and the MCP
+  path only, built from `APP_URL`, 404 with OAuth off. The `/mcp` 401 challenge
+  of laravel/mcp is left as if the package were absent (no `resource_metadata`
+  pointing at a document that may be off). They replace
   `Mcp::oauthRoutes()`, which a product must not call.
 - `mcp-oauth:prune-auth-code-exchanges {--dry-run}` deletes the
   `oauth_auth_code_exchanges` rows whose grant is revoked or gone.

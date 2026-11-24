@@ -126,6 +126,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->app->bind(RevokeTokenAction::class, static function (Application $app): RevokeTokenAction {
             return new RevokeTokenAction(
                 $app->make(GrantStore::class),
+                $app->make(FamilyRevokingRefreshTokenRepository::class),
                 $app->make(ResourceServer::class),
                 $app->make(ConfigRepository::class),
                 $app->make(Dispatcher::class),
