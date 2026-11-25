@@ -75,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Connected apps (design §5.2): `McpOAuthSettingsRoutes::register()` serves
+  the signed-in user's active grants and revokes one with
+  `RevokeConnectedAppAction` (grant with `RevocationReason::User`, then its
+  tokens; `McpGrantRevoked`). Up while OAuth is off.
 - `McpOAuthServer` exposes the discovery contract (standards review M9):
   `specRevision()` (the `spec_revision` config, a `YYYY-MM-DD` date, failing
   closed otherwise), `authorizationServerMetadata()` and
