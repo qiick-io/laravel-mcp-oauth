@@ -343,3 +343,10 @@ it('serves the revocation endpoint when revocation_enabled reads as true, or is 
     'yes' => ['yes'],
     'unset' => ['unset'],
 ]);
+
+it('accepts an issuer with a host, a port and a path', function (string $appUrl): void {
+    $server = makeServer(true, true);
+    config()->set('app.url', $appUrl);
+
+    expect($server->hasAbsoluteIssuer())->toBeTrue();
+})->with(['https://app.example', 'http://127.0.0.1:8000', 'https://app.example/base', 'HTTPS://APP.EXAMPLE']);
