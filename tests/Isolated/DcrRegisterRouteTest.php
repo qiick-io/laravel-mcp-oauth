@@ -664,3 +664,21 @@ it('refuses an empty contact even without ConvertEmptyStringsToNull', function (
         'contacts' => [''],
     ])->assertStatus(400)->assertJsonPath('error', 'invalid_client_metadata');
 });
+
+it('treats an empty client field as not sent, even without ConvertEmptyStringsToNull (#32 review N2)', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+
+    $response = $this->withoutMiddleware(ConvertEmptyStringsToNull::class)->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+        ...array_fill_keys(['logo_uri', 'client_uri', 'tos_uri', 'policy_uri', 'software_id', 'software_version'], ''),
+    ])->assertCreated();
+
+    $metadata = OAuthClientMetadata::query()->where('client_id', $response->json('client_id'))->sole();
+
+    foreach (['logo_uri', 'client_uri', 'tos_uri', 'policy_uri', 'software_id', 'software_version'] as $field) {
+        $response->assertJsonMissingPath($field);
+        expect($metadata->{$field})->toBeNull();
+    }
+});
