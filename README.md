@@ -100,6 +100,28 @@ try {
 }
 ```
 
+Mount the admin backend for MCP clients and blocked hosts inside the
+product's own admin group, naming the permission middleware every route
+needs. The routes stay up while OAuth is off, so an admin can still clean up:
+
+```php
+Route::middleware(['web', 'auth'])->prefix('admin')->group(
+    fn () => McpOAuthAdminRoutes::register('permission:can-manage-mcp-clients'),
+);
+```
+
+| Route | Does |
+| --- | --- |
+| `GET mcp-oauth-clients` | JSON: the package's clients (50 a page) and the blocked hosts |
+| `POST mcp-oauth-clients/{client}/block` | revokes the client, its grants, tokens and codes |
+| `POST mcp-oauth-clients/bulk-block` | the same for 1 to 100 distinct client UUIDs |
+| `POST mcp-oauth-clients/blocked-hosts` | blocks a host (`match_mode` `exact` or, by default, with its subdomains) and every client that redirects there |
+| `DELETE mcp-oauth-clients/blocked-hosts/{id}` | lifts a block; blocked clients stay revoked |
+
+Writes answer 204 to a JSON call and redirect back for a form or Inertia post.
+Only clients the package registered are listed or blocked, never the product's
+own Passport clients.
+
 Schedule the retention jobs. `mcp-oauth:purge-revoked` deletes what was revoked
 more than `revoked_retention_days` (90) ago: clients the package registered,
 the product's grants (through `GrantStore::purgeRevokedBefore()`, which may keep

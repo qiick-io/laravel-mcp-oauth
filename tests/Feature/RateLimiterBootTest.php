@@ -69,6 +69,13 @@ it('keys the per-client limit on the body or Basic client id, lower-cased, never
         ->and($tokenLimiter($basicRequest)[1]->key)->toBe('token:client:abc-def');
 });
 
+it('keys no per-client limit on an empty client id', function (): void {
+    /** @var Closure(Request): list<Limit> $tokenLimiter */
+    $tokenLimiter = RateLimiter::limiter('mcp-oauth-token');
+
+    expect($tokenLimiter(Request::create('/oauth/token', 'POST', ['client_id' => ''], server: ['REMOTE_ADDR' => '203.0.113.10'])))->toHaveCount(1);
+});
+
 it('keeps DCR IP-only because registration has no client yet', function (): void {
     $request = Request::create('/oauth/register', 'POST', [
         'client_id' => 'should-be-ignored',
@@ -118,7 +125,7 @@ it('answers 429 with Retry-After when a limiter is exceeded', function (): void 
     $this->post('/_mcp-oauth-test/token', ['client_id' => 'c1'])
         ->assertStatus(429)
         ->assertHeader('Retry-After')
-        ->assertJsonPath('error', 'temporarily_unavailable');
+        ->assertExactJson(['error' => 'temporarily_unavailable', 'error_description' => 'Too many requests. Try again later.']);
 });
 
 it('rejects invalid rate limit config at boot', function (): void {
