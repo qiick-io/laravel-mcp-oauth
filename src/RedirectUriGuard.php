@@ -176,6 +176,27 @@ final class RedirectUriGuard
         return false;
     }
 
+    /**
+     * A redirect a native app receives: loopback http or a private-use scheme
+     * (RFC 8252 §7.1, §7.3). DCR infers `application_type` from it when the
+     * client sends none (OIDC Registration defaults to `web`, which would
+     * mislabel every desktop MCP client). An unparseable URI is not native.
+     */
+    public function isNativeRedirectUri(string $redirectUri): bool
+    {
+        try {
+            $parsed = $this->parseCanonical($redirectUri);
+        } catch (InvalidArgumentException) {
+            return false;
+        }
+
+        if ($parsed->scheme === 'https') {
+            return false;
+        }
+
+        return $parsed->scheme !== 'http' || in_array($parsed->normalizedHost, $this->loopbackHosts(), true);
+    }
+
     public function clientHasBlockedRedirectHost(Client $client): bool
     {
         /** @var array<mixed> $redirectUris Passport's redirectUris accessor always returns an array */

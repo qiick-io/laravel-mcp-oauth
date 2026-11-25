@@ -164,3 +164,16 @@ it('flags a stored redirect that no longer passes registration even when its hos
 it('refuses a host with only one IPv6 bracket', function (string $host): void {
     expect(fn () => (new RedirectUriGuard)->normalizeHost($host))->toThrow(InvalidArgumentException::class);
 })->with(['[::1', '::1]']);
+
+it('tells a native app redirect from a web one (RFC 8252 §7.1, §7.3)', function (string $redirectUri, bool $isNative): void {
+    expect((new RedirectUriGuard)->isNativeRedirectUri($redirectUri))->toBe($isNative);
+})->with([
+    'loopback IPv4' => ['http://127.0.0.1:33418/callback', true],
+    'loopback name' => ['http://LOCALHOST/callback', true],
+    'loopback IPv6' => ['http://[::1]/callback', true],
+    'private-use scheme' => ['cursor://anysphere.cursor-retrieval/oauth/callback', true],
+    'https' => ['https://app.example/callback', false],
+    'https on loopback' => ['https://127.0.0.1/callback', false],
+    'http on a public host' => ['http://app.example/callback', false],
+    'unparseable' => ['cursor://callback#fragment', false],
+]);
