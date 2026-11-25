@@ -4,13 +4,10 @@ declare(strict_types=1);
 
 namespace Qiick\McpOAuth\Actions;
 
-use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\Log;
-use Laravel\Passport\Passport;
 use League\OAuth2\Server\CryptTrait;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\RevocationReason;
-use Qiick\McpOAuth\Internal\GrantBindingColumn;
 use Qiick\McpOAuth\Models\OAuthAuthCodeExchange;
 
 /**
@@ -33,7 +30,7 @@ final class RevokeAuthCodeTokensAction
 
     public function __construct(
         private readonly GrantStore $grantStore,
-        private readonly ConfigRepository $config,
+        private readonly RevokeGrantTokensAction $revokeGrantTokens,
         string $tokenEncryptionKey,
     ) {
         $this->setEncryptionKey($tokenEncryptionKey);
@@ -53,15 +50,7 @@ final class RevokeAuthCodeTokensAction
         // revoked and revokes that token itself (BindAccessTokenAction).
         $this->grantStore->revoke($grant->id, null, RevocationReason::Reuse);
 
-        // Ids read first: MySQL refuses an UPDATE whose subquery reads the same table (error 1093).
-        $grantAccessTokenIds = Passport::token()->newQuery()
-            ->where('client_id', $grant->clientId)
-            ->where(GrantBindingColumn::from($this->config), $this->grantStore->bindingKey($grant))
-            ->pluck('id')
-            ->all();
-
-        Passport::refreshToken()->newQuery()->whereIn('access_token_id', $grantAccessTokenIds)->update(['revoked' => true]);
-        Passport::token()->newQuery()->whereIn('id', $grantAccessTokenIds)->update(['revoked' => true]);
+        $this->revokeGrantTokens->execute($grant);
 
         Log::warning('MCP OAuth authorization code presented again: its tokens and grant are revoked.', [
             'client_id' => $grant->clientId,

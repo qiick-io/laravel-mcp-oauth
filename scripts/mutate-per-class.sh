@@ -18,6 +18,7 @@ DEDICATED_CLASSES=(
   'Qiick\McpOAuth\RedirectUriGuard'
   'Qiick\McpOAuth\McpOAuthServer'
   'Qiick\McpOAuth\McpOAuthRoutes'
+  'Qiick\McpOAuth\McpOAuthServiceProvider'
 )
 
 CLASSES=(
@@ -34,6 +35,8 @@ CLASSES=(
   'Qiick\McpOAuth\Actions\PurgeRevokedRecordsAction'
   'Qiick\McpOAuth\Actions\RecordConsentDecisionAction'
   'Qiick\McpOAuth\Actions\RevokeAuthCodeTokensAction'
+  'Qiick\McpOAuth\Actions\RevokeConnectedAppAction'
+  'Qiick\McpOAuth\Actions\RevokeGrantTokensAction'
   'Qiick\McpOAuth\Actions\RevokeTokenAction'
   'Qiick\McpOAuth\Actions\UnblockRedirectHostAction'
   'Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository'
@@ -47,6 +50,7 @@ CLASSES=(
   'Qiick\McpOAuth\Http\Controllers\ApproveClientController'
   'Qiick\McpOAuth\Http\Controllers\AuthorizeClientController'
   'Qiick\McpOAuth\Http\Controllers\ClientAdminController'
+  'Qiick\McpOAuth\Http\Controllers\ConnectedAppsController'
   'Qiick\McpOAuth\Http\Controllers\DenyClientController'
   'Qiick\McpOAuth\Http\Controllers\IssueTokenController'
   'Qiick\McpOAuth\Http\Controllers\RegisterClientController'
@@ -61,9 +65,10 @@ CLASSES=(
   'Qiick\McpOAuth\Internal\PassportUserIdentifier'
   'Qiick\McpOAuth\McpOAuthAdminRoutes'
   'Qiick\McpOAuth\McpOAuthReadiness'
-  'Qiick\McpOAuth\McpOAuthServiceProvider'
+  'Qiick\McpOAuth\McpOAuthSettingsRoutes'
   'Qiick\McpOAuth\Services\AuthorizationResponseService'
   'Qiick\McpOAuth\Services\ClientAdminService'
+  'Qiick\McpOAuth\Services\ConnectedAppsService'
   'Qiick\McpOAuth\Services\ConsentDecisionService'
   'Qiick\McpOAuth\Services\ConsentPageService'
   'Qiick\McpOAuth\Services\PendingAuthorizationRequestService'
