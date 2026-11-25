@@ -232,3 +232,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Laravel 12/13 × lowest/stable) with `composer validate --strict`,
   `composer audit`, SHA-pinned Actions, PostgreSQL/MySQL/MariaDB/SQLite job
   shape, real-HTTP and no-dev boot cells, and README header banners.
+
+### Documentation
+
+- Dependency register `docs/dependencies.md`: one row per runtime
+  `composer.json` `require` entry with constraint rationale, usage,
+  maintainer, license, known risk and an in-package exit plan.
