@@ -19,7 +19,8 @@ use Qiick\McpOAuth\RedirectUriGuard;
 /**
  * An admin blocks a redirect host (design §8.2, S39). The host is normalised
  * to ASCII (UTS #46; Unicode input accepted) and stored once; blocking it
- * again keeps the first row. Then, outside any transaction, so a large client
+ * again keeps the first row, its match mode and reason included: unblock,
+ * then block again, to change them. Then, outside any transaction, so a large client
  * table never holds a lock open, every non-revoked client whose redirect URIs
  * the block now matches is blocked with {@see BlockClientAction}, in chunks
  * of `host_block_chunk_size`.

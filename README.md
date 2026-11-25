@@ -117,12 +117,26 @@ Route::middleware(['web', 'auth'])->prefix('admin')->group(
 | `GET mcp-oauth-clients` | JSON: the package's clients (50 a page) and the blocked hosts |
 | `POST mcp-oauth-clients/{client}/block` | revokes the client, its grants, tokens and codes |
 | `POST mcp-oauth-clients/bulk-block` | the same for 1 to 100 distinct client UUIDs |
-| `POST mcp-oauth-clients/blocked-hosts` | blocks a host (`match_mode` `exact` or, by default, with its subdomains) and every client that redirects there |
+| `POST mcp-oauth-clients/blocked-hosts` | blocks a host (`match_mode` `exact` or, by default, with its subdomains) and every client that redirects there; a host already blocked keeps its first mode and reason |
 | `DELETE mcp-oauth-clients/blocked-hosts/{id}` | lifts a block; blocked clients stay revoked |
 
 Writes answer 204 to a JSON call and redirect back for a form or Inertia post.
 Only clients the package registered are listed or blocked, never the product's
 own Passport clients.
+
+Mount Connected apps, where a signed-in user lists the MCP clients they
+authorised and revokes one, inside the product's authenticated group. Like the
+admin routes, they stay up while OAuth is off:
+
+```php
+Route::middleware(['web', 'auth'])->group(fn () => McpOAuthSettingsRoutes::register());
+```
+
+`GET settings/connected-apps` answers JSON (`connectedApps`: grant id, client,
+scopes, display, dates); `DELETE settings/connected-apps/{grant}` revokes the
+grant and every token bound to it, answering 204 to a JSON call and
+redirecting back otherwise. A grant that is not the user's own active one is a
+404.
 
 Schedule the retention jobs. `mcp-oauth:purge-revoked` deletes what was revoked
 more than `revoked_retention_days` (90) ago: clients the package registered,

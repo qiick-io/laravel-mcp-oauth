@@ -335,3 +335,21 @@ it('never blocks a Passport client the package did not register', function (): v
     expect(isClientRevoked($productClient))->toBeFalse()
         ->and($this->actingAs($admin)->getJson('/mcp-oauth-clients')->json('clients.data'))->toBe([]);
 });
+
+it('shows a client as ever authorised once approved, after its grant is purged (#39 review m1)', function (): void {
+    registerAdminRoutes();
+    $client = $this->createClient();
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->update(['first_authorized_at' => now()->subDays(100)]);
+
+    $listedClient = collect($this->actingAs(adminUser($this))->getJson('/mcp-oauth-clients')->assertOk()->json('clients.data'))
+        ->firstWhere('id', (string) $client->getKey());
+
+    expect($listedClient['hasEverAuthorized'])->toBeTrue();
+});
+
+it('needs a signed-in user before any permission (#39 review m2)', function (): void {
+    registerAdminRoutes();
+
+    $this->getJson('/mcp-oauth-clients')->assertUnauthorized();
+    $this->postJson('/mcp-oauth-clients/blocked-hosts', ['host' => 'evil.example'])->assertUnauthorized();
+});
