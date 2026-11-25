@@ -128,3 +128,18 @@ it('redirects back after a form or Inertia post', function (): void {
         ->delete("/settings/connected-apps/{$grant->id}")
         ->assertRedirect('/settings/connected-apps-page');
 });
+
+it('lists a grant whose client is gone, or that has no dates, so it can still be revoked', function (): void {
+    $user = $this->createUser();
+    $client = $this->createClient(['https://app.example/callback', 'https://app.example/second', 'https://other.example/callback']);
+    $grant = new GrantRecord((string) Str::uuid7(), (string) $client->getKey(), (string) $user->getKey(), false, ['mcp:read'], null, null);
+    $orphanGrant = new GrantRecord((string) Str::uuid7(), (string) Str::uuid7(), (string) $user->getKey(), false, ['mcp:read'], null, null);
+    $this->grantStore()->seed($grant);
+    $this->grantStore()->seed($orphanGrant);
+
+    $connectedApps = collect($this->actingAs($user)->getJson('/settings/connected-apps')->assertOk()->json('connectedApps'))->keyBy('id');
+
+    expect($connectedApps[$grant->id]['client']['redirectHosts'])->toBe(['app.example', 'other.example'])
+        ->and($connectedApps[$grant->id]['authorizedAt'])->toBeNull()
+        ->and($connectedApps[$orphanGrant->id]['client'])->toBe(['id' => $orphanGrant->clientId, 'name' => null, 'redirectHosts' => []]);
+});
