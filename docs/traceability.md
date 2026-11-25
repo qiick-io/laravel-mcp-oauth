@@ -26,7 +26,7 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 | S10 | World-readable key file counts as missing (503) | covered | `Unit/McpOAuthServerTest` "treats world-readable key files as missing"; `Unit/McpOAuthServerMutationTest` mode tests |
 | S11 | Switch refuses to turn on without keys; unreadable store is off | covered (#44) | `Isolated/SwitchMcpOAuthTest`; `Unit/McpOAuthServerTest` "treats an unreadable admin switch store as off", "treats a throwing admin switch as off" |
 | S12 | Readiness reports `passport_keys` only while enabled | covered | `Unit/McpOAuthServerTest` "reports passport_keys only while OAuth is enabled" |
-| S13 | Issuer, resource and endpoints from `APP_URL`; `mcp.authorization_server` pinned | partial | `Isolated/DiscoveryRouteTest` "builds every URL from APP_URL, never from the Host header"; `Http/RealHttpFlowTest` step 1. The `mcp.authorization_server` pin is not implemented: the package serves both documents and the challenge itself |
+| S13 | Issuer, resource and endpoints from `APP_URL`; `mcp.authorization_server` pinned | covered (#50) | `Isolated/DiscoveryRouteTest` "builds every URL from APP_URL, never from the Host header"; `Http/RealHttpFlowTest` step 1; `Feature/ServiceProviderTest` "pins laravel/mcp's authorization server to the issuer, unless the product set one" |
 | S14 | Root and nested discovery shadow laravel/mcp's | covered | `Isolated/DiscoveryRouteTest` "publishes … root and nested", "serves the nested authorization server document only for the MCP path" |
 | S15 | Metadata advertises only `mcp:use`, `code`, the two grants, `S256` | covered | `Isolated/DiscoveryRouteTest` (exact JSON); `Unit/McpOAuthServerTest` "builds the RFC 8414 and RFC 9728 documents" |
 | S16 | `resource` required and exact at authorize and token | covered | `Isolated/TokenEndpointRouteTest` "requires the resource to name this MCP endpoint on both grants"; `Unit/McpOAuthServerTest` "compares the resource path exactly" |
@@ -37,7 +37,7 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 | S21 | Token response names `scope=mcp:use` | covered | `Unit/McpBearerTokenResponseTest`; `Isolated/TokenEndpointRouteTest` |
 | S22 | Fragments and dangerous schemes refused, even when listed | covered | `Unit/RedirectUriGuardTest` "refuses fragments and dangerous schemes even when listed as custom"; `Unit/RedirectUriGuardAdversarialTest` |
 | S23 | `https`, loopback `http`, listed schemes accepted; other `http` refused | covered | `Unit/RedirectUriGuardTest` "accepts https and loopback http including IPv6"; `Unit/RedirectUriGuardCanonicalParseTest` N1; `Http/RealHttpFlowTest` step 2 |
-| S24 | `http://[::1]` completes the whole flow | partial | `[::1]` registers over real HTTP (`Http/RealHttpFlowTest` step 2) and passes the guard (`Unit/RedirectUriGuardAdversarialTest`); the full flow runs on `127.0.0.1` |
+| S24 | `http://[::1]` completes the whole flow | covered (#51) | `Http/RealHttpFlowTest` "runs the whole flow to tools/list with an IPv6 loopback callback" |
 | S25 | Non-ASCII registered hosts refused | covered | `Unit/RedirectUriGuardTest` "refuses non-ASCII registered hosts"; `Unit/RedirectUriGuardAdversarialTest` |
 | S26 | League `UriString` only; no `parse_url` in `src/` | covered | `Arch/PackageArchitectureTest` "src never calls parse_url"; `Unit/RedirectUriGuardAdversarialTest` "forbids parse_url anywhere under src" |
 | S27 | Per-address registration limit | covered | `Isolated/DcrRegisterRouteTest` "limits unauthenticated registrations per address with Retry-After"; `Feature/RateLimiterBootTest` |
@@ -47,12 +47,12 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 | S31 | Prune: unused clients past retention; keeps ever-authorised and fresh ones | covered | `Isolated/RetentionCommandsTest` prune tests, the 23/24/25-hour boundary, B1 (grant purged) and M1 (authorised during the prune) |
 | S32 | DCR refuses a blocked host | covered | `Isolated/DcrRegisterRouteTest` "refuses registration for a blocked redirect host" |
 | S33 | Admin Unicode host stored as ASCII; invalid IDNA refused | covered | `Isolated/AdminBlockActionsTest` "blocks a host and its subdomains, normalised to ASCII", "refuses a host that does not normalise"; `Unit/RedirectUriGuardTest` |
-| S34 | The NFC punycode form of a blocked IDN refused | partial | Normalisation proved (`Unit/RedirectUriGuardTest` "normalises admin Unicode hosts to ASCII punycode", `Unit/RedirectUriGuardAdversarialTest` nontransitional IDNA); no test registers the punycode of a host blocked in Unicode |
+| S34 | The NFC punycode form of a blocked IDN refused | covered (#51) | `Isolated/DcrRegisterRouteTest` "refuses the punycode of an IDN an admin blocked in Unicode, composed or not" (allowed before the block) |
 | S35 | Exact or subdomain match; `notapp.test` ≠ `app.test` | covered | `Unit/RedirectUriGuardTest` "blocks exact hosts and subdomains but not sibling suffixes" |
 | S36 | A host that does not normalise counts as blocked | covered | `Unit/RedirectUriGuardTest` "treats a host that does not normalise as blocked" |
 | S37 | Existing clients refused at authorize, token and `/mcp` after a block | covered | `Isolated/AuthorizeConsentRouteTest`, `TokenEndpointRouteTest`, `McpDoorRouteTest` (blocked host); `Http/RealHttpFlowTest` step 5 |
 | S38 | Token-endpoint block check reads the client id from HTTP Basic | covered | `Isolated/TokenEndpointRouteTest` "refuses a client whose redirect host was blocked, by body or HTTP Basic client_id" |
-| S39 | Host block: short transaction, chunked revocation outside it | partial | `Isolated/AdminBlockActionsTest` "blocks every matching client across more than one chunk"; the transaction boundary is not asserted with a query log |
+| S39 | Host block: short transaction, chunked revocation outside it | covered (#51) | `Isolated/AdminBlockActionsTest` "blocks every matching client across more than one chunk", "blocks a host without one transaction around the client walk" (one transaction per blocked client, never nested) |
 | S40 | Bulk block: 1–100 distinct ids, each fully revoked | covered | `Isolated/AdminBlockActionsTest` bulk test and the 422 matrix |
 | S41 | Blocking a client revokes it and every credential | covered | `Isolated/AdminBlockActionsTest` "blocks a client: revokes it, its grants, tokens and codes"; refusal of a revoked client in `McpDoorRouteTest`, `TokenEndpointRouteTest`, `AuthorizeConsentRouteTest` |
 | S42 | A guest goes to login; the authorize query survives login | covered | `Isolated/AuthorizeConsentRouteTest` "sends a guest to the login page and keeps the full authorize URL as intended" (password and passkey login are the product's) |
@@ -92,11 +92,10 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 | S76 | A user revoke refuses the next call and refresh, and revokes unexchanged codes | covered (#49) | `Isolated/ConnectedAppsTest`: the grant, its access and refresh tokens, and the codes it issued (codes issued before the revoke, while no newer grant is active); a newer consent's code and a code issued during the revoke survive |
 | S77 | Revoke after losing AI access, and while OAuth is off | covered | `Isolated/ConnectedAppsTest` "lists … with OAuth off too" (losing access is the product's) |
 | S78 | Audit entries name client and redirect host | product | `AuditLogger`; the events carry the ids and hosts (`Unit/Events/McpEventsCarryUuidsOnlyTest`) |
-| S79 | Token material never in logs, exceptions, events, audit | partial | `Unit/Events/McpEventsCarryUuidsOnlyTest`; `Isolated/FamilyRevokingRefreshTokenRepositoryTest` "logs a CAS miss without putting it in the client hint"; no sweep over every log call |
+| S79 | Token material never in logs, exceptions, events, audit | covered (#52) | `Isolated/SecretsStayOutOfLogsTest` (every log line and package event across exchange, rotation, reuse, replay and revocation); `Unit/Events/McpEventsCarryUuidsOnlyTest`; token error bodies are fixed strings (`Unit/Services/TokenErrorResponseServiceTest`) |
 | S80 | No bigint in contracts, events, route keys, props | covered | `Unit/Data/GrantRecordTest`; `Unit/Events/McpEventsCarryUuidsOnlyTest`; admin and settings routes use UUIDs and `public_id` |
 | S81 | Without Inertia boots; enabled without a `ConsentView` fails clearly | covered | `Feature/AdapterBootTest` |
 
 ## Open items
 
 - **Known race (from the review of #45):** a user's first approval can lose to `mcp-oauth:prune-unused-clients`. If the prune locks the metadata row and deletes the client after the approval read it, the approval's `first_authorized_at` write updates nothing and the user ends with a grant (or a failed callback) for a deleted client. Closing it means taking the same metadata row lock in the approval before the grant is written.
-- **Partial S13, S24, S34, S39, S79:** the parts named in the table above.
