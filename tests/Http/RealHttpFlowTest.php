@@ -128,9 +128,9 @@ function jsonOf(ResponseInterface $response): array
     return $decoded;
 }
 
-function registerHttpFlowClient(HttpClient $client): string
+function registerHttpFlowClient(HttpClient $client, string $redirectUri = HTTP_FLOW_REDIRECT_URI): string
 {
-    $registration = $client->post('/oauth/register', ['json' => ['client_name' => 'Real client', 'redirect_uris' => [HTTP_FLOW_REDIRECT_URI]]]);
+    $registration = $client->post('/oauth/register', ['json' => ['client_name' => 'Real client', 'redirect_uris' => [$redirectUri]]]);
 
     expect($registration->getStatusCode())->toBe(201);
 
@@ -143,14 +143,14 @@ function registerHttpFlowClient(HttpClient $client): string
  *
  * @return array{access_token: string, refresh_token: string, client_id: string}
  */
-function obtainHttpFlowTokens(string $baseUrl): array
+function obtainHttpFlowTokens(string $baseUrl, string $redirectUri = HTTP_FLOW_REDIRECT_URI): array
 {
     $client = httpFlowClient($baseUrl);
-    $clientId = registerHttpFlowClient($client);
+    $clientId = registerHttpFlowClient($client, $redirectUri);
     $authorizeUrl = '/oauth/authorize?'.http_build_query([
         'response_type' => 'code',
         'client_id' => $clientId,
-        'redirect_uri' => HTTP_FLOW_REDIRECT_URI,
+        'redirect_uri' => $redirectUri,
         'state' => 'state-1234',
         'scope' => 'mcp:use',
         'code_challenge' => AuthorizeFlowTestCase::CODE_CHALLENGE,
@@ -184,7 +184,7 @@ function obtainHttpFlowTokens(string $baseUrl): array
     $tokenResponse = httpFlowClient($baseUrl)->post('/oauth/token', ['form_params' => [
         'grant_type' => 'authorization_code',
         'client_id' => $clientId,
-        'redirect_uri' => HTTP_FLOW_REDIRECT_URI,
+        'redirect_uri' => $redirectUri,
         'code' => $redirectParameters['code'],
         'code_verifier' => AuthorizeFlowTestCase::CODE_VERIFIER,
         'resource' => "{$baseUrl}/mcp",
@@ -382,4 +382,14 @@ it('with the Passport keys missing, answers 503 to OAuth and keeps API keys (ste
 
     // Keys back: the same token works again.
     expect(listMcpTools($baseUrl, $accessToken)->getStatusCode())->toBe(200);
+});
+
+it('runs the whole flow to tools/list with an IPv6 loopback callback (S24)', function () use (&$httpFlowServer): void {
+    $baseUrl = $httpFlowServer['baseUrl'];
+    ['access_token' => $accessToken] = obtainHttpFlowTokens($baseUrl, 'http://[::1]:9/callback');
+
+    $toolsList = listMcpTools($baseUrl, $accessToken);
+
+    expect($toolsList->getStatusCode())->toBe(200)
+        ->and((string) $toolsList->getBody())->toContain('list-news-tool');
 });

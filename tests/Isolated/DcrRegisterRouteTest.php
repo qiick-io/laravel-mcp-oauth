@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
 use Laravel\Passport\Client;
 use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Passport;
@@ -682,3 +683,26 @@ it('treats an empty client field as not sent, even without ConvertEmptyStringsTo
         expect($metadata->{$field})->toBeNull();
     }
 });
+
+it('refuses the punycode of an IDN an admin blocked in Unicode, composed or not (S34)', function (string $blockedAs): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+    $register = fn (): TestResponse => $this->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://xn--bcher-kva.example/callback'],
+    ]);
+
+    // Allowed until the block exists.
+    $register()->assertCreated();
+
+    // The row the admin block writes: the host normalised as admin input is.
+    OAuthBlockedRedirectHost::query()->create(['host' => app(RedirectUriGuard::class)->normalizeHost($blockedAs), 'match_mode' => 'host_and_subdomains']);
+
+    $this->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://xn--bcher-kva.example/callback'],
+    ])->assertStatus(400)->assertJsonPath('error', 'invalid_redirect_uri');
+})->with([
+    'composed (NFC)' => ["B\u{00FC}cher.example"],
+    'decomposed (NFD)' => ["Bu\u{0308}cher.example"],
+]);
