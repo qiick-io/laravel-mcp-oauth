@@ -162,7 +162,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer active gets its clock started); event `McpRevokedRecordsPurged`.
   `mcp-oauth:prune-unused-clients {--dry-run}` deletes DCR clients nobody
   authorised within 24 hours, in chunks, never a client in retention or a
-  product's own Passport client; event `McpUnusedClientsPruned`.
+  product's own Passport client; event `McpUnusedClientsPruned`. A client a
+  user once approved is never pruned: `oauth_client_metadata` gains
+  `first_authorized_at`, set at the first approval and kept after the grant is
+  purged (the `create_` migration changed: run `migrate:fresh` locally).
   `mcp-oauth:check` reports the gate, issuer, resource, key source and
   foreign Passport routes, and exits 1 when OAuth is on but not ready.
 - `mcp-oauth:prune-auth-code-exchanges {--dry-run}` deletes the
