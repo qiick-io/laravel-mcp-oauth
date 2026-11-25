@@ -1068,3 +1068,22 @@ it('ignores prompt=login, so a link cannot sign the user out', function (string 
 
     $this->assertAuthenticatedAs($user);
 })->with(['login', 'login consent', 'consent login']);
+
+// --- Loopback-only redirect warning (S3) ----------------------------------------
+
+it('flags a client whose every redirect URI is loopback http, so the page can warn (S3)', function (array $redirectUris, bool $isLoopbackOnly): void {
+    $this->enableOAuth();
+    config()->set('mcp.custom_schemes', ['cursor']);
+    McpOAuthRoutes::register();
+    $client = $this->createClient($redirectUris);
+
+    $this->actingAs($this->createUser())
+        ->get($this->authorizeUrl($client, ['redirect_uri' => $redirectUris[0]]), INERTIA_HEADERS)
+        ->assertOk()
+        ->assertJsonPath('props.client.isRedirectLoopbackOnly', $isLoopbackOnly);
+})->with([
+    'loopback only' => [['http://127.0.0.1:33418/callback', 'http://localhost/callback', 'http://[::1]/callback'], true],
+    'https' => [['https://app.example/callback'], false],
+    'loopback and https' => [['http://127.0.0.1/callback', 'https://app.example/callback'], false],
+    'a private-use scheme' => [['cursor://anysphere.cursor-retrieval/oauth/callback'], false],
+]);
