@@ -8,6 +8,7 @@ use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Laravel\Passport\Client;
 use League\Uri\UriString;
+use LogicException;
 use Qiick\McpOAuth\Data\ParsedRedirectUriData;
 use Qiick\McpOAuth\Internal\BlockedHostCatalog;
 use Throwable;
@@ -144,8 +145,11 @@ final class RedirectUriGuard
             return $parsed->scheme;
         }
 
-        // parseCanonical never yields a null http(s) host; the cast only narrows the type.
-        return (string) $parsed->normalizedHost; // @pest-mutate-ignore: RemoveStringCast
+        if ($parsed->normalizedHost === null) {
+            throw new LogicException('parseCanonical() returned an http(s) URI without a host.');
+        }
+
+        return $parsed->normalizedHost;
     }
 
     public function isHostBlocked(string $host): bool
@@ -391,11 +395,17 @@ final class RedirectUriGuard
 
     /**
      * inet_ntop fails only on a length other than 4 or 16 bytes, which
-     * inet_pton never produces; the cast only narrows the type.
+     * inet_pton never produces.
      */
     private function formatPackedIp(string $packedAddress): string
     {
-        return (string) inet_ntop($packedAddress); // @pest-mutate-ignore: RemoveStringCast
+        $formattedAddress = inet_ntop($packedAddress);
+
+        if ($formattedAddress === false) {
+            throw new LogicException('formatPackedIp() was given a packed address of the wrong length.');
+        }
+
+        return $formattedAddress;
     }
 
     /**

@@ -99,11 +99,21 @@ final class HookedGrantStore implements GrantStore
     /** @var list<int> how many client ids each everAuthorized() call was asked about */
     public array $everAuthorizedBatchSizes = [];
 
+    /** Runs once, after the next everAuthorized() has answered. */
+    public ?Closure $afterNextEverAuthorized = null;
+
     public function everAuthorized(array $clientIds): array
     {
         $this->everAuthorizedBatchSizes[] = count($clientIds);
+        $authorizedClientIds = $this->grantStore->everAuthorized($clientIds);
+        $hook = $this->afterNextEverAuthorized;
+        $this->afterNextEverAuthorized = null;
 
-        return $this->grantStore->everAuthorized($clientIds);
+        if ($hook !== null) {
+            $hook();
+        }
+
+        return $authorizedClientIds;
     }
 
     public function activeForUser(Authenticatable $user): array

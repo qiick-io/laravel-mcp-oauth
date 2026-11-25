@@ -6,6 +6,7 @@ use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Cookie\CookieJar;
 use GuzzleHttp\Promise\Utils;
 use Psr\Http\Message\ResponseInterface;
+use Qiick\McpOAuth\Tests\Http\Server\HttpFlowServiceProvider;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 use Symfony\Component\Process\Process;
 
@@ -23,7 +24,7 @@ uses()->group('http');
 
 const HTTP_FLOW_REDIRECT_URI = 'http://127.0.0.1:9/callback';
 
-/** @var array{processes: list<Process>, baseUrl: string, secondBaseUrl: string, storage: string}|null $httpFlowServer */
+/** @var array{processes: list<Process>, baseUrl: string, secondBaseUrl: string, storage: string, environment: array<string, string>}|null $httpFlowServer */
 $httpFlowServer = null;
 
 beforeAll(function () use (&$httpFlowServer): void {
@@ -48,6 +49,7 @@ beforeAll(function () use (&$httpFlowServer): void {
         'baseUrl' => $baseUrl,
         'secondBaseUrl' => "http://127.0.0.1:{$secondPort}",
         'storage' => $storage,
+        'environment' => $environment,
     ];
 });
 
@@ -295,4 +297,89 @@ it('S57: two parallel refreshes with one token yield at most one usable pair, th
     foreach ($issuedAccessTokens as $accessToken) {
         expect(listMcpTools($baseUrl, $accessToken)->getStatusCode())->toBe(401);
     }
+});
+
+/**
+ * Runs `$scenario` with the given state flags set on the running servers
+ * (HttpFlowServiceProvider), and always clears them.
+ *
+ * @param  list<string>  $flags
+ */
+function withHttpFlowFlags(string $storage, array $flags, Closure $scenario): void
+{
+    foreach ($flags as $flag) {
+        touch("{$storage}/{$flag}");
+    }
+
+    try {
+        $scenario();
+    } finally {
+        foreach ($flags as $flag) {
+            @unlink("{$storage}/{$flag}");
+        }
+    }
+}
+
+/**
+ * @param  array{environment: array<string, string>}  $httpFlowServer
+ */
+function runHttpFlowCommand(array $httpFlowServer, string $action, string $host): void
+{
+    (new Process([PHP_BINARY, 'tests/Http/Server/command.php', $action, $host], dirname(__DIR__, 2), $httpFlowServer['environment']))->mustRun();
+}
+
+it('refuses an existing token once its redirect host is blocked (step 5)', function () use (&$httpFlowServer): void {
+    $baseUrl = $httpFlowServer['baseUrl'];
+    ['access_token' => $accessToken] = obtainHttpFlowTokens($baseUrl);
+
+    expect(listMcpTools($baseUrl, $accessToken)->getStatusCode())->toBe(200);
+
+    runHttpFlowCommand($httpFlowServer, 'block-host', '127.0.0.1');
+
+    try {
+        $refused = listMcpTools($baseUrl, $accessToken);
+
+        expect($refused->getStatusCode())->toBe(401)
+            ->and($refused->getHeaderLine('WWW-Authenticate'))->toContain('error="invalid_token"');
+    } finally {
+        runHttpFlowCommand($httpFlowServer, 'unblock-host', '127.0.0.1');
+    }
+});
+
+it('switched off by the admin or by config, answers 404 on OAuth and keeps API keys (step 6)', function (string $flag) use (&$httpFlowServer): void {
+    $baseUrl = $httpFlowServer['baseUrl'];
+
+    withHttpFlowFlags($httpFlowServer['storage'], [$flag], static function () use ($baseUrl): void {
+        $client = httpFlowClient($baseUrl);
+
+        expect($client->get('/.well-known/oauth-authorization-server')->getStatusCode())->toBe(404)
+            ->and($client->get('/.well-known/oauth-protected-resource/mcp')->getStatusCode())->toBe(404)
+            ->and($client->post('/oauth/register', ['json' => ['redirect_uris' => [HTTP_FLOW_REDIRECT_URI]]])->getStatusCode())->toBe(404)
+            ->and($client->post('/oauth/token', ['form_params' => ['grant_type' => 'refresh_token']])->getStatusCode())->toBe(404)
+            ->and(listMcpTools($baseUrl, 'ak_valid')->getStatusCode())->toBe(200);
+    });
+})->with([
+    'the admin switch' => [HttpFlowServiceProvider::ADMIN_SWITCH_OFF_FLAG],
+    'the config gate' => [HttpFlowServiceProvider::CONFIG_OFF_FLAG],
+]);
+
+it('with the Passport keys missing, answers 503 to OAuth and keeps API keys (step 7)', function () use (&$httpFlowServer): void {
+    $baseUrl = $httpFlowServer['baseUrl'];
+    ['access_token' => $accessToken] = obtainHttpFlowTokens($baseUrl);
+
+    withHttpFlowFlags($httpFlowServer['storage'], [HttpFlowServiceProvider::KEYS_MISSING_FLAG], static function () use ($baseUrl, $accessToken): void {
+        $client = httpFlowClient($baseUrl);
+        $registration = $client->post('/oauth/register', ['json' => ['redirect_uris' => [HTTP_FLOW_REDIRECT_URI]]]);
+        $oauthCall = listMcpTools($baseUrl, $accessToken);
+
+        expect($registration->getStatusCode())->toBe(503)
+            ->and(jsonOf($registration)['error'])->toBe('temporarily_unavailable')
+            ->and($client->post('/oauth/token', ['form_params' => ['grant_type' => 'refresh_token']])->getStatusCode())->toBe(503)
+            ->and($oauthCall->getStatusCode())->toBe(503)
+            ->and(jsonOf($oauthCall)['error'])->toBe('temporarily_unavailable')
+            ->and(listMcpTools($baseUrl, 'ak_valid')->getStatusCode())->toBe(200);
+    });
+
+    // Keys back: the same token works again.
+    expect(listMcpTools($baseUrl, $accessToken)->getStatusCode())->toBe(200);
 });

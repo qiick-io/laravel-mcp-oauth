@@ -293,6 +293,25 @@ it('only counts unused clients with --dry-run', function (): void {
     Event::assertNotDispatched(McpUnusedClientsPruned::class);
 });
 
+it('keeps a client authorised or put in retention after the prune selected it (#31 review M1)', function (string $change): void {
+    $this->enableOAuth();
+    $hookedGrantStore = new HookedGrantStore($this->grantStore());
+    app()->instance(GrantStore::class, $hookedGrantStore);
+    $client = clientRegisteredHoursAgo($this, 25);
+    $unusedClient = clientRegisteredHoursAgo($this, 25);
+    // A user approves the client (or an admin blocks it) once the prune has read it as unused.
+    $hookedGrantStore->afterNextEverAuthorized = static fn () => OAuthClientMetadata::query()
+        ->where('client_id', $client->getKey())
+        ->update([$change => now()]);
+
+    $this->artisan('mcp-oauth:prune-unused-clients')
+        ->expectsOutput('Pruned 1 unused clients registered before '.now()->subHours(24)->toIso8601String().'.')
+        ->assertSuccessful();
+
+    expect(Client::query()->whereKey($client->getKey())->exists())->toBeTrue()
+        ->and(Client::query()->whereKey($unusedClient->getKey())->exists())->toBeFalse();
+})->with(['first_authorized_at', 'revoked_at']);
+
 it('prunes unused clients across more than one chunk of 100', function (): void {
     $this->enableOAuth();
     $hookedGrantStore = new HookedGrantStore($this->grantStore());

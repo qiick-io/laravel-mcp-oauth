@@ -41,6 +41,13 @@ final class InvalidMcpOAuthConfigException extends InvalidArgumentException
         );
     }
 
+    public static function passportGuardNotStateful(): self
+    {
+        return new self(
+            'mcp-oauth needs [passport.guard] to name a session (stateful) guard: consent signs the user in between authorize and approve.',
+        );
+    }
+
     public static function invalidGrantBindingColumn(): self
     {
         return new self(

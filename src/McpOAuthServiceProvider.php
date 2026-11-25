@@ -73,15 +73,6 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class McpOAuthServiceProvider extends ServiceProvider
 {
-    /**
-     * The grants an AuthorizationServer keeps while OAuth is on: the MCP
-     * grants. `personal_access` is listed because the same afterResolving hook
-     * also runs on the separate server Passport gives PersonalAccessTokenFactory
-     * (the main server never has that grant): keeping it there means the
-     * product's own `createToken()` still works.
-     */
-    private const array SERVER_GRANT_TYPES = [...McpOAuthServer::SUPPORTED_GRANT_TYPES, 'personal_access'];
-
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/mcp-oauth.php', 'mcp-oauth');
@@ -104,7 +95,10 @@ final class McpOAuthServiceProvider extends ServiceProvider
                 $guardName = $app->make(ConfigRepository::class)->get('passport.guard');
                 $passportGuard = $app->make(AuthFactory::class)->guard(is_string($guardName) ? $guardName : null);
 
-                assert($passportGuard instanceof StatefulGuard);
+                // A token guard cannot hold the signed-in user between authorize and approve.
+                if (! $passportGuard instanceof StatefulGuard) {
+                    throw InvalidMcpOAuthConfigException::passportGuardNotStateful();
+                }
 
                 return $passportGuard;
             });
@@ -300,7 +294,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
      * Passport hardcodes AuthCodeGrant at PT10M and always enables
      * ClientCredentialsGrant. Patch the live AuthorizationServer: set the
      * validated auth-code TTL, and, while `mcp-oauth.enabled` is on, drop
-     * every grant outside SERVER_GRANT_TYPES (client_credentials, whose
+     * every grant outside the server's own (client_credentials, whose
      * hard-coded `*` scope must never be issued for MCP, and password or
      * implicit if a product enables them), so the token endpoint's own check
      * is not the only guard. Off, the product's Passport grants stay. Retrofits an already-resolved singleton.
@@ -315,10 +309,15 @@ final class McpOAuthServiceProvider extends ServiceProvider
             $enabledGrantTypes = $enabledGrantTypesProperty->getValue($authorizationServer);
             // Off, Passport stays the product's: its own grants are left as they are.
             $isMcpOAuthEnabled = $this->isMcpOAuthEnabled();
+            // The MCP grants, and `personal_access`: this hook also runs on the
+            // separate server Passport gives PersonalAccessTokenFactory, so the
+            // product's own createToken() keeps working. A local list, not a
+            // class constant: pcov never covers a constant.
+            $serverGrantTypes = [...McpOAuthServer::SUPPORTED_GRANT_TYPES, 'personal_access'];
 
             foreach ($enabledGrantTypes as $grantIdentifier => $grant) {
                 // Password, implicit, client credentials, device: whatever Passport enables.
-                if ($isMcpOAuthEnabled && ! in_array($grantIdentifier, self::SERVER_GRANT_TYPES, true)) {
+                if ($isMcpOAuthEnabled && ! in_array($grantIdentifier, $serverGrantTypes, true)) {
                     unset($enabledGrantTypes[$grantIdentifier]);
 
                     continue;

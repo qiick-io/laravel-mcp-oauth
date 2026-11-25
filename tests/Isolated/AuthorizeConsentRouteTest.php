@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
@@ -20,6 +21,8 @@ use Qiick\McpOAuth\Data\ConsentOption;
 use Qiick\McpOAuth\Data\ConsentOptions;
 use Qiick\McpOAuth\Events\McpConsentApproved;
 use Qiick\McpOAuth\Events\McpConsentDenied;
+use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
+use Qiick\McpOAuth\Http\Controllers\AuthorizeClientController;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
@@ -1068,3 +1071,25 @@ it('ignores prompt=login, so a link cannot sign the user out', function (string 
 
     $this->assertAuthenticatedAs($user);
 })->with(['login', 'login consent', 'consent login']);
+
+// --- The session guard the authorize controller signs users in with ---------
+
+it('gives the authorize controller the guard passport.guard names', function (): void {
+    $this->enableOAuth();
+    config()->set('auth.guards.consent', ['driver' => 'session', 'provider' => 'users']);
+    config()->set('passport.guard', 'consent');
+
+    $controller = app(AuthorizeClientController::class);
+
+    expect((new ReflectionProperty($controller, 'guard'))->getValue($controller))->toBe(Auth::guard('consent'));
+});
+
+it('fails closed with a config error when passport.guard is not a session guard', function (): void {
+    $this->enableOAuth();
+    Auth::viaRequest('stateless', static fn (): null => null);
+    config()->set('auth.guards.stateless', ['driver' => 'stateless', 'provider' => 'users']);
+    config()->set('passport.guard', 'stateless');
+
+    expect(fn () => app(AuthorizeClientController::class))
+        ->toThrow(InvalidMcpOAuthConfigException::class, 'passport.guard');
+});

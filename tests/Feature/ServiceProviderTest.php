@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\ServiceProvider;
+use Qiick\McpOAuth\McpOAuthServiceProvider;
+
 it('merges the package defaults into the mcp-oauth config', function (): void {
     expect(config('mcp-oauth.enabled'))->toBeFalse();
     expect(config('mcp-oauth.mcp_enabled'))->toBeNull();
@@ -30,12 +33,12 @@ it('merges the package defaults into the mcp-oauth config', function (): void {
 });
 
 it('lets an app publish the config file', function (): void {
-    $this->artisan('vendor:publish', ['--tag' => 'mcp-oauth-config', '--force' => true])
-        ->assertSuccessful();
+    // The mapping, not a real publish: writing into Testbench's shared
+    // skeleton raced with parallel workers loading their config from it.
+    $publishedFiles = ServiceProvider::pathsToPublish(McpOAuthServiceProvider::class, 'mcp-oauth-config');
 
-    expect(config_path('mcp-oauth.php'))->toBeFile();
-
-    unlink(config_path('mcp-oauth.php'));
+    expect(array_values($publishedFiles))->toBe([config_path('mcp-oauth.php')])
+        ->and((string) array_key_first($publishedFiles))->toBeFile();
 });
 
 it('lets an app publish migrations under mcp-oauth-migrations', function (): void {

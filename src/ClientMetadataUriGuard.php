@@ -6,6 +6,7 @@ namespace Qiick\McpOAuth;
 
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use LogicException;
 use Qiick\McpOAuth\Internal\BlockedHostCatalog;
 
 /**
@@ -50,8 +51,11 @@ final class ClientMetadataUriGuard
             return false;
         }
 
-        // parseCanonical guarantees a host for http(s); the cast only satisfies PHPStan.
-        $host = (string) $parsedUri->normalizedHost; // @pest-mutate-ignore: RemoveStringCast
+        $host = $parsedUri->normalizedHost;
+
+        if ($host === null) {
+            throw new LogicException('parseCanonical() returned an http(s) URI without a host.');
+        }
 
         if (filter_var($host, FILTER_VALIDATE_IP) === false) {
             return $this->isPublicHostname($host);
@@ -113,8 +117,12 @@ final class ClientMetadataUriGuard
 
     private function bitsOf(string $ipAddress): string
     {
-        // Callers pass validated IP literals, so inet_pton never returns false; the cast only narrows the type.
-        $packedAddress = (string) inet_pton($ipAddress); // @pest-mutate-ignore: RemoveStringCast
+        $packedAddress = inet_pton($ipAddress);
+
+        // Callers pass validated IP literals, so this never fires.
+        if ($packedAddress === false) {
+            throw new LogicException('bitsOf() was given something other than an IP literal.');
+        }
 
         $bits = '';
 
@@ -136,8 +144,9 @@ final class ClientMetadataUriGuard
             ['100.64.0.0', 10], // shared address space (CGNAT), RFC 6598
             ['192.0.0.0', 24], // IETF protocol assignments, RFC 6890
             ['198.18.0.0', 15], // benchmarking, RFC 2544
-            // A /3 only adds 240.0.0.0/4, which filter_var's reserved flag already refuses.
-            ['224.0.0.0', 4], // IPv4 multicast @pest-mutate-ignore: DecrementInteger
+            // Multicast (224.0.0.0/4) and the reserved 240.0.0.0/4, which
+            // filter_var's reserved flag refuses too: one /3 for both.
+            ['224.0.0.0', 3],
             ['ff00::', 8], // IPv6 multicast
             ['2002::', 16], // 6to4 embeds an IPv4 address, RFC 3056
             ['2001::', 32], // Teredo embeds an obfuscated IPv4 address, RFC 4380

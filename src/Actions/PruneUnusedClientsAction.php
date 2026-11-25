@@ -61,14 +61,45 @@ final class PruneUnusedClientsAction
                 array_push($unusedClientIds, ...array_diff($oldClientIds, $this->grantStore->everAuthorized($oldClientIds)));
             });
 
-        if (! $isDryRun) {
-            foreach ($unusedClientIds as $clientId) {
+        if ($isDryRun) {
+            return new UnusedClientsPruneData(count($unusedClientIds), $cutoff->toDateTimeImmutable());
+        }
+
+        $prunedClientCount = 0;
+
+        foreach ($unusedClientIds as $clientId) {
+            $prunedClientCount += $this->deleteIfStillUnused($clientId) ? 1 : 0;
+        }
+
+        $this->events->dispatch(new McpUnusedClientsPruned($prunedClientCount, $cutoff->toIso8601String()));
+
+        return new UnusedClientsPruneData($prunedClientCount, $cutoff->toDateTimeImmutable());
+    }
+
+    /**
+     * The selection above may be minutes old: a user may have approved the
+     * client since (#31 review M1), or an admin blocked it. Re-read under a
+     * row lock, in the transaction that deletes, so an approval committed
+     * first keeps the client, and one that comes later waits for the delete.
+     */
+    private function deleteIfStillUnused(string $clientId): bool
+    {
+        /** @var bool $isDeleted Laravel 12 types transaction() as mixed */
+        $isDeleted = OAuthClientMetadata::query()->getConnection()->transaction(function () use ($clientId): bool {
+            $isStillUnused = OAuthClientMetadata::query()
+                ->where('client_id', $clientId)
+                ->whereNull('first_authorized_at')
+                ->whereNull('revoked_at')
+                ->lockForUpdate()
+                ->exists();
+
+            if ($isStillUnused) {
                 $this->deleteClient->execute($clientId);
             }
 
-            $this->events->dispatch(new McpUnusedClientsPruned(count($unusedClientIds), $cutoff->toIso8601String()));
-        }
+            return $isStillUnused;
+        });
 
-        return new UnusedClientsPruneData(count($unusedClientIds), $cutoff->toDateTimeImmutable());
+        return $isDeleted;
     }
 }

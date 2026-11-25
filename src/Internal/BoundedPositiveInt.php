@@ -18,6 +18,9 @@ final class BoundedPositiveInt
     /** Access tokens stay short-lived; one day is the hard ceiling. */
     public const int ACCESS_TOKEN_TTL_MINUTES_MAX = 1_440;
 
+    /** Clients blocked per chunk when a host is blocked: a chunk is one query and one loop. */
+    public const int HOST_BLOCK_CHUNK_SIZE_MAX = 1_000;
+
     /** Refresh tokens may last up to one year. */
     public const int REFRESH_TOKEN_TTL_DAYS_MAX = 365;
 
