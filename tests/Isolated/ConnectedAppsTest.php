@@ -143,3 +143,18 @@ it('lists a grant whose client is gone, or that has no dates, so it can still be
         ->and($connectedApps[$grant->id]['authorizedAt'])->toBeNull()
         ->and($connectedApps[$orphanGrant->id]['client'])->toBe(['id' => $orphanGrant->clientId, 'name' => null, 'redirectHosts' => []]);
 });
+
+it('revokes the user\'s unexchanged codes for that client too (S76)', function (): void {
+    $user = $this->createUser();
+    ['grant' => $grant, 'client' => $client] = connectedApp($this, $user);
+    $authCode = static fn (string $userIdentifier): string => tap(Str::random(80), static fn (string $codeId) => DB::table('oauth_auth_codes')->insert([
+        'id' => $codeId, 'user_id' => $userIdentifier, 'client_id' => $client->getKey(), 'scopes' => '["mcp:use"]', 'revoked' => false, 'expires_at' => now()->addMinutes(5),
+    ]));
+    $userCode = $authCode((string) $user->getKey());
+    $otherUserCode = $authCode((string) $this->createUser()->getKey());
+
+    $this->actingAs($user)->deleteJson("/settings/connected-apps/{$grant->id}")->assertNoContent();
+
+    expect(DB::table('oauth_auth_codes')->where('id', $userCode)->value('revoked'))->toBeTruthy()
+        ->and(DB::table('oauth_auth_codes')->where('id', $otherUserCode)->value('revoked'))->toBeFalsy();
+});
