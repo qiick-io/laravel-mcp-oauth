@@ -18,6 +18,7 @@ DEDICATED_CLASSES=(
   'Qiick\McpOAuth\RedirectUriGuard'
   'Qiick\McpOAuth\McpOAuthServer'
   'Qiick\McpOAuth\McpOAuthRoutes'
+  'Qiick\McpOAuth\McpOAuthServiceProvider'
 )
 
 CLASSES=(
@@ -64,7 +65,6 @@ CLASSES=(
   'Qiick\McpOAuth\Internal\PassportUserIdentifier'
   'Qiick\McpOAuth\McpOAuthAdminRoutes'
   'Qiick\McpOAuth\McpOAuthReadiness'
-  'Qiick\McpOAuth\McpOAuthServiceProvider'
   'Qiick\McpOAuth\McpOAuthSettingsRoutes'
   'Qiick\McpOAuth\Services\AuthorizationResponseService'
   'Qiick\McpOAuth\Services\ClientAdminService'
