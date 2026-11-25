@@ -88,9 +88,9 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 | S72 | Both doors bind identically | product | `McpCredentialBinder` |
 | S73 | `/mcp` outside `web`: a session cookie never authenticates | covered (#48) | `Isolated/McpDoorRouteTest` "refuses a signed-in browser session without a Bearer, even on a route inside web" (a control route proves the session is live) |
 | S74 | Failure brake 429 before the per-key throttle | covered | `Isolated/McpDoorRouteTest` "answers 429 before reading the credential once an address has failed too often" |
-| S75 | Connected apps lists only the user's own active grants | covered (#41) | `Isolated/ConnectedAppsTest` (API keys are the product's) |
+| S75 | Connected apps lists only the user's own active grants | covered | `Isolated/ConnectedAppsTest` (API keys are the product's) |
 | S76 | A user revoke refuses the next call and refresh, and revokes unexchanged codes | covered (#49) | `Isolated/ConnectedAppsTest`: the grant, its access and refresh tokens, and the codes it issued (codes issued before the revoke, while no newer grant is active); a newer consent's code and a code issued during the revoke survive |
-| S77 | Revoke after losing AI access, and while OAuth is off | covered (#41) | `Isolated/ConnectedAppsTest` "lists … with OAuth off too" (losing access is the product's) |
+| S77 | Revoke after losing AI access, and while OAuth is off | covered | `Isolated/ConnectedAppsTest` "lists … with OAuth off too" (losing access is the product's) |
 | S78 | Audit entries name client and redirect host | product | `AuditLogger`; the events carry the ids and hosts (`Unit/Events/McpEventsCarryUuidsOnlyTest`) |
 | S79 | Token material never in logs, exceptions, events, audit | partial | `Unit/Events/McpEventsCarryUuidsOnlyTest`; `Isolated/FamilyRevokingRefreshTokenRepositoryTest` "logs a CAS miss without putting it in the client hint"; no sweep over every log call |
 | S80 | No bigint in contracts, events, route keys, props | covered | `Unit/Data/GrantRecordTest`; `Unit/Events/McpEventsCarryUuidsOnlyTest`; admin and settings routes use UUIDs and `public_id` |
