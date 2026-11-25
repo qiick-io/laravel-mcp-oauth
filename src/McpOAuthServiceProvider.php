@@ -28,6 +28,7 @@ use League\OAuth2\Server\Grant\AuthCodeGrant;
 use League\OAuth2\Server\ResourceServer;
 use Qiick\McpOAuth\Actions\BindAccessTokenAction;
 use Qiick\McpOAuth\Actions\RevokeAuthCodeTokensAction;
+use Qiick\McpOAuth\Actions\RevokeGrantTokensAction;
 use Qiick\McpOAuth\Actions\RevokeTokenAction;
 use Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository;
 use Qiick\McpOAuth\Bridge\OneShotAuthCodeRepository;
@@ -136,7 +137,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->app->bind(RevokeAuthCodeTokensAction::class, static function (Application $app): RevokeAuthCodeTokensAction {
             return new RevokeAuthCodeTokensAction(
                 $app->make(GrantStore::class),
-                $app->make(ConfigRepository::class),
+                $app->make(RevokeGrantTokensAction::class),
                 Passport::tokenEncryptionKey($app->make(Encrypter::class)),
             );
         });

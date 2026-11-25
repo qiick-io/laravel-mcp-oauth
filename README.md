@@ -109,6 +109,20 @@ Writes answer 204 to a JSON call and redirect back for a form or Inertia post.
 Only clients the package registered are listed or blocked, never the product's
 own Passport clients.
 
+Mount Connected apps, where a signed-in user lists the MCP clients they
+authorised and revokes one, inside the product's authenticated group. Like the
+admin routes, they stay up while OAuth is off:
+
+```php
+Route::middleware(['web', 'auth'])->group(fn () => McpOAuthSettingsRoutes::register());
+```
+
+`GET settings/connected-apps` answers JSON (`connectedApps`: grant id, client,
+scopes, display, dates); `DELETE settings/connected-apps/{grant}` revokes the
+grant and every token bound to it, answering 204 to a JSON call and
+redirecting back otherwise. A grant that is not the user's own active one is a
+404.
+
 Schedule the retention jobs. `mcp-oauth:purge-revoked` deletes what was revoked
 more than `revoked_retention_days` (90) ago: clients the package registered,
 the product's grants (through `GrantStore::purgeRevokedBefore()`, which may keep
