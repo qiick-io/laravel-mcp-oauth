@@ -87,7 +87,7 @@ final class McpOAuthServer
 
     /**
      * APP_URL is an issuer RFC 8414 §2 accepts: an http(s) URL with a host,
-     * and no userinfo, query or fragment. Every document and challenge is
+     * a usable port if any (1 to 65535), and no userinfo, query or fragment. Every document and challenge is
      * built from it, so OAuth cannot serve without one.
      */
     public function hasAbsoluteIssuer(): bool
@@ -100,14 +100,16 @@ final class McpOAuthServer
 
         return in_array(strtolower((string) $issuerParts['scheme']), ['http', 'https'], true)
             && (string) $issuerParts['host'] !== ''
+            && ($issuerParts['port'] === null || ($issuerParts['port'] >= 1 && $issuerParts['port'] <= 65_535))
             && $issuerParts['user'] === null
             && $issuerParts['query'] === null
             && $issuerParts['fragment'] === null;
     }
 
     /**
-     * The Passport keys parse and form one pair, read the way Passport reads
-     * them (env PEM with `\n` escapes, else the key files). Parses both keys,
+     * The Passport keys parse, form one pair, and suit the signer league uses
+     * for access tokens (RS256: RSA of at least 2048 bits), read the way
+     * Passport reads them (env PEM with `\n` escapes, else the key files). Parses both keys,
      * so it runs where an admin switches OAuth on, not on every request:
      * hasPassportKeys() stays the cheap per-request check.
      */
@@ -124,10 +126,14 @@ final class McpOAuthServer
             return false;
         }
 
+        // A parsed key always has details; is_array() only narrows the type.
         $privateKeyDetails = openssl_pkey_get_details($privateKey);
         $publicKeyDetails = openssl_pkey_get_details($publicKey);
 
-        return $privateKeyDetails !== false && $publicKeyDetails !== false && $privateKeyDetails['key'] === $publicKeyDetails['key'];
+        return is_array($privateKeyDetails) && is_array($publicKeyDetails)
+            && $privateKeyDetails['type'] === OPENSSL_KEYTYPE_RSA
+            && $privateKeyDetails['bits'] >= 2_048
+            && $privateKeyDetails['key'] === $publicKeyDetails['key'];
     }
 
     public function issuer(): string
