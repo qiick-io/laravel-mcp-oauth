@@ -45,10 +45,13 @@ interface OAuthAuthorizePageProps {
         redirectHost: string;
         nameIsSelfAsserted: true;
         /**
-         * Every redirect URI is loopback http (127.0.0.1, localhost, [::1]):
-         * warn that the code goes to a program on this computer (S3)
+         * The callback this request returns to is loopback http (127.0.0.1,
+         * localhost, [::1]): warn that the code goes to a program on this
+         * computer, whichever program listens on that port (S3). A caution,
+         * not evidence of the app's identity: keep showing the return host
+         * and the self-asserted name.
          */
-        isRedirectLoopbackOnly: boolean;
+        isRedirectLoopback: boolean;
     };
     /** Must be posted back as `auth_token` */
     authToken: string;

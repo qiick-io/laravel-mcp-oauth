@@ -105,6 +105,7 @@ it('refuses to switch on while APP_URL is not a usable issuer', function (string
     expect($store->writes)->toBe([]);
 })->with([
     'no authority, a query' => ['http://?x=1'],
+    'no host' => ['http:///path'],
     'whitespace for a host' => ['https:// app.example'],
     'a query' => ['https://app.example?x=1'],
     'a fragment' => ['https://app.example#top'],

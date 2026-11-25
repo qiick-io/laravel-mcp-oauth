@@ -8,6 +8,7 @@ use DateInterval;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Laravel\Mcp\Server\Registrar;
 use Laravel\Passport\Passport;
+use League\Uri\UriString;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
@@ -85,12 +86,48 @@ final class McpOAuthServer
     }
 
     /**
-     * APP_URL is an absolute http(s) URL: every document and challenge is
+     * APP_URL is an issuer RFC 8414 §2 accepts: an http(s) URL with a host,
+     * and no userinfo, query or fragment. Every document and challenge is
      * built from it, so OAuth cannot serve without one.
      */
     public function hasAbsoluteIssuer(): bool
     {
-        return preg_match('#^https?://[^/]#i', $this->issuer()) === 1;
+        try {
+            $issuerParts = UriString::parse($this->issuer());
+        } catch (Throwable) {
+            return false;
+        }
+
+        return in_array(strtolower((string) $issuerParts['scheme']), ['http', 'https'], true)
+            && (string) $issuerParts['host'] !== ''
+            && $issuerParts['user'] === null
+            && $issuerParts['query'] === null
+            && $issuerParts['fragment'] === null;
+    }
+
+    /**
+     * The Passport keys parse and form one pair, read the way Passport reads
+     * them (env PEM with `\n` escapes, else the key files). Parses both keys,
+     * so it runs where an admin switches OAuth on, not on every request:
+     * hasPassportKeys() stays the cheap per-request check.
+     */
+    public function hasUsablePassportKeyPair(): bool
+    {
+        if (! $this->hasPassportKeys()) {
+            return false;
+        }
+
+        $privateKey = openssl_pkey_get_private($this->passportKeyMaterial('private'));
+        $publicKey = openssl_pkey_get_public($this->passportKeyMaterial('public'));
+
+        if ($privateKey === false || $publicKey === false) {
+            return false;
+        }
+
+        $privateKeyDetails = openssl_pkey_get_details($privateKey);
+        $publicKeyDetails = openssl_pkey_get_details($publicKey);
+
+        return $privateKeyDetails !== false && $publicKeyDetails !== false && $privateKeyDetails['key'] === $publicKeyDetails['key'];
     }
 
     public function issuer(): string
@@ -305,6 +342,18 @@ final class McpOAuthServer
 
         // Null / unset: gate 3 fails closed (OAuth cannot be on).
         return false;
+    }
+
+    /**
+     * @param  'private'|'public'  $keyType
+     */
+    private function passportKeyMaterial(string $keyType): string
+    {
+        $envKey = $this->config->get("passport.{$keyType}_key");
+
+        return is_string($envKey) && $envKey !== ''
+            ? str_replace('\\n', "\n", $envKey)
+            : 'file://'.Passport::keyPath("oauth-{$keyType}.key");
     }
 
     private function keyFileIsUsable(string $path): bool

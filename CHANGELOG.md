@@ -78,14 +78,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SwitchMcpOAuthAction` (design §4.3): the product's settings page switches
   OAuth on or off through it. Switching on is refused with
   `McpOAuthCannotBeEnabledException` (the reason to show) while the Passport
-  keys are missing, APP_URL is not absolute or a foreign `passport.*` route
-  exists; either way the product's store is written through a callback and
-  `McpOAuthEnabled` / `McpOAuthDisabled` is dispatched with the actor.
-- The consent page's `client` carries `isRedirectLoopbackOnly` (S3): every
-  redirect URI is loopback http, so the page can warn that the code goes to a
-  program on the user's computer. `ClientInfo` gains the same flag, and
-  `RedirectUriGuard::isLoopbackRedirectUri()` and
-  `McpOAuthServer::hasAbsoluteIssuer()` are public.
+  keys are missing or not one usable matching pair, APP_URL is not a valid
+  issuer (http(s), a host, no userinfo, query or fragment) or a foreign
+  `passport.*` route exists; either way the product's store is written through
+  a callback and `McpOAuthEnabled` / `McpOAuthDisabled` is dispatched with the
+  actor. Every write of the switch store must go through it.
+- The consent page's `client` carries `isRedirectLoopback` (S3): the callback
+  this request returns to is loopback http, so the page can warn that the code
+  goes to a program on the user's computer. `ClientInfo` gains the same flag,
+  and `RedirectUriGuard::isLoopbackRedirectUri()`,
+  `McpOAuthServer::hasAbsoluteIssuer()` (now a parsed check, which `isReady()`
+  also uses) and `McpOAuthServer::hasUsablePassportKeyPair()` are public.
 - `McpOAuthServer` exposes the discovery contract (standards review M9):
   `specRevision()` (the `spec_revision` config, a `YYYY-MM-DD` date, failing
   closed otherwise), `authorizationServerMetadata()` and

@@ -21,8 +21,8 @@ use Qiick\McpOAuth\McpOAuthServer;
  * package owns the rules around it:
  *
  * - switching on is refused, with a reason to show, while OAuth could not
- *   serve: Passport keys missing, APP_URL not absolute, or a foreign
- *   `passport.*` route (what mcp-oauth:check fails on);
+ *   serve: Passport keys missing or not one usable pair, APP_URL not a
+ *   valid issuer, or a foreign `passport.*` route;
  * - switching off is always allowed and leaves grants, clients and blocked
  *   hosts in place;
  * - either way {@see McpOAuthEnabled} or {@see McpOAuthDisabled} is
@@ -59,6 +59,10 @@ final class SwitchMcpOAuthAction
     {
         if (! $this->mcpOAuthServer->hasPassportKeys()) {
             throw new McpOAuthCannotBeEnabledException('OAuth cannot be switched on while the Passport keys are missing: run passport:keys.');
+        }
+
+        if (! $this->mcpOAuthServer->hasUsablePassportKeyPair()) {
+            throw new McpOAuthCannotBeEnabledException('OAuth cannot be switched on: the Passport keys are not a usable matching pair.');
         }
 
         if (! $this->mcpOAuthServer->hasAbsoluteIssuer()) {

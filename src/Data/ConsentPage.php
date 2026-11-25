@@ -12,7 +12,7 @@ namespace Qiick\McpOAuth\Data;
 final readonly class ConsentPage
 {
     /**
-     * @param  array{id: string, name: string, redirectHost: string, nameIsSelfAsserted: true, isRedirectLoopbackOnly: bool}  $client
+     * @param  array{id: string, name: string, redirectHost: string, nameIsSelfAsserted: true, isRedirectLoopback: bool}  $client
      */
     public function __construct(
         public array $client,
