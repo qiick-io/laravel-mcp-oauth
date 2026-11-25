@@ -12,6 +12,7 @@ use Qiick\McpOAuth\Actions\BlockClientAction;
 use Qiick\McpOAuth\Actions\BlockRedirectHostAction;
 use Qiick\McpOAuth\Actions\BulkBlockClientsAction;
 use Qiick\McpOAuth\Actions\UnblockRedirectHostAction;
+use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
 use Qiick\McpOAuth\Events\McpClientBlocked;
 use Qiick\McpOAuth\Events\McpRedirectHostBlocked;
@@ -34,22 +35,31 @@ const UNKNOWN_CLIENT_ID = '0195f0a0-0000-7000-8000-00000000dead';
  */
 
 /**
- * A client with a live grant, access token, refresh token and an unused
- * auth code, through the real consent and token endpoints.
+ * A client with a live grant and, bound to it, an access token, its refresh
+ * token and an auth code never exchanged: the rows consent and the token
+ * endpoint write.
  *
  * @return array{client: Client, user: TestUser}
  */
-function clientWithCredentials(AuthorizeFlowTestCase $testCase, string $redirectUri = AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI): array
+function clientWithCredentials(AuthorizeFlowTestCase $testCase): array
 {
-    $client = $testCase->createClient([$redirectUri]);
-    ['code' => $code, 'user' => $user] = $testCase->obtainAuthorizationCode($client);
-    $testCase->withHeaders(['Accept' => 'application/json'])
-        ->post('/oauth/token', $testCase->codeExchange($client, $code))
-        ->assertOk();
-    // A second, unexchanged code.
-    $testCase->obtainAuthorizationCode($client, $user);
+    $client = $testCase->createClient();
+    $user = (new ReflectionMethod($testCase, 'createUser'))->invoke($testCase);
+    $grant = new GrantRecord((string) Str::uuid7(), (string) $client->getKey(), (string) $user->getKey(), false, ['mcp:read'], new DateTimeImmutable, null);
+    $testCase->grantStore()->seed($grant);
+    $accessTokenId = Str::random(80);
+    $owner = ['user_id' => $user->getKey(), 'client_id' => $client->getKey(), 'scopes' => '["mcp:use"]', 'revoked' => false, 'expires_at' => now()->addHour()];
+
+    DB::table('oauth_access_tokens')->insert([...$owner, 'id' => $accessTokenId, 'api_key_id' => $grant->id, 'audience' => AuthorizeFlowTestCase::RESOURCE, 'created_at' => now(), 'updated_at' => now()]);
+    DB::table('oauth_refresh_tokens')->insert(['id' => Str::random(80), 'access_token_id' => $accessTokenId, 'revoked' => false, 'expires_at' => now()->addDays(30)]);
+    DB::table('oauth_auth_codes')->insert([...$owner, 'id' => Str::random(80)]);
 
     return ['client' => $client, 'user' => $user];
+}
+
+function isClientRevoked(Client $client): bool
+{
+    return (bool) Passport::client()->newQuery()->whereKey($client->getKey())->value('revoked');
 }
 
 function isClientFullyRevoked(Client $client): bool
@@ -111,9 +121,9 @@ it('bulk blocks each listed client and ignores unknown or already revoked ones (
 
 it('blocks a host and its subdomains, normalised to ASCII, and blocks the clients that redirect there', function (): void {
     Event::fake([McpRedirectHostBlocked::class, McpClientBlocked::class]);
-    ['client' => $hostClient] = clientWithCredentials($this, 'https://xn--bcher-kva.example/callback');
-    ['client' => $subdomainClient] = clientWithCredentials($this, 'https://app.xn--bcher-kva.example/callback');
-    ['client' => $otherClient] = clientWithCredentials($this, 'https://other.example/callback');
+    $hostClient = $this->createClient(['https://xn--bcher-kva.example/callback']);
+    $subdomainClient = $this->createClient(['https://app.xn--bcher-kva.example/callback']);
+    $otherClient = $this->createClient(['https://other.example/callback']);
     $admin = $this->createUser();
 
     $blockedHost = app(BlockRedirectHostAction::class)->execute('Bücher.example', $admin, isSubdomainMatched: true, reason: 'Phishing');
@@ -123,24 +133,24 @@ it('blocks a host and its subdomains, normalised to ASCII, and blocks the client
         ->and($blockedHost->match_mode)->toBe('host_and_subdomains')
         ->and($blockedHost->getAttribute('reason'))->toBe('Phishing')
         ->and($blockedHost->getAttribute('created_by'))->toBe($admin->getKey())
-        ->and(isClientFullyRevoked($hostClient))->toBeTrue()
-        ->and(isClientFullyRevoked($subdomainClient))->toBeTrue()
-        ->and(Passport::client()->newQuery()->whereKey($otherClient->getKey())->value('revoked'))->toBeFalsy();
+        ->and(isClientRevoked($hostClient))->toBeTrue()
+        ->and(isClientRevoked($subdomainClient))->toBeTrue()
+        ->and(isClientRevoked($otherClient))->toBeFalse();
 
     Event::assertDispatched(McpRedirectHostBlocked::class, static fn (McpRedirectHostBlocked $event): bool => $event->host === 'xn--bcher-kva.example'
         && $event->actorIdentifier === (string) $admin->getKey());
 });
 
 it('blocks only the host itself in exact mode, and once however often it is blocked', function (): void {
-    ['client' => $hostClient] = clientWithCredentials($this, 'https://app.example/callback');
-    ['client' => $subdomainClient] = clientWithCredentials($this, 'https://login.app.example/callback');
+    $hostClient = $this->createClient(['https://app.example/callback']);
+    $subdomainClient = $this->createClient(['https://login.app.example/callback']);
 
     app(BlockRedirectHostAction::class)->execute('app.example', null, isSubdomainMatched: false);
     app(BlockRedirectHostAction::class)->execute('app.example.', null, isSubdomainMatched: false);
 
     expect(OAuthBlockedRedirectHost::query()->where('host', 'app.example')->sole()->match_mode)->toBe('exact')
-        ->and(isClientFullyRevoked($hostClient))->toBeTrue()
-        ->and(Passport::client()->newQuery()->whereKey($subdomainClient->getKey())->value('revoked'))->toBeFalsy();
+        ->and(isClientRevoked($hostClient))->toBeTrue()
+        ->and(isClientRevoked($subdomainClient))->toBeFalse();
 });
 
 it('blocks every matching client across more than one chunk (S39)', function (): void {
@@ -151,10 +161,10 @@ it('blocks every matching client across more than one chunk (S39)', function ():
     app(BlockRedirectHostAction::class)->execute('app.example', null, isSubdomainMatched: true);
 
     foreach ($matchingClients as $matchingClient) {
-        expect(Passport::client()->newQuery()->whereKey($matchingClient->getKey())->value('revoked'))->toBeTruthy();
+        expect(isClientRevoked($matchingClient))->toBeTrue();
     }
 
-    expect(Passport::client()->newQuery()->whereKey($otherClient->getKey())->value('revoked'))->toBeFalsy();
+    expect(isClientRevoked($otherClient))->toBeFalse();
 });
 
 it('refuses a host that does not normalise', function (string $host): void {
@@ -169,7 +179,8 @@ it('refuses a host that does not normalise', function (string $host): void {
 
 it('unblocks a host: the row goes, revoked clients stay revoked', function (): void {
     Event::fake([McpRedirectHostUnblocked::class]);
-    ['client' => $hostClient] = clientWithCredentials($this, 'https://app.example/callback');
+    // The registered redirect URI is on app.example.
+    ['client' => $hostClient] = clientWithCredentials($this);
     $blockedHost = app(BlockRedirectHostAction::class)->execute('app.example', null, isSubdomainMatched: true);
     $admin = $this->createUser();
 
@@ -209,7 +220,7 @@ function adminUser(AuthorizeFlowTestCase $testCase): TestUser
 
 it('lists package clients and blocked hosts for an admin only', function (): void {
     registerAdminRoutes();
-    ['client' => $client] = clientWithCredentials($this, 'https://app.example/callback');
+    ['client' => $client] = clientWithCredentials($this);
     $this->createClient(['https://other.example/callback']);
     app(BlockRedirectHostAction::class)->execute('blocked.example', null, isSubdomainMatched: false, reason: 'Spam');
 
@@ -274,3 +285,23 @@ it('answers 404 for an unknown client and refuses invalid admin input with 422',
     'a host that does not normalise' => [['POST', '/mcp-oauth-clients/blocked-hosts', ['host' => 'bad_host.example']]],
     'an unknown match mode' => [['POST', '/mcp-oauth-clients/blocked-hosts', ['host' => 'app.example', 'match_mode' => 'suffix']]],
 ]);
+
+it('never blocks a Passport client the package did not register', function (): void {
+    registerAdminRoutes();
+    $admin = adminUser($this);
+    $productClient = (new Client)->forceFill([
+        'id' => (string) Str::uuid7(),
+        'name' => 'Product app',
+        'secret' => null,
+        'redirect_uris' => ['https://app.example/callback'],
+        'grant_types' => ['authorization_code'],
+        'revoked' => false,
+    ]);
+    $productClient->save();
+
+    $this->actingAs($admin)->postJson("/mcp-oauth-clients/{$productClient->getKey()}/block")->assertNotFound();
+    $this->actingAs($admin)->postJson('/mcp-oauth-clients/bulk-block', ['client_ids' => [(string) $productClient->getKey()]])->assertNoContent();
+
+    expect(isClientRevoked($productClient))->toBeFalse()
+        ->and($this->actingAs($admin)->getJson('/mcp-oauth-clients')->json('clients.data'))->toBe([]);
+});
