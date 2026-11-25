@@ -181,6 +181,8 @@ it('keeps only the MCP grants on the server, and personal access on its own, wha
     }
 
     expect(array_keys($enabledGrantTypes))->toEqualCanonicalizing(['authorization_code', 'refresh_token'])
+        // The auth-code TTL goes on the auth-code grant only, never as a stray property on another.
+        ->and((new ReflectionObject($enabledGrantTypes['refresh_token']))->hasProperty('authCodeTTL'))->toBeFalse()
         ->and(array_keys($personalAccessGrantTypes))->toContain('personal_access')
         ->and(array_keys($personalAccessGrantTypes))->not->toContain('password');
 });
