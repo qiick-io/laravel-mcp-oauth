@@ -69,8 +69,9 @@ return [
 
     /*
      * RFC 7009 revocation at POST oauth/revoke, advertised as
-     * `revocation_endpoint`. Anything but true (env `false`, `0`, a typo)
-     * turns both off.
+     * `revocation_endpoint`. A boolean, unlike the integer keys below:
+     * `true`, `1`, `on` or `yes` keeps both on; anything else (`false`, `0`,
+     * a typo) turns both off.
      */
     'revocation_enabled' => env('MCP_OAUTH_REVOCATION_ENABLED', true),
 
