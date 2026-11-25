@@ -90,6 +90,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `schema_version` (default 1) like every package table (M7); it keeps the
   code id as its key, the one documented exception to UUID ids. Pre-1.0 the
   `create_` migration changed: run `migrate:fresh` on a local database.
+- Admin backend for MCP clients and redirect hosts (design §5.2, §8.2):
+  `BlockClientAction`, `BulkBlockClientsAction` (1–100 distinct ids),
+  `BlockRedirectHostAction` (UTS #46 to ASCII, exact or with subdomains,
+  chunked by `host_block_chunk_size`) and `UnblockRedirectHostAction`, with
+  their events, behind `McpOAuthAdminRoutes::register($permissionMiddleware)`.
+  Only clients the package registered are listed or blocked.
 - Authorization endpoint and consent (design §8.3): `GET|POST|DELETE
   oauth/authorize` (`passport.authorizations.*`) inside the off-gate (404
   identical to a missing route, HTML 503 for a browser when keys are missing),

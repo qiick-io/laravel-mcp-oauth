@@ -221,7 +221,8 @@ function adminUser(AuthorizeFlowTestCase $testCase): TestUser
 it('lists package clients and blocked hosts for an admin only', function (): void {
     registerAdminRoutes();
     ['client' => $client] = clientWithCredentials($this);
-    $this->createClient(['https://other.example/callback']);
+    // Two redirect URIs on one host and one on another: each host listed once.
+    $this->createClient(['https://other.example/callback', 'https://other.example/second', 'https://third.example/callback']);
     app(BlockRedirectHostAction::class)->execute('blocked.example', null, isSubdomainMatched: false, reason: 'Spam');
 
     $this->actingAs($this->createUser())->getJson('/mcp-oauth-clients')->assertForbidden();
@@ -235,12 +236,28 @@ it('lists package clients and blocked hosts for an admin only', function (): voi
             'isRevoked' => false,
             'hasEverAuthorized' => true,
         ])
+        ->and(collect($response->json('clients.data'))->firstWhere('name', 'Cursor')['createdAt'])->toMatch('/^\d{4}-\d{2}-\d{2}T/')
+        ->and(collect($response->json('clients.data'))->pluck('redirectHosts')->all())->toContain(['other.example', 'third.example'])
+        ->and($response->json('blockedHosts'))->toBeList()
         ->and($response->json('blockedHosts.0'))->toMatchArray([
             'host' => 'blocked.example',
             'matchMode' => 'exact',
             'reason' => 'Spam',
+            'expiresAt' => null,
         ])
+        ->and($response->json('blockedHosts.0.createdAt'))->toMatch('/^\d{4}-\d{2}-\d{2}T/')
         ->and($response->json('blockedHosts.0.id'))->toBeString();
+});
+
+it('lists clients 50 to a page', function (): void {
+    registerAdminRoutes();
+    array_map(fn (): Client => $this->createClient(), range(1, 51));
+
+    $response = $this->actingAs(adminUser($this))->getJson('/mcp-oauth-clients?page=2')->assertOk();
+
+    expect($response->json('clients.total'))->toBe(51)
+        ->and($response->json('clients.per_page'))->toBe(50)
+        ->and($response->json('clients.data'))->toHaveCount(1);
 });
 
 it('blocks, bulk blocks, blocks a host and unblocks it through the admin routes', function (): void {
@@ -251,18 +268,24 @@ it('blocks, bulk blocks, blocks a host and unblocks it through the admin routes'
 
     $this->actingAs($admin)->postJson("/mcp-oauth-clients/{$client->getKey()}/block")->assertNoContent();
     $this->actingAs($admin)->postJson('/mcp-oauth-clients/bulk-block', ['client_ids' => [(string) $bulkClient->getKey()]])->assertNoContent();
-    $this->actingAs($admin)->postJson('/mcp-oauth-clients/blocked-hosts', ['host' => 'Evil.example', 'match_mode' => 'exact'])->assertNoContent();
+    $this->actingAs($admin)->postJson('/mcp-oauth-clients/blocked-hosts', ['host' => 'Evil.example', 'match_mode' => 'exact', 'reason' => 'Phishing'])->assertNoContent();
 
     $blockedHost = OAuthBlockedRedirectHost::query()->sole();
 
     expect(isClientFullyRevoked($client))->toBeTrue()
         ->and(isClientFullyRevoked($bulkClient))->toBeTrue()
         ->and($blockedHost->host)->toBe('evil.example')
-        ->and($blockedHost->match_mode)->toBe('exact');
+        ->and($blockedHost->match_mode)->toBe('exact')
+        ->and($blockedHost->getAttribute('reason'))->toBe('Phishing');
+
+    // A null match mode and reason are allowed: subdomains blocked, no reason.
+    $this->actingAs($admin)->postJson('/mcp-oauth-clients/blocked-hosts', ['host' => 'spam.example', 'match_mode' => null, 'reason' => null])->assertNoContent();
+
+    expect(OAuthBlockedRedirectHost::query()->where('host', 'spam.example')->sole()->match_mode)->toBe('host_and_subdomains');
 
     $this->actingAs($admin)->deleteJson("/mcp-oauth-clients/blocked-hosts/{$blockedHost->public_id}")->assertNoContent();
 
-    expect(OAuthBlockedRedirectHost::query()->count())->toBe(0);
+    expect(OAuthBlockedRedirectHost::query()->where('host', 'evil.example')->exists())->toBeFalse();
 
     // A browser (or Inertia) form post goes back to the page.
     $this->actingAs($admin)->from('/admin/clients')->post("/mcp-oauth-clients/{$client->getKey()}/block")->assertRedirect('/admin/clients');
@@ -278,10 +301,17 @@ it('answers 404 for an unknown client and refuses invalid admin input with 422',
 })->with([
     'unknown client' => [['POST', '/mcp-oauth-clients/'.UNKNOWN_CLIENT_ID.'/block', []]],
     'no client ids' => [['POST', '/mcp-oauth-clients/bulk-block', ['client_ids' => []]]],
+    'client ids missing' => [['POST', '/mcp-oauth-clients/bulk-block', []]],
+    'client ids an object' => [['POST', '/mcp-oauth-clients/bulk-block', ['client_ids' => ['first' => UNKNOWN_CLIENT_ID]]]],
+    'a null client id' => [['POST', '/mcp-oauth-clients/bulk-block', ['client_ids' => [null]]]],
     'more than 100 ids (S40)' => [['POST', '/mcp-oauth-clients/bulk-block', ['client_ids' => array_map(static fn (): string => (string) Str::uuid7(), range(1, 101))]]],
     'duplicate ids (S40)' => [['POST', '/mcp-oauth-clients/bulk-block', ['client_ids' => [UNKNOWN_CLIENT_ID, UNKNOWN_CLIENT_ID]]]],
     'an id that is not a UUID' => [['POST', '/mcp-oauth-clients/bulk-block', ['client_ids' => ['42']]]],
     'no host' => [['POST', '/mcp-oauth-clients/blocked-hosts', []]],
+    'a host that is not a string' => [['POST', '/mcp-oauth-clients/blocked-hosts', ['host' => ['app.example']]]],
+    'a host over 253 characters' => [['POST', '/mcp-oauth-clients/blocked-hosts', ['host' => str_repeat('a', 63).'.'.str_repeat('b', 63).'.'.str_repeat('c', 63).'.'.str_repeat('d', 62)]]],
+    'a reason that is not a string' => [['POST', '/mcp-oauth-clients/blocked-hosts', ['host' => 'app.example', 'reason' => ['spam']]]],
+    'a reason over 512 characters' => [['POST', '/mcp-oauth-clients/blocked-hosts', ['host' => 'app.example', 'reason' => str_repeat('r', 513)]]],
     'a host that does not normalise' => [['POST', '/mcp-oauth-clients/blocked-hosts', ['host' => 'bad_host.example']]],
     'an unknown match mode' => [['POST', '/mcp-oauth-clients/blocked-hosts', ['host' => 'app.example', 'match_mode' => 'suffix']]],
 ]);

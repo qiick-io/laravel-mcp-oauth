@@ -71,7 +71,8 @@ final class ClientAdminService
      */
     public function blockedHosts(): array
     {
-        return array_values(OAuthBlockedRedirectHost::query()->orderBy('host')->get()->map(
+        /** @var list<array{id: string|null, host: string, matchMode: string, reason: mixed, expiresAt: string|null, createdAt: string|null}> $blockedHosts */
+        $blockedHosts = OAuthBlockedRedirectHost::query()->orderBy('host')->get()->map(
             static fn (OAuthBlockedRedirectHost $blockedHost): array => [
                 'id' => $blockedHost->public_id,
                 'host' => $blockedHost->host,
@@ -80,7 +81,9 @@ final class ClientAdminService
                 'expiresAt' => self::iso8601($blockedHost->getAttribute('expires_at')),
                 'createdAt' => self::iso8601($blockedHost->getAttribute('created_at')),
             ],
-        )->all());
+        )->all();
+
+        return $blockedHosts;
     }
 
     private static function iso8601(mixed $dateTime): ?string

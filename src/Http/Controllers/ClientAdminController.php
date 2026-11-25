@@ -54,8 +54,9 @@ final class ClientAdminController
     {
         /** @var array{client_ids: list<string>} $validated */
         $validated = Validator::make($request->all(), [
-            'client_ids' => ['required', 'list', 'min:1', 'max:100'],
-            'client_ids.*' => ['required', 'string', 'uuid', 'distinct'],
+            // `required` refuses an empty list; `uuid` refuses null and non-strings.
+            'client_ids' => ['required', 'list', 'max:100'],
+            'client_ids.*' => ['uuid', 'distinct'],
         ])->validate();
 
         $bulkBlockClientsAction->execute($validated['client_ids'], $request->user());
@@ -71,7 +72,9 @@ final class ClientAdminController
     public function blockHost(Request $request, BlockRedirectHostAction $blockRedirectHostAction, RedirectUriGuard $redirectUriGuard): Response
     {
         $validator = Validator::make($request->all(), [
-            'host' => ['required', 'string', 'max:253'],
+            // Only `string`: the UTS #46 normalisation below refuses a missing,
+            // empty or over-long (DNS limit) host.
+            'host' => ['string'],
             'match_mode' => ['nullable', 'in:exact,host_and_subdomains'],
             'reason' => ['nullable', 'string', 'max:512'],
         ]);
