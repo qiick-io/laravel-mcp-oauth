@@ -40,9 +40,22 @@ use Qiick\McpOAuth\Tests\Support\TestUser;
  *   the address the client calls;
  * - `MCP_HTTP_STORAGE`: a directory for the Passport keys, the cache files
  *   and, on SQLite, the database file.
+ *
+ * Each request also reads three flag files in that directory, so a test can
+ * switch the running servers into the states of design §11.1 steps 6 and 7
+ * (and must remove the file afterwards).
  */
 final class HttpFlowServiceProvider extends ServiceProvider
 {
+    /** The product's admin switch is off. */
+    public const string ADMIN_SWITCH_OFF_FLAG = 'admin-switch-off';
+
+    /** `mcp-oauth.enabled` is false. */
+    public const string CONFIG_OFF_FLAG = 'config-off';
+
+    /** Passport finds no key files. */
+    public const string KEYS_MISSING_FLAG = 'keys-missing';
+
     public function register(): void
     {
         $storagePath = (string) getenv('MCP_HTTP_STORAGE');
@@ -61,10 +74,10 @@ final class HttpFlowServiceProvider extends ServiceProvider
         $config->set('auth.providers.users.model', TestUser::class);
         $config->set('passport.guard', 'web');
         $config->set('mcp.redirect_domains', ['*']);
-        $config->set('mcp-oauth.enabled', true);
+        $config->set('mcp-oauth.enabled', ! is_file($storagePath.'/'.self::CONFIG_OFF_FLAG));
         $config->set('mcp-oauth.mcp_enabled', true);
 
-        $this->app->instance(AdminSwitch::class, new FakeAdminSwitch(isEnabled: true));
+        $this->app->instance(AdminSwitch::class, new FakeAdminSwitch(isEnabled: ! is_file($storagePath.'/'.self::ADMIN_SWITCH_OFF_FLAG)));
         $this->app->instance(ConsentProvider::class, new FakeConsentProvider(AuthorizeFlowTestCase::defaultConsentOptions()));
         $this->app->bind(ConsentView::class, HtmlConsentView::class);
         $this->app->bind(GrantStore::class, DatabaseGrantStore::class);
@@ -72,7 +85,8 @@ final class HttpFlowServiceProvider extends ServiceProvider
         $this->app->instance(ApiKeyDoor::class, new FakeApiKeyDoor(['ak_valid']));
         $this->app->instance(McpCredentialBinder::class, new FakeMcpCredentialBinder);
 
-        Passport::loadKeysFrom($storagePath);
+        // A directory without keys stands for keys deleted or never generated.
+        Passport::loadKeysFrom(is_file($storagePath.'/'.self::KEYS_MISSING_FLAG) ? $storagePath.'/cache' : $storagePath);
     }
 
     public function boot(): void
