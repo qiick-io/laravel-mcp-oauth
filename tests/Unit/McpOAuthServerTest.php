@@ -376,7 +376,8 @@ it('accepts a matching RSA pair of at least 2048 bits, from env PEM with \n esca
         config()->set('passport.private_key', str_replace("\n", '\n', $keyPair['private']));
         config()->set('passport.public_key', str_replace("\n", '\n', $keyPair['public']));
     } else {
-        config()->set(['passport.private_key' => null, 'passport.public_key' => null]);
+        // Empty env keys count as unset: Passport falls back to the files.
+        config()->set(['passport.private_key' => '', 'passport.public_key' => '']);
         $privatePath = Passport::keyPath('oauth-private.key');
         $publicPath = Passport::keyPath('oauth-public.key');
         @mkdir(dirname($privatePath), 0777, true);

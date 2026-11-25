@@ -115,10 +115,7 @@ final class McpOAuthServer
      */
     public function hasUsablePassportKeyPair(): bool
     {
-        if (! $this->hasPassportKeys()) {
-            return false;
-        }
-
+        // Missing keys read as empty material or an absent file: both fail to parse.
         $privateKey = openssl_pkey_get_private($this->passportKeyMaterial('private'));
         $publicKey = openssl_pkey_get_public($this->passportKeyMaterial('public'));
 
