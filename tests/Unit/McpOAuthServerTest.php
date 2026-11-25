@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\McpOAuthReadiness;
@@ -306,7 +307,7 @@ it('builds the RFC 8414 and RFC 9728 documents from APP_URL', function (): void 
     ]);
 });
 
-it('serves no revocation endpoint unless revocation_enabled is exactly true', function (mixed $isRevocationEnabled): void {
+it('serves no revocation endpoint when revocation_enabled reads as false', function (mixed $isRevocationEnabled): void {
     $server = makeServer(true, true);
     config()->set('mcp-oauth.revocation_enabled', $isRevocationEnabled);
 
@@ -317,6 +318,28 @@ it('serves no revocation endpoint unless revocation_enabled is exactly true', fu
         ->toHaveKey('token_endpoint_auth_methods_supported');
 })->with([
     'off' => [false],
-    'a string' => ['yes'],
+    'the string false' => ['false'],
+    'zero' => ['0'],
+    'the string off' => ['off'],
     'null' => [null],
+    'anything else' => ['maybe'],
+]);
+
+it('serves the revocation endpoint when revocation_enabled reads as true, or is unset (#33 review N1)', function (mixed $isRevocationEnabled): void {
+    $server = makeServer(true, true);
+    config()->set('mcp-oauth.revocation_enabled', $isRevocationEnabled);
+
+    // A config file published before the key existed.
+    if ($isRevocationEnabled === 'unset') {
+        config()->set('mcp-oauth', Arr::except(config('mcp-oauth'), 'revocation_enabled'));
+    }
+
+    expect($server->revocationEndpointUrl())->toBe('https://mcp-oauth.test/oauth/revoke');
+})->with([
+    'true' => [true],
+    'the string true' => ['true'],
+    'one' => ['1'],
+    'the string on' => ['on'],
+    'yes' => ['yes'],
+    'unset' => ['unset'],
 ]);

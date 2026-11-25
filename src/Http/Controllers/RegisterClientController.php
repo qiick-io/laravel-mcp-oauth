@@ -113,9 +113,9 @@ final class RegisterClientController extends OAuthRegisterController
         $validatedFields = $additionalFieldsValidator->validated();
         $this->additionalClientFields = [];
 
-        // A field sent as null is a field not sent: neither stored nor echoed.
+        // A field sent as null or empty is a field not sent: neither stored nor echoed.
         foreach (['application_type', 'tos_uri', 'policy_uri', 'contacts', 'software_id', 'software_version'] as $fieldName) {
-            if (isset($validatedFields[$fieldName])) {
+            if (($validatedFields[$fieldName] ?? '') !== '') {
                 $this->additionalClientFields[$fieldName] = $validatedFields[$fieldName];
             }
         }
@@ -187,7 +187,7 @@ final class RegisterClientController extends OAuthRegisterController
         $registeredFields = [
             ...array_filter(
                 ['logo_uri' => $validated['logo_uri'] ?? null, 'client_uri' => $validated['client_uri'] ?? null],
-                static fn (mixed $uri): bool => $uri !== null,
+                static fn (mixed $uri): bool => $uri !== null && $uri !== '',
             ),
             ...$this->additionalClientFields,
         ];

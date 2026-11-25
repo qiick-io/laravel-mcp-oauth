@@ -82,8 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   well-known routes now serve unchanged), `revocationEndpointUrl()` and
   `supportsClientIdMetadataDocuments()` (false until the CIMD fetcher lands,
   whatever `cimd.enabled` says).
-- `revocation_enabled` config (`MCP_OAUTH_REVOCATION_ENABLED`, default true):
-  anything but true leaves `POST oauth/revoke` unregistered and drops
+- `revocation_enabled` config (`MCP_OAUTH_REVOCATION_ENABLED`, default true),
+  a boolean read like `FILTER_VALIDATE_BOOLEAN` (`true`, `1`, `on`, `yes`):
+  any other value leaves `POST oauth/revoke` unregistered and drops
   `revocation_endpoint` from the metadata.
 - `oauth_auth_code_exchanges` carries `metadata` (json, null) and
   `schema_version` (default 1) like every package table (M7); it keeps the

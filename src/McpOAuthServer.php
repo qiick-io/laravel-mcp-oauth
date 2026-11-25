@@ -138,13 +138,15 @@ final class McpOAuthServer
     }
 
     /**
-     * RFC 7009 endpoint, or null when `revocation_enabled` is not exactly
-     * true: then McpOAuthRoutes registers no `oauth/revoke` and the metadata
-     * does not advertise it (M2).
+     * RFC 7009 endpoint, or null when `revocation_enabled` reads as false:
+     * then McpOAuthRoutes registers no `oauth/revoke` and the metadata does
+     * not advertise it (M2). A boolean, read like PHP's FILTER_VALIDATE_BOOLEAN:
+     * `true`, `1`, `on` and `yes` are on; anything else, null included, is
+     * off. A config file without the key keeps revocation on.
      */
     public function revocationEndpointUrl(): ?string
     {
-        if ($this->config->get('mcp-oauth.revocation_enabled', true) !== true) {
+        if (! filter_var($this->config->get('mcp-oauth.revocation_enabled', true), FILTER_VALIDATE_BOOLEAN)) {
             return null;
         }
 
