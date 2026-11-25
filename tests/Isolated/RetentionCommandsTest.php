@@ -232,6 +232,54 @@ it('prunes DCR clients never authorised after 24 hours, and nothing else', funct
         && $event->cutoffIso8601 === now()->subHours(24)->toIso8601String());
 });
 
+it('keeps a client the boundary has not passed: 23 and 24 hours kept, 25 pruned', function (int $hours, bool $isPruned): void {
+    $this->enableOAuth();
+    $client = clientRegisteredHoursAgo($this, $hours);
+
+    $this->artisan('mcp-oauth:prune-unused-clients')->assertSuccessful();
+
+    expect(Client::query()->whereKey($client->getKey())->exists())->toBe(! $isPruned);
+})->with([
+    '23 hours' => [23, false],
+    '24 hours' => [24, false],
+    '25 hours' => [25, true],
+]);
+
+it('never prunes a client a user once authorised, after its revoked grant is purged (#31 review B1)', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['user' => $user] = $this->obtainAuthorizationCode($client);
+    $grant = $this->grantStore()->activeFor((string) $client->getKey(), (string) $user->getKey());
+    $this->grantStore()->revoke($grant->id, (string) $user->getKey(), RevocationReason::User);
+
+    $this->travel(91)->days();
+    $this->artisan('mcp-oauth:purge-revoked')->assertSuccessful();
+
+    expect($this->grantStore()->find($grant->id))->toBeNull();
+
+    $this->artisan('mcp-oauth:prune-unused-clients')->assertSuccessful();
+
+    expect(Client::query()->whereKey($client->getKey())->exists())->toBeTrue();
+});
+
+it('marks a client authorised at its first approval and keeps that date on re-consent', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $firstAuthorizedAt = fn (): mixed => OAuthClientMetadata::query()->where('client_id', $client->getKey())->value('first_authorized_at');
+
+    expect($firstAuthorizedAt())->toBeNull();
+
+    ['user' => $user] = $this->obtainAuthorizationCode($client);
+    $firstApproval = $firstAuthorizedAt();
+    $this->travel(1)->days();
+    $this->obtainAuthorizationCode($client, $user);
+
+    expect($firstApproval)->not->toBeNull()
+        ->and($firstAuthorizedAt())->toBe($firstApproval);
+});
+
 it('only counts unused clients with --dry-run', function (): void {
     Event::fake([McpUnusedClientsPruned::class]);
     $this->enableOAuth();
