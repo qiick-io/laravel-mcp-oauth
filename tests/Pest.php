@@ -9,4 +9,6 @@ use Qiick\McpOAuth\Tests\Support\PackageTestCase;
  * TestCase + migrated schema). phpunit.xml excludes that directory so the
  * synced suite stays for drift-check without running here.
  */
-pest()->extend(PackageTestCase::class)->in('Feature', 'Unit', 'Http');
+// Not tests/Http: those drive real `php -S` servers, and PackageTestCase
+// would drop and recreate the tables they share on a server engine.
+pest()->extend(PackageTestCase::class)->in('Feature', 'Unit');
