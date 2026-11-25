@@ -174,6 +174,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
 
         $this->configurePassportTokenLifetimes();
         $this->configurePassportScopes();
+        $this->pinAuthorizationServer();
         Passport::useAuthorizationServerResponseType(new McpBearerTokenResponse);
         Passport::authorizationView(function (array $parameters): Response {
             // The shape AuthorizationController passes to withParameters().
@@ -338,6 +339,22 @@ final class McpOAuthServiceProvider extends ServiceProvider
 
         if ($this->app->resolved(AuthorizationServer::class)) {
             $harden($this->app->make(AuthorizationServer::class));
+        }
+    }
+
+    /**
+     * laravel/mcp builds its own discovery documents (`Mcp::oauthRoutes()`)
+     * from `mcp.authorization_server`, else from url('/'), the request Host.
+     * The package never mounts them, but a product that also calls it gets
+     * the issuer (APP_URL), never a Host-derived one (design §5.2, S13). A
+     * value the product set is kept.
+     */
+    private function pinAuthorizationServer(): void
+    {
+        $config = $this->app->make(ConfigRepository::class);
+
+        if ($config->get('mcp.authorization_server') === null) {
+            $config->set('mcp.authorization_server', $this->app->make(McpOAuthServer::class)->issuer());
         }
     }
 
