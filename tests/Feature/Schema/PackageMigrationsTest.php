@@ -39,7 +39,7 @@ it('M3: oauth_client_metadata has every RFC 7591, CIMD, PAR/DPoP and retention c
         'client_uri', 'logo_uri', 'tos_uri', 'policy_uri', 'contacts',
         'software_id', 'software_version', 'software_statement',
         'token_endpoint_auth_method', 'jwks_uri', 'jwks',
-        'client_id_issued_at', 'client_secret_expires_at',
+        'client_id_issued_at', 'first_authorized_at', 'client_secret_expires_at',
         'registration_access_token_hash', 'registration_access_token_expires_at',
         'metadata_document_url', 'metadata_document_url_sha256', 'metadata_document',
         'metadata_document_sha256', 'metadata_document_etag',

@@ -277,7 +277,7 @@ it('marks a client authorised at its first approval and keeps that date on re-co
     $this->obtainAuthorizationCode($client, $user);
 
     expect($firstApproval)->not->toBeNull()
-        ->and($firstAuthorizedAt())->toBe($firstApproval);
+        ->and($firstAuthorizedAt())->toEqual($firstApproval);
 });
 
 it('only counts unused clients with --dry-run', function (): void {

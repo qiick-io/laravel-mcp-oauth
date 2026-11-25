@@ -15,6 +15,10 @@ use Qiick\McpOAuth\McpOAuthServer;
  * they are usable, and any foreign `passport.*` route (design §3.3). It
  * exits 1 when OAuth is on but not ready, or beside a foreign Passport route.
  *
+ * It reads McpOAuthServer directly rather than McpOAuthReadiness: that probe
+ * reports only `passport_keys` for a product's /up endpoint, while an
+ * operator here needs the reason (which source, which route).
+ *
  * @api
  */
 final class McpOAuthCheckCommand extends Command

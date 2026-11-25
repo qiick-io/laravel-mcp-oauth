@@ -12,6 +12,11 @@ use Qiick\McpOAuth\Models\OAuthClientMetadata;
  * for it: its codes, access tokens and their refresh tokens, and its
  * `oauth_client_metadata` row. Passport's tables have no foreign keys, so
  * nothing would cascade on its own.
+ *
+ * Not a full cascade: the client's consent records and auth-code exchanges
+ * stay. They hold no credential, and their own retention removes them
+ * (`retention_until` in mcp-oauth:purge-revoked, and
+ * mcp-oauth:prune-auth-code-exchanges).
  */
 final class DeleteClientAction
 {

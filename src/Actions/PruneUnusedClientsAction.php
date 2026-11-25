@@ -17,8 +17,11 @@ use Qiick\McpOAuth\Models\OAuthClientMetadata;
 
 /**
  * Deletes DCR clients registered more than `unused_client_retention_hours`
- * (24) ago that no user ever authorised (GrantStore::everAuthorized(), a
- * revoked grant included), in chunks (design §5.4, S31). A client in
+ * (24) ago that no user ever authorised, in chunks (design §5.4, S31). A
+ * client counts as authorised when its metadata row has
+ * `first_authorized_at`, which the retention purge never clears, or when the
+ * product still lists a grant for it (GrantStore::everAuthorized(), a revoked
+ * one included): a grant alone would be forgotten once purged. A client in
  * retention (`revoked_at` set) is left to `mcp-oauth:purge-revoked`, and a
  * product's own Passport client (no metadata row) is never touched.
  */
@@ -44,6 +47,7 @@ final class PruneUnusedClientsAction
         OAuthClientMetadata::query()
             ->where('registration_source', 'dcr')
             ->whereNull('revoked_at')
+            ->whereNull('first_authorized_at')
             ->chunkById(100, function ($metadataRows) use ($cutoff, &$unusedClientIds): void {
                 /** @var list<string> $clientIds client ids are UUID strings */
                 $clientIds = $metadataRows->pluck('client_id')->all();

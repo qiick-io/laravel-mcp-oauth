@@ -43,6 +43,8 @@ return new class extends Migration
             $table->string('jwks_uri', 2048)->nullable();
             $table->json('jwks')->nullable();
             $table->timestamp('client_id_issued_at')->nullable();
+            // Set at the first approval and never cleared: unlike a grant, it outlives the retention purge.
+            $table->timestamp('first_authorized_at')->nullable();
             $table->dateTime('client_secret_expires_at')->nullable();
             $table->char('registration_access_token_hash', 64)->nullable()->unique();
             $table->dateTime('registration_access_token_expires_at')->nullable();
