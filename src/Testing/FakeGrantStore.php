@@ -6,6 +6,7 @@ namespace Qiick\McpOAuth\Testing;
 
 use DateTimeImmutable;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Str;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\ConsentDecision;
@@ -24,6 +25,9 @@ final class FakeGrantStore implements GrantStore
 
     /** @var list<array{grantId: string, actorIdentifier: ?string, reason: RevocationReason}> */
     public array $revocations = [];
+
+    /** @var array<string, DateTimeImmutable> when each grant was revoked */
+    private array $revokedAtById = [];
 
     public function seed(GrantRecord $grant): void
     {
@@ -92,6 +96,8 @@ final class FakeGrantStore implements GrantStore
             return;
         }
 
+        $this->revokedAtById[$grantId] = Date::now()->toDateTimeImmutable();
+
         $this->grantsById[$grantId] = new GrantRecord(
             id: $existingGrant->id,
             clientId: $existingGrant->clientId,
@@ -102,6 +108,20 @@ final class FakeGrantStore implements GrantStore
             lastUsedAt: $existingGrant->lastUsedAt,
             display: $existingGrant->display,
         );
+    }
+
+    public function purgeRevokedBefore(DateTimeImmutable $cutoff): int
+    {
+        $purgedCount = 0;
+
+        foreach ($this->revokedAtById as $grantId => $revokedAt) {
+            if ($revokedAt < $cutoff) {
+                unset($this->grantsById[$grantId], $this->revokedAtById[$grantId]);
+                $purgedCount++;
+            }
+        }
+
+        return $purgedCount;
     }
 
     public function revokeAllForClient(string $clientId, ?string $actorIdentifier): void

@@ -14,6 +14,7 @@ use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\PendingAuthorizationRequestData;
 use Qiick\McpOAuth\Events\McpConsentApproved;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Services\ConsentDecisionService;
 use Qiick\McpOAuth\Services\ConsentPageService;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -29,7 +30,9 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  * 3. in one transaction: GrantStore::replace() (the earlier grant is revoked
  *    by the product), every earlier auth code, access token and refresh token
  *    of this client and user is revoked, so an unexchanged old code cannot be
- *    bound to the new grant, and the consent record is written;
+ *    bound to the new grant, the consent record is written, and the client
+ *    is marked authorised the first time (`first_authorized_at`, which
+ *    keeps mcp-oauth:prune-unused-clients off it after the grant is purged);
  * 4. McpConsentApproved is dispatched after the commit;
  * 5. the request is marked approved, ready for
  *    AuthorizationResponseService::complete().
@@ -71,6 +74,10 @@ final class ApproveConsentAction
             $grant = $this->grantStore->replace($decision);
             $this->revokeEarlierCredentials($clientInfo->id, $userIdentifier);
             $this->recordConsentDecision->execute($request, $pendingAuthorizationRequest, $redirectUri, $decision, $grant);
+            OAuthClientMetadata::query()
+                ->where('client_id', $clientInfo->id)
+                ->whereNull('first_authorized_at')
+                ->update(['first_authorized_at' => now()]);
 
             return $grant;
         });

@@ -49,6 +49,7 @@ is nullable with **no** database default (registration writes the value).
 | `jwks_uri` | string(2048) | yes | null | — |
 | `jwks` | json | yes | null | — |
 | `client_id_issued_at` | timestamp | yes | null | — |
+| `first_authorized_at` | timestamp | yes | null | — (set at the first approval; keeps the client out of the unused-client prune after its grant is purged) |
 | `client_secret_expires_at` | dateTime | yes | null | — |
 | `registration_access_token_hash` | char(64) | yes | null | unique |
 | `registration_access_token_expires_at` | dateTime | yes | null | — |

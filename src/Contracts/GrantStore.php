@@ -43,6 +43,14 @@ interface GrantStore
     public function revokeAllForClient(string $clientId, ?string $actorIdentifier): void;
 
     /**
+     * Retention (standards review M5): delete the grants revoked before the
+     * cutoff (90 days ago by default) and return how many went. The product
+     * may keep rows it holds for its own reasons, such as a legal hold; the
+     * package never decides that.
+     */
+    public function purgeRevokedBefore(\DateTimeImmutable $cutoff): int;
+
+    /**
      * @param  list<string>  $clientIds
      * @return list<string> those with any grant ever (revoked included)
      */
