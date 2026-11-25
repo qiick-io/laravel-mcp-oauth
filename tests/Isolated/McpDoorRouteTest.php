@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Carbon\CarbonImmutable;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
@@ -415,4 +416,32 @@ it('judges the wire scopes as a set: repeated mcp:use is fine, none is not', fun
 })->with([
     'mcp:use twice' => [['mcp:use', 'mcp:use'], 200],
     'no scope' => [[], 401],
+]);
+
+// --- A browser session is never a credential (S73) ------------------------------
+
+it('refuses a signed-in browser session without a Bearer, even on a route inside web (S73)', function (bool $isInsideWeb): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $middleware = [McpChallengeMiddleware::class, McpBearerDoorMiddleware::class];
+    Route::post('mcp', static fn (): string => 'reached the server')
+        ->middleware($isInsideWeb ? ['web', ...$middleware] : $middleware);
+
+    // The same group without the door does see the signed-in user: the session is live.
+    Route::post('session-check', static fn (Request $request): JsonResponse => new JsonResponse(['isSignedIn' => $request->user() !== null]))
+        ->middleware($isInsideWeb ? ['web'] : []);
+    $user = $this->createUser();
+
+    $this->actingAs($user)->postJson('/session-check')->assertExactJson(['isSignedIn' => true]);
+
+    $response = $this->actingAs($user)->postJson('/mcp', ['jsonrpc' => '2.0', 'method' => 'tools/list', 'id' => 1]);
+
+    $response->assertUnauthorized()
+        ->assertHeader('WWW-Authenticate', 'Bearer realm="mcp", scope="mcp:use", resource_metadata="'.RESOURCE_METADATA_URL.'"');
+
+    expect(app(McpCredentialBinder::class)->boundApiKeys)->toBe([])
+        ->and(app(McpCredentialBinder::class)->boundGrants)->toBe([]);
+})->with([
+    'outside web' => [false],
+    'inside web' => [true],
 ]);
