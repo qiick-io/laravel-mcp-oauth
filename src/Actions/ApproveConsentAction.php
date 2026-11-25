@@ -27,7 +27,8 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  *    PendingAuthorizationRequestService);
  * 2. the posted choices become a ConsentDecision judged against the offered
  *    options, then by ConsentProvider::validate();
- * 3. in one transaction: GrantStore::replace() (the earlier grant is revoked
+ * 3. in one transaction, holding the client's metadata row lock (a client
+ *    pruned meanwhile is refused): GrantStore::replace() (the earlier grant is revoked
  *    by the product), every earlier auth code, access token and refresh token
  *    of this client and user is revoked, so an unexchanged old code cannot be
  *    bound to the new grant, the consent record is written, and the client
@@ -69,8 +70,20 @@ final class ApproveConsentAction
 
         $this->consentProvider->validate($request, $user, $decision);
 
+        // The client's metadata row is locked on its own (Passport's)
+        // connection for the whole approval: the same lock
+        // mcp-oauth:prune-unused-clients takes before it deletes. A prune that
+        // committed first leaves no row and the approval is refused; one that
+        // comes later sees first_authorized_at and keeps the client. On one
+        // connection the inner transaction is a savepoint.
         /** @var GrantRecord $grant Laravel 12 types transaction() as mixed */
-        $grant = $this->database->transaction(function () use ($request, $pendingAuthorizationRequest, $redirectUri, $decision, $clientInfo, $userIdentifier): GrantRecord {
+        $grant = OAuthClientMetadata::query()->getConnection()->transaction(fn (): mixed => $this->database->transaction(function () use ($request, $pendingAuthorizationRequest, $redirectUri, $decision, $clientInfo, $userIdentifier): GrantRecord {
+            $isStillRegistered = OAuthClientMetadata::query()->where('client_id', $clientInfo->id)->lockForUpdate()->exists();
+
+            if (! $isStillRegistered) {
+                throw new AccessDeniedHttpException('This client is no longer registered.');
+            }
+
             $grant = $this->grantStore->replace($decision);
             $this->revokeEarlierCredentials($clientInfo->id, $userIdentifier);
             $this->recordConsentDecision->execute($request, $pendingAuthorizationRequest, $redirectUri, $decision, $grant);
@@ -80,7 +93,7 @@ final class ApproveConsentAction
                 ->update(['first_authorized_at' => now()]);
 
             return $grant;
-        });
+        }));
 
         $this->events->dispatch(new McpConsentApproved(
             clientId: $clientInfo->id,
