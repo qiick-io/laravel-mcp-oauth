@@ -86,10 +86,10 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 | S70 | Bare challenge; RFC 6750 codes survive; `resource_metadata` when on | covered | `Isolated/McpDoorRouteTest` "asks for credentials with the resource metadata and the scope, without an error code", "renders the product's refusal"; `Http/RealHttpFlowTest` step 3 |
 | S71 | API keys keep their wording when OAuth is on | covered | `Isolated/McpDoorRouteTest` "keeps API keys working with OAuth on", "names insufficient_scope when the product refuses an API key with 403" |
 | S72 | Both doors bind identically | product | `McpCredentialBinder` |
-| S73 | `/mcp` outside `web`: a session cookie never authenticates | gap | The door reads only the Bearer (`Isolated/McpDoorRouteTest` "answers a Bearer with no token like no credentials"); no test sends a signed-in session to `/mcp` |
+| S73 | `/mcp` outside `web`: a session cookie never authenticates | covered (#48) | `Isolated/McpDoorRouteTest` "refuses a signed-in browser session without a Bearer, even on a route inside web" (a control route proves the session is live) |
 | S74 | Failure brake 429 before the per-key throttle | covered | `Isolated/McpDoorRouteTest` "answers 429 before reading the credential once an address has failed too often" |
 | S75 | Connected apps lists only the user's own active grants | covered (#41) | `Isolated/ConnectedAppsTest` (API keys are the product's) |
-| S76 | A user revoke refuses the next call and refresh, and revokes unexchanged codes | partial (#41) | `Isolated/ConnectedAppsTest` revokes the grant and its access and refresh tokens. Unexchanged codes are not revoked yet; a token minted from one is revoked at once (S54). Follow-up |
+| S76 | A user revoke refuses the next call and refresh, and revokes unexchanged codes | covered (#49) | `Isolated/ConnectedAppsTest`: the grant, its access and refresh tokens, and the codes it issued (codes issued before the revoke, while no newer grant is active); a newer consent's code and a code issued during the revoke survive |
 | S77 | Revoke after losing AI access, and while OAuth is off | covered (#41) | `Isolated/ConnectedAppsTest` "lists … with OAuth off too" (losing access is the product's) |
 | S78 | Audit entries name client and redirect host | product | `AuditLogger`; the events carry the ids and hosts (`Unit/Events/McpEventsCarryUuidsOnlyTest`) |
 | S79 | Token material never in logs, exceptions, events, audit | partial | `Unit/Events/McpEventsCarryUuidsOnlyTest`; `Isolated/FamilyRevokingRefreshTokenRepositoryTest` "logs a CAS miss without putting it in the client hint"; no sweep over every log call |
@@ -98,6 +98,5 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 
 ## Open items
 
-- **Gap S73:** a test that sends a signed-in session (no Bearer) to `/mcp` and gets 401.
-- **Partial S76:** the Connected-apps revoke should also revoke the user's unexchanged auth codes for that client.
+- **Known race (from the review of #45):** a user's first approval can lose to `mcp-oauth:prune-unused-clients`. If the prune locks the metadata row and deletes the client after the approval read it, the approval's `first_authorized_at` write updates nothing and the user ends with a grant (or a failed callback) for a deleted client. Closing it means taking the same metadata row lock in the approval before the grant is written.
 - **Partial S13, S24, S34, S39, S79:** the parts named in the table above.
