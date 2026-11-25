@@ -175,6 +175,9 @@ composer analyse
 bash scripts/mutate-per-class.sh   # per-class MSI ≥ 95 once targets land
 ```
 
+[docs/traceability.md](./docs/traceability.md) maps every design scenario
+(S1–S81) to the tests that prove it, and lists what is still open.
+
 CI: PHP 8.3/8.4/8.5 × Laravel 12/13 × lowest/stable, Pint, PHPStan max, Pest,
 `composer validate --strict`, `composer audit`, database engine jobs, real HTTP
 (`php -S`) once the `http` group exists, and qiick standards drift against
