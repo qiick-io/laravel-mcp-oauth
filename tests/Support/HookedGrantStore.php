@@ -72,8 +72,18 @@ final class HookedGrantStore implements GrantStore
         return $grant;
     }
 
+    /** Runs once, before the next replace(), inside the approval's transaction. */
+    public ?Closure $beforeNextReplace = null;
+
     public function replace(ConsentDecision $decision): GrantRecord
     {
+        $hook = $this->beforeNextReplace;
+        $this->beforeNextReplace = null;
+
+        if ($hook !== null) {
+            $hook();
+        }
+
         return $this->grantStore->replace($decision);
     }
 
