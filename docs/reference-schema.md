@@ -123,10 +123,17 @@ code is first presented. A code presented again (before or after it expired)
 revokes that grant and every token bound to it. Passport does not link tokens
 to their code and its tables are never altered, hence this side table.
 
+**M7 exception:** no UUID `id`. The row is keyed by Passport's code id; it is
+technical, never leaves the database and never appears on the wire, so a
+public id would identify nothing anyone asks for. It still carries `metadata`
+and `schema_version` like every package table.
+
 | Column | Type | Null | Default | Index |
 | --- | --- | --- | --- | --- |
 | `auth_code_id` | string(100) | no | — | PK (Passport `oauth_auth_codes.id`) |
 | `grant_id` | uuid | no | — | index |
+| `metadata` | json | yes | null | — |
+| `schema_version` | unsignedSmallInteger | no | 1 | — |
 | `created_at` | timestamp | no | current | index (future prune after the refresh-token TTL) |
 
 ## Grant binding (product stub, tag `mcp-oauth-binding-stub`)

@@ -9,6 +9,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Laravel\Mcp\Server\Registrar;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
+use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Throwable;
 
@@ -116,6 +117,105 @@ final class McpOAuthServer
     public function protectedResourceMetadataUrl(): string
     {
         return $this->issuer().'/.well-known/oauth-protected-resource/'.$this->mcpPath();
+    }
+
+    /**
+     * The MCP authorization spec revision this server implements (M8), a
+     * `YYYY-MM-DD` date. Fails closed on anything else rather than stamp a
+     * client row with a revision nobody can compare.
+     *
+     * @throws InvalidMcpOAuthConfigException
+     */
+    public function specRevision(): string
+    {
+        $specRevision = $this->config->get('mcp-oauth.spec_revision');
+
+        if (! is_string($specRevision) || preg_match('/^\d{4}-\d{2}-\d{2}\z/', $specRevision) !== 1) {
+            throw InvalidMcpOAuthConfigException::invalidSpecRevision();
+        }
+
+        return $specRevision;
+    }
+
+    /**
+     * RFC 7009 endpoint, or null when `revocation_enabled` is not exactly
+     * true: then McpOAuthRoutes registers no `oauth/revoke` and the metadata
+     * does not advertise it (M2).
+     */
+    public function revocationEndpointUrl(): ?string
+    {
+        if ($this->config->get('mcp-oauth.revocation_enabled', true) !== true) {
+            return null;
+        }
+
+        return $this->issuer().'/oauth/revoke';
+    }
+
+    /**
+     * Whether `client_id` may be a Client ID Metadata Document URL (S2).
+     *
+     * ponytail: always false until the fetcher lands on qiick/laravel-outbound;
+     * then it reads `mcp-oauth.cimd.enabled` and authorizationServerMetadata()
+     * adds `client_id_metadata_document_supported` when it is true.
+     * Advertising it with no handler would make clients send URLs the server
+     * cannot resolve (M2).
+     */
+    public function supportsClientIdMetadataDocuments(): bool
+    {
+        return false;
+    }
+
+    /**
+     * RFC 8414 authorization server metadata, served at the root and nested
+     * well-known paths. Every URL comes from the issuer (APP_URL), never the
+     * request Host, and only what is switched on is advertised (M2).
+     *
+     * @return array<string, mixed>
+     */
+    public function authorizationServerMetadata(): array
+    {
+        $issuer = $this->issuer();
+        $revocationEndpointUrl = $this->revocationEndpointUrl();
+        // Passport clients authenticate with a secret in Basic or the body; DCR clients with none.
+        $clientAuthenticationMethods = ['none', 'client_secret_basic', 'client_secret_post'];
+
+        $metadata = [
+            'issuer' => $issuer,
+            'authorization_endpoint' => $issuer.'/oauth/authorize',
+            'token_endpoint' => $issuer.'/oauth/token',
+            'registration_endpoint' => $issuer.'/oauth/register',
+            'revocation_endpoint' => $revocationEndpointUrl,
+            'scopes_supported' => [self::WIRE_SCOPE],
+            'response_types_supported' => ['code'],
+            'grant_types_supported' => self::SUPPORTED_GRANT_TYPES,
+            'code_challenge_methods_supported' => self::SUPPORTED_CODE_CHALLENGE_METHODS,
+            'token_endpoint_auth_methods_supported' => $clientAuthenticationMethods,
+            'revocation_endpoint_auth_methods_supported' => $clientAuthenticationMethods,
+            'authorization_response_iss_parameter_supported' => true,
+        ];
+
+        if ($revocationEndpointUrl === null) {
+            unset($metadata['revocation_endpoint'], $metadata['revocation_endpoint_auth_methods_supported']);
+        }
+
+        return $metadata;
+    }
+
+    /**
+     * RFC 9728 metadata of the MCP endpoint, one document for the root and
+     * the nested well-known path. Bearer tokens go in the Authorization
+     * header only.
+     *
+     * @return array<string, mixed>
+     */
+    public function protectedResourceMetadata(): array
+    {
+        return [
+            'resource' => $this->resourceIdentifier(),
+            'authorization_servers' => [$this->issuer()],
+            'scopes_supported' => [self::WIRE_SCOPE],
+            'bearer_methods_supported' => ['header'],
+        ];
     }
 
     /**

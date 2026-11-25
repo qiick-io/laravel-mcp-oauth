@@ -75,6 +75,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `McpOAuthServer` exposes the discovery contract (standards review M9):
+  `specRevision()` (the `spec_revision` config, a `YYYY-MM-DD` date, failing
+  closed otherwise), `authorizationServerMetadata()` and
+  `protectedResourceMetadata()` (the RFC 8414 and RFC 9728 documents the
+  well-known routes now serve unchanged), `revocationEndpointUrl()` and
+  `supportsClientIdMetadataDocuments()` (false until the CIMD fetcher lands,
+  whatever `cimd.enabled` says).
+- `revocation_enabled` config (`MCP_OAUTH_REVOCATION_ENABLED`, default true):
+  anything but true leaves `POST oauth/revoke` unregistered and drops
+  `revocation_endpoint` from the metadata.
+- `oauth_auth_code_exchanges` carries `metadata` (json, null) and
+  `schema_version` (default 1) like every package table (M7); it keeps the
+  code id as its key, the one documented exception to UUID ids. Pre-1.0 the
+  `create_` migration changed: run `migrate:fresh` on a local database.
 - Authorization endpoint and consent (design §8.3): `GET|POST|DELETE
   oauth/authorize` (`passport.authorizations.*`) inside the off-gate (404
   identical to a missing route, HTML 503 for a browser when keys are missing),

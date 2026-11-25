@@ -16,6 +16,8 @@ use Qiick\McpOAuth\Traits\UsesPassportConnectionTrait;
  *
  * @property string $auth_code_id
  * @property string $grant_id
+ * @property array<string, mixed>|null $metadata
+ * @property int $schema_version
  *
  * @internal
  */
@@ -36,5 +38,19 @@ final class OAuthAuthCodeExchange extends Model
     /**
      * @var list<string>
      */
-    protected $fillable = ['auth_code_id', 'grant_id'];
+    protected $fillable = ['auth_code_id', 'grant_id', 'metadata'];
+
+    /**
+     * `schema_version` is an int on every engine (PostgreSQL and MySQL drivers
+     * may return a numeric string).
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'metadata' => 'array',
+            'schema_version' => 'integer',
+        ];
+    }
 }

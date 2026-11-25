@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Route;
 use Laravel\Mcp\Server\Middleware\AddWwwAuthenticateHeader;
 use Qiick\McpOAuth\McpOAuthRoutes;
@@ -134,3 +135,16 @@ it('leaves the /mcp challenge of laravel/mcp as if the package were absent', fun
         ->assertStatus(401)
         ->assertHeader('WWW-Authenticate', 'Bearer realm="mcp", error="invalid_token"');
 })->with(['OAuth off' => [false], 'OAuth on' => [true]]);
+
+it('neither serves nor advertises revocation when revocation_enabled is off', function (): void {
+    $this->enableOAuth();
+    config()->set('mcp-oauth.revocation_enabled', false);
+    McpOAuthRoutes::register();
+
+    $this->getJson('/.well-known/oauth-authorization-server')
+        ->assertOk()
+        ->assertExactJson(Arr::except(AUTHORIZATION_SERVER_METADATA, ['revocation_endpoint', 'revocation_endpoint_auth_methods_supported']));
+    $this->postJson('/oauth/revoke', ['token' => 'anything'])->assertNotFound();
+
+    expect(Route::has('mcp.oauth.revoke'))->toBeFalse();
+});

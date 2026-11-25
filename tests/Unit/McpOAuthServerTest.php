@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Http\Request;
 use Laravel\Passport\Passport;
+use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\McpOAuthReadiness;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Testing\FakeAdminSwitch;
@@ -239,3 +240,83 @@ it('falls back to the default path when mcp_path is only slashes', function (): 
     expect($server->resourceIdentifier())->toBe('https://mcp-oauth.test/mcp')
         ->and($server->acceptsResource('https://mcp-oauth.test/mcp'))->toBeTrue();
 });
+
+// --- M9: the contract the discovery documents and adopters read ------------
+
+it('pins the MCP authorization spec revision from config (M8, M9)', function (): void {
+    $server = makeServer(true, true);
+
+    expect($server->specRevision())->toBe('2026-07-28');
+
+    config()->set('mcp-oauth.spec_revision', '2025-11-25');
+
+    expect($server->specRevision())->toBe('2025-11-25');
+});
+
+it('fails closed on a spec revision that is not a date', function (mixed $specRevision): void {
+    $server = makeServer(true, true);
+    config()->set('mcp-oauth.spec_revision', $specRevision);
+
+    expect(fn (): string => $server->specRevision())
+        ->toThrow(InvalidMcpOAuthConfigException::class, 'spec_revision');
+})->with([
+    'empty' => [''],
+    'null' => [null],
+    'not a date' => ['latest'],
+    'a date with a suffix' => ['2026-07-28-draft'],
+    'a date with a prefix' => ['v2026-07-28'],
+    'a date with a trailing newline' => ["2026-07-28\n"],
+]);
+
+it('advertises the revocation endpoint from APP_URL and no client ID metadata documents', function (): void {
+    $server = makeServer(true, true);
+
+    expect($server->revocationEndpointUrl())->toBe('https://mcp-oauth.test/oauth/revoke')
+        ->and($server->supportsClientIdMetadataDocuments())->toBeFalse();
+
+    config()->set('mcp-oauth.cimd.enabled', true);
+
+    // No fetcher yet: switching CIMD on must not make the metadata claim it.
+    expect($server->supportsClientIdMetadataDocuments())->toBeFalse();
+});
+
+it('builds the RFC 8414 and RFC 9728 documents from APP_URL', function (): void {
+    $server = makeServer(true, true);
+    config()->set('mcp-oauth.mcp_path', 'api/mcp');
+    $clientAuthenticationMethods = ['none', 'client_secret_basic', 'client_secret_post'];
+
+    expect($server->authorizationServerMetadata())->toBe([
+        'issuer' => 'https://mcp-oauth.test',
+        'authorization_endpoint' => 'https://mcp-oauth.test/oauth/authorize',
+        'token_endpoint' => 'https://mcp-oauth.test/oauth/token',
+        'registration_endpoint' => 'https://mcp-oauth.test/oauth/register',
+        'revocation_endpoint' => 'https://mcp-oauth.test/oauth/revoke',
+        'scopes_supported' => ['mcp:use'],
+        'response_types_supported' => ['code'],
+        'grant_types_supported' => ['authorization_code', 'refresh_token'],
+        'code_challenge_methods_supported' => ['S256'],
+        'token_endpoint_auth_methods_supported' => $clientAuthenticationMethods,
+        'revocation_endpoint_auth_methods_supported' => $clientAuthenticationMethods,
+        'authorization_response_iss_parameter_supported' => true,
+    ])->and($server->protectedResourceMetadata())->toBe([
+        'resource' => 'https://mcp-oauth.test/api/mcp',
+        'authorization_servers' => ['https://mcp-oauth.test'],
+        'scopes_supported' => ['mcp:use'],
+        'bearer_methods_supported' => ['header'],
+    ]);
+});
+
+it('serves no revocation endpoint unless revocation_enabled is exactly true', function (mixed $isRevocationEnabled): void {
+    $server = makeServer(true, true);
+    config()->set('mcp-oauth.revocation_enabled', $isRevocationEnabled);
+
+    expect($server->revocationEndpointUrl())->toBeNull()
+        ->and($server->authorizationServerMetadata())
+        ->not->toHaveKey('revocation_endpoint')
+        ->not->toHaveKey('revocation_endpoint_auth_methods_supported')
+        ->toHaveKey('token_endpoint_auth_methods_supported');
+})->with([
+    'off' => [false],
+    'a string' => ['yes'],
+    'null' => [null],
+]);

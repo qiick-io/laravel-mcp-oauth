@@ -68,6 +68,13 @@ return [
     'revoke_requests_per_client_per_minute' => env('MCP_OAUTH_REVOKE_REQUESTS_PER_CLIENT_PER_MINUTE', '20'),
 
     /*
+     * RFC 7009 revocation at POST oauth/revoke, advertised as
+     * `revocation_endpoint`. Anything but true (env `false`, `0`, a typo)
+     * turns both off.
+     */
+    'revocation_enabled' => env('MCP_OAUTH_REVOCATION_ENABLED', true),
+
+    /*
      * Integer keys below stay raw env strings like the TTLs: `(int) env()`
      * would turn `1e3` into 1000 and `abc` into 0 before boot validation
      * sees them. Boot fails closed outside 1..the documented maximum.

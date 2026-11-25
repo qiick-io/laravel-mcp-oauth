@@ -34,6 +34,13 @@ final class InvalidMcpOAuthConfigException extends InvalidArgumentException
         );
     }
 
+    public static function invalidSpecRevision(): self
+    {
+        return new self(
+            'mcp-oauth config [spec_revision] must be an MCP spec revision date (YYYY-MM-DD).',
+        );
+    }
+
     public static function invalidGrantBindingColumn(): self
     {
         return new self(
