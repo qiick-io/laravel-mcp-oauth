@@ -81,12 +81,12 @@ it('refuses to switch on, with the reason, while OAuth could not serve', functio
     $store = switchStore();
 
     expect(fn () => app(SwitchMcpOAuthAction::class)->execute(true, null, $store->persist))
-        ->toThrow(McpOAuthCannotBeEnabledException::class, $reason);
+        ->toThrow(static fn (McpOAuthCannotBeEnabledException $exception) => expect($exception->getMessage())->toBe($reason));
 
     expect($store->writes)->toBe([]);
     Event::assertNotDispatched(McpOAuthEnabled::class);
 })->with([
-    'keys missing' => ['keys missing', 'Passport keys are missing'],
-    'APP_URL not absolute' => ['APP_URL not absolute', 'APP_URL'],
-    'a foreign Passport route' => ['a foreign Passport route', 'passport.device'],
+    'keys missing' => ['keys missing', 'OAuth cannot be switched on while the Passport keys are missing: run passport:keys.'],
+    'APP_URL not absolute' => ['APP_URL not absolute', 'OAuth cannot be switched on until APP_URL is an absolute http(s) URL.'],
+    'a foreign Passport route' => ['a foreign Passport route', 'OAuth cannot be switched on beside another Passport server: passport.device.'],
 ]);
