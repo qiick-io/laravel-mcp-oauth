@@ -81,6 +81,15 @@ final class McpOAuthServer
             return false;
         }
 
+        return $this->hasAbsoluteIssuer();
+    }
+
+    /**
+     * APP_URL is an absolute http(s) URL: every document and challenge is
+     * built from it, so OAuth cannot serve without one.
+     */
+    public function hasAbsoluteIssuer(): bool
+    {
         return preg_match('#^https?://[^/]#i', $this->issuer()) === 1;
     }
 

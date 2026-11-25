@@ -197,6 +197,23 @@ final class RedirectUriGuard
         return $parsed->scheme !== 'http' || in_array($parsed->normalizedHost, $this->loopbackHosts(), true);
     }
 
+    /**
+     * Loopback http (RFC 8252 §7.3): the code reaches whatever listens on
+     * that port of the user's machine, so a client registered with only such
+     * redirects gets a warning on the consent page (S3). An unparseable URI
+     * is not loopback.
+     */
+    public function isLoopbackRedirectUri(string $redirectUri): bool
+    {
+        try {
+            $parsed = $this->parseCanonical($redirectUri);
+        } catch (InvalidArgumentException) {
+            return false;
+        }
+
+        return $parsed->scheme === 'http' && in_array($parsed->normalizedHost, $this->loopbackHosts(), true);
+    }
+
     public function clientHasBlockedRedirectHost(Client $client): bool
     {
         /** @var array<mixed> $redirectUris Passport's redirectUris accessor always returns an array */

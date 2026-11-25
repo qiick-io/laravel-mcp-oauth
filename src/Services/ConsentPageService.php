@@ -50,6 +50,7 @@ final class ConsentPageService
                 'name' => $clientInfo->name,
                 'redirectHost' => $clientInfo->redirectHost,
                 'nameIsSelfAsserted' => true,
+                'isRedirectLoopbackOnly' => $clientInfo->isRedirectLoopbackOnly,
             ],
             authToken: $parameters['authToken'],
             options: $consentOptions,
@@ -76,6 +77,10 @@ final class ConsentPageService
             name: $clientName,
             redirectHost: $this->redirectUriGuard->displayHostOf($redirectUri ?? $registeredRedirectUris[0]),
             redirectUris: $registeredRedirectUris,
+            isRedirectLoopbackOnly: array_filter(
+                $registeredRedirectUris,
+                fn (string $registeredRedirectUri): bool => ! $this->redirectUriGuard->isLoopbackRedirectUri($registeredRedirectUri),
+            ) === [],
         );
     }
 }

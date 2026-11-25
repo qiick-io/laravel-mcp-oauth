@@ -87,6 +87,19 @@ before the package: every Bearer is an API key, and a 401 says
 `Bearer realm="mcp", error="invalid_token"`. With OAuth on, every 401 and 403
 points at the protected resource metadata built from `APP_URL`.
 
+The product's settings page switches OAuth on and off through
+`SwitchMcpOAuthAction`, which refuses to switch on (with a reason to show)
+while OAuth could not serve, and dispatches `McpOAuthEnabled` or
+`McpOAuthDisabled`. The product keeps its own store behind `AdminSwitch`:
+
+```php
+try {
+    $switchMcpOAuth->execute($request->boolean('enabled'), $request->user(), fn (bool $isEnabled) => $settings->setMcpOAuth($isEnabled));
+} catch (McpOAuthCannotBeEnabledException $exception) {
+    return back()->withErrors(['enabled' => $exception->getMessage()]);
+}
+```
+
 Schedule the retention jobs. `mcp-oauth:purge-revoked` deletes what was revoked
 more than `revoked_retention_days` (90) ago: clients the package registered,
 the product's grants (through `GrantStore::purgeRevokedBefore()`, which may keep

@@ -32,6 +32,7 @@ CLASSES=(
   'Qiick\McpOAuth\Actions\RecordConsentDecisionAction'
   'Qiick\McpOAuth\Actions\RevokeAuthCodeTokensAction'
   'Qiick\McpOAuth\Actions\RevokeTokenAction'
+  'Qiick\McpOAuth\Actions\SwitchMcpOAuthAction'
   'Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository'
   'Qiick\McpOAuth\Bridge\OneShotAuthCodeRepository'
   'Qiick\McpOAuth\ClientMetadataUriGuard'

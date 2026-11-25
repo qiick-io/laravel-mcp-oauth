@@ -44,6 +44,11 @@ interface OAuthAuthorizePageProps {
         /** The host the grant returns to (or the scheme of a private-use URI) */
         redirectHost: string;
         nameIsSelfAsserted: true;
+        /**
+         * Every redirect URI is loopback http (127.0.0.1, localhost, [::1]):
+         * warn that the code goes to a program on this computer (S3)
+         */
+        isRedirectLoopbackOnly: boolean;
     };
     /** Must be posted back as `auth_token` */
     authToken: string;
