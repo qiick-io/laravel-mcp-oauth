@@ -49,7 +49,11 @@ final class ClientAdminService
         $clientPage = self::packageClients()->orderByDesc('created_at')->orderByDesc('id')->paginate(50);
         /** @var list<string> $clientIdsOnPage Passport client ids are UUID strings */
         $clientIdsOnPage = $clientPage->getCollection()->modelKeys();
-        $everAuthorizedClientIds = $this->grantStore->everAuthorized($clientIdsOnPage);
+        // The product's grants, or the approval mark that outlives their purge.
+        $everAuthorizedClientIds = [
+            ...$this->grantStore->everAuthorized($clientIdsOnPage),
+            ...OAuthClientMetadata::query()->whereIn('client_id', $clientIdsOnPage)->whereNotNull('first_authorized_at')->pluck('client_id')->all(),
+        ];
 
         return $clientPage->through(function (Client $client) use ($everAuthorizedClientIds): array {
             /** @var array{id: string, name: string, revoked: bool} $clientRow */
