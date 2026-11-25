@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Events\TransactionBeginning;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
@@ -352,4 +353,20 @@ it('needs a signed-in user before any permission (#39 review m2)', function (): 
 
     $this->getJson('/mcp-oauth-clients')->assertUnauthorized();
     $this->postJson('/mcp-oauth-clients/blocked-hosts', ['host' => 'evil.example'])->assertUnauthorized();
+});
+
+it('blocks a host without one transaction around the client walk (S39)', function (): void {
+    config()->set('mcp-oauth.host_block_chunk_size', 2);
+    array_map(fn (): Client => $this->createClient(['https://app.example/callback']), range(1, 3));
+    $this->createClient(['https://other.example/callback']);
+    $baseLevel = DB::transactionLevel();
+    $openedLevels = [];
+    Event::listen(TransactionBeginning::class, static function (TransactionBeginning $event) use (&$openedLevels, $baseLevel): void {
+        $openedLevels[] = $event->connection->transactionLevel() - $baseLevel;
+    });
+
+    app(BlockRedirectHostAction::class)->execute('app.example', null, isSubdomainMatched: true);
+
+    // One short transaction per blocked client, never nested in a wider one.
+    expect($openedLevels)->toBe([1, 1, 1]);
 });
