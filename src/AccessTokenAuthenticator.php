@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
-use Illuminate\Contracts\Container\Container;
 use Illuminate\Http\Request;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
@@ -13,13 +12,13 @@ use Laravel\Passport\Token;
 use Lcobucci\JWT\Validation\RequiredConstraintsViolated;
 use League\OAuth2\Server\Exception\OAuthServerException;
 use League\OAuth2\Server\ResourceServer;
-use Psr\Http\Message\ServerRequestInterface;
 use Qiick\McpOAuth\Contracts\GrantAuthorizer;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\AuthorizationDecision;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Internal\GrantBindingColumn;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
+use Symfony\Bridge\PsrHttpMessage\Factory\PsrHttpFactory;
 
 /**
  * The use-time checks on an OAuth access token at `/mcp` (design §8.5), in
@@ -55,14 +54,19 @@ final class AccessTokenAuthenticator
         private readonly GrantStore $grantStore,
         private readonly GrantAuthorizer $grantAuthorizer,
         private readonly ConfigRepository $config,
-        private readonly Container $container,
     ) {}
 
+    /**
+     * Checks the Bearer of `$request` itself, converted the way Passport's
+     * TokenGuard converts it, never the container's current request: a
+     * product calling this with a request of its own gets that request's
+     * token checked.
+     */
     public function authenticate(Request $request): GrantRecord|AuthorizationDecision
     {
         try {
             $validatedRequest = $this->resourceServer->validateAuthenticatedRequest(
-                $this->container->make(ServerRequestInterface::class),
+                (new PsrHttpFactory)->createRequest($request),
             );
         } catch (OAuthServerException $exception) {
             return AuthorizationDecision::invalidToken(self::descriptionOf($exception));
@@ -100,7 +104,8 @@ final class AccessTokenAuthenticator
             return AuthorizationDecision::invalidToken(self::REVOKED);
         }
 
-        /** @var list<string> $scopes the JWT `scopes` claim league writes */
+        // The JWT `scopes` claim: league always writes a list, but a token
+        // signed with the server key may carry none, or null.
         $scopes = $validatedRequest->getAttribute('oauth_scopes');
 
         if (! $this->isBoundTo($accessToken, $grant) || ! self::carriesOnlyTheWireScope($scopes)) {
@@ -124,11 +129,22 @@ final class AccessTokenAuthenticator
     }
 
     /**
-     * @param  list<string>  $scopes
+     * At least one scope, and every one exactly `mcp:use`. Compared strictly,
+     * so a claim holding something other than strings is refused, not cast.
      */
-    private static function carriesOnlyTheWireScope(array $scopes): bool
+    private static function carriesOnlyTheWireScope(mixed $scopes): bool
     {
-        return $scopes !== [] && array_diff($scopes, [McpOAuthServer::WIRE_SCOPE]) === [];
+        if (! is_array($scopes) || $scopes === []) {
+            return false;
+        }
+
+        foreach ($scopes as $scope) {
+            if ($scope !== McpOAuthServer::WIRE_SCOPE) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

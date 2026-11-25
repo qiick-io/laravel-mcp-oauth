@@ -61,8 +61,11 @@ product's `config/cors.php`, where Laravel's `HandleCors` answers the preflight
 before routing:
 
 ```php
-'paths' => ['api/*', '.well-known/*', 'oauth/register', 'oauth/token', 'oauth/revoke'],
+'paths' => ['api/*', '.well-known/*', 'oauth/register', 'oauth/token', 'oauth/revoke', 'mcp'],
 ```
+
+`mcp` is the MCP endpoint itself (`mcp-oauth.mcp_path`): a browser client
+calls it cross-origin with the token it got.
 
 Mount the package's door and challenge on the product's `/mcp` route. The
 door replaces the product's own `/mcp` authentication middleware and sits
@@ -100,7 +103,7 @@ Schedule::command('mcp-oauth:prune-auth-code-exchanges')->daily()->onOneServer()
 | Refresh-token theft / races | Atomic rotation; family + grant revocation; live binding required |
 | Code replay | One-shot codes; a replay revokes the grant and every token issued with it |
 | A token used after revocation | `/mcp` re-checks token, audience, client, blocked hosts and bound grant on every call; nothing cached |
-| Credential guessing at `/mcp` | Per-address failure brake (429 before the credential is read) |
+| Credential guessing at `/mcp` | Per-address failure brake (429 before the credential is read). Clients behind one shared address (carrier NAT, a corporate egress) share the counter: raise `mcp_auth_failures_per_minute` or throttle sharper at the edge |
 | Missing Passport keys | 503 `temporarily_unavailable`; switch refuses to turn on |
 
 Full table: design §16.
