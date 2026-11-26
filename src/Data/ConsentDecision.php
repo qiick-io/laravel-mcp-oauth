@@ -15,6 +15,9 @@ final readonly class ConsentDecision
      * @param  list<string>  $scopes
      * @param  list<string>  $resources
      * @param  array<string, scalar|null>  $attributes
+     * @param  string|null  $resource  the MCP resource the grant is for (RFC 8707)
+     * @param  string|null  $consentVersion  the version of the consent text the product showed
+     * @param  string|null  $locale  the locale the page was shown in
      */
     public function __construct(
         public string $clientId,
@@ -25,5 +28,8 @@ final readonly class ConsentDecision
         public array $resources,
         public bool $allResources,
         public array $attributes = [],
+        public ?string $resource = null,
+        public ?string $consentVersion = null,
+        public ?string $locale = null,
     ) {}
 }

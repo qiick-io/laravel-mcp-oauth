@@ -27,6 +27,8 @@ return [
             'Qiick\McpOAuth\Contracts\McpCredentialBinder',
             'Qiick\McpOAuth\Contracts\AuditLogger',
             'Qiick\McpOAuth\Contracts\ConsentView',
+            // Standards review §3: the CIMD fetch contract, named alike.
+            'Qiick\McpOAuth\Contracts\ClientMetadataDocumentFetcher',
         ],
         'Data' => [
             // Design §3.2 DTOs: names are the API, not *Data.

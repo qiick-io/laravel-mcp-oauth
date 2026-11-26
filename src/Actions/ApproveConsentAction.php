@@ -102,6 +102,7 @@ final class ApproveConsentAction
             redirectHost: $clientInfo->redirectHost,
             scopes: $decision->scopes,
             resources: $decision->resources,
+            resource: $decision->resource,
         ));
 
         // The wire scopes are already exactly `mcp:use`: the authorization

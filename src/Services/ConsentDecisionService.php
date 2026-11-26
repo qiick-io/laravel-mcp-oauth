@@ -12,6 +12,7 @@ use Illuminate\Validation\ValidationException;
 use Qiick\McpOAuth\Data\ConsentDecision;
 use Qiick\McpOAuth\Data\ConsentOption;
 use Qiick\McpOAuth\Data\ConsentOptions;
+use Qiick\McpOAuth\McpOAuthServer;
 
 /**
  * Turns the posted consent form into a {@see ConsentDecision}, judged against
@@ -34,6 +35,7 @@ final class ConsentDecisionService
 {
     public function __construct(
         private readonly ValidationFactory $validationFactory,
+        private readonly McpOAuthServer $mcpOAuthServer,
     ) {}
 
     /**
@@ -85,6 +87,10 @@ final class ConsentDecisionService
             resources: $isAllResources ? [] : ($validated['resources'] ?? []),
             allResources: $isAllResources,
             attributes: $organisation === null ? [] : ['organisation' => $organisation],
+            // The request's resource was checked against this one exactly (RFC 8707).
+            resource: $this->mcpOAuthServer->resourceIdentifier(),
+            consentVersion: $consentOptions->consentVersion,
+            locale: app()->getLocale(),
         );
     }
 

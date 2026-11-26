@@ -52,7 +52,7 @@ final class RecordConsentDecisionAction
             'decision' => $isDenied ? 'denied' : 'approved',
             'redirect_uri' => $redirectUri,
             'redirect_host' => $this->redirectUriGuard->displayHostOf($redirectUri),
-            'resource' => $this->mcpOAuthServer->resourceIdentifier(),
+            'resource' => $decision->resource ?? $this->mcpOAuthServer->resourceIdentifier(),
             // League scope entities JSON-serialise to their identifier.
             'requested_scopes' => $authorizationRequest->getScopes(),
             'granted_scopes' => $decision?->scopes,
@@ -60,7 +60,8 @@ final class RecordConsentDecisionAction
             'resources' => $decision?->resources,
             'all_resources' => $decision !== null && $decision->allResources,
             'attributes' => $decision?->attributes,
-            'locale' => app()->getLocale(),
+            'consent_version' => $decision?->consentVersion,
+            'locale' => $decision->locale ?? app()->getLocale(),
             'ip_address' => $request->ip(),
             'user_agent' => $userAgent === null ? null : mb_strcut($userAgent, 0, 512),
             'retention_until' => $isDenied

@@ -55,6 +55,13 @@ interface OAuthAuthorizePageProps {
     };
     /** Must be posted back as `auth_token` */
     authToken: string;
+    /**
+     * The Advanced section, closed by default: what the client registered
+     * (client id, registration source, callbacks, website, terms, privacy
+     * policy, contacts, software), each row only when it has a value. All of
+     * it is the client's own claim.
+     */
+    advanced: { label: string; value: string }[];
     options: {
         scopes: ConsentOption[];
         /** Empty: the product has no role choice; post no `role` */

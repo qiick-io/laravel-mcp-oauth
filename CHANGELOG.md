@@ -81,6 +81,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The remaining contract additions of the standards review (M9), each with a
+  default so existing code keeps working: `ClientInfo` carries what the client
+  registered (`registrationSource`, the four URIs, `contacts`, software id and
+  version, `metadataDocumentUrl`, `nameIsSelfAsserted`); `ConsentDecision`
+  carries `resource`, `consentVersion` (from the new
+  `ConsentOptions::$consentVersion`) and `locale`, all written to the consent
+  record; `GrantRecord` carries `revokedAt`, `revocationReason` and
+  `metadata`; `ConsentPage` and the Inertia props carry an `advanced` section;
+  `McpConsentApproved` carries `resource`; `RevocationReason::Security`; and
+  the `ClientMetadataDocumentFetcher` contract for CIMD (not bound while CIMD
+  is off). DCR writes the MCP `spec_revision` on each client row (M8).
 - `SwitchMcpOAuthAction` (design §4.3): the product's settings page switches
   OAuth on or off through it. Switching on is refused with
   `McpOAuthCannotBeEnabledException` (the reason to show) while the Passport
