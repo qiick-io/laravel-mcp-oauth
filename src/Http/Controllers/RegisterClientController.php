@@ -23,6 +23,8 @@ use Qiick\McpOAuth\RedirectUriGuard;
  * Dynamic client registration (RFC 7591 / design §8.1). Extends laravel/mcp's
  * controller so every redirect_uri decision goes through {@see RedirectUriGuard}
  * (B3) before the parent validation and Passport create.
+ *
+ * @internal
  */
 final class RegisterClientController extends OAuthRegisterController
 {

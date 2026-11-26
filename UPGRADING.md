@@ -11,6 +11,18 @@ Products must adopt with an exact `0.x` version constraint until `1.0.0`.
 
 ## Unreleased
 
+- The package now schedules `mcp-oauth:prune-unused-clients`,
+  `mcp-oauth:purge-revoked` and `mcp-oauth:prune-auth-code-exchanges` itself.
+  Remove your own `Schedule::command('mcp-oauth:…')` lines, or keep them and set
+  `MCP_OAUTH_RETENTION_SCHEDULE=false`: with both, each job is scheduled twice,
+  and `onOneServer()` does not merge two schedule entries. Run
+  `php artisan config:cache` again after setting the variable: a config cache
+  built before this release has no `retention.schedule` key, so the package
+  schedule stays on. A value that is not a boolean (`flase`) now stops the boot
+  with an error naming `retention.schedule`. Republish the config
+  (`--tag=mcp-oauth-config`) to see the key; without it the default (on)
+  applies. On more than one server, the single-server lock needs a cache store
+  every server shares (database, Redis, Memcached, DynamoDB).
 - Every event class now ends with `Event` (fleet convention F5); update each
   listener, `Event::fake()` and `Event::assert*()` call:
 
@@ -50,9 +62,9 @@ Products must adopt with an exact `0.x` version constraint until `1.0.0`.
 
   MySQL and MariaDB already index the foreign key.
 - `GrantStore` has a new method, `purgeRevokedBefore(\DateTimeImmutable $cutoff): int`:
-  delete the grants revoked before the cutoff and return how many went. Then
-  schedule `mcp-oauth:purge-revoked` daily and `mcp-oauth:prune-unused-clients`
-  hourly (see the README).
+  delete the grants revoked before the cutoff and return how many went. The
+  package schedules `mcp-oauth:purge-revoked` daily and
+  `mcp-oauth:prune-unused-clients` hourly itself (see the first entry above).
 - Clients registered via DCR before `oauth_client_metadata` existed have no
   metadata row and are refused at authorize and token; they register again.
 - `oauth_client_metadata` has a new column, `first_authorized_at`, added to its

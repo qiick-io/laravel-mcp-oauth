@@ -8,6 +8,8 @@ use DateTimeImmutable;
 
 /**
  * What one run of `mcp-oauth:prune-unused-clients` deleted, or would delete.
+ *
+ * @internal
  */
 final readonly class UnusedClientsPruneData
 {

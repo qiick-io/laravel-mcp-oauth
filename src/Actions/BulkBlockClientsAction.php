@@ -14,6 +14,8 @@ use Qiick\McpOAuth\Services\ClientAdminService;
  * no package client (the product's own Passport clients included), or a
  * client already revoked, is skipped. The request caps the
  * list at 100 distinct ids.
+ *
+ * @internal
  */
 final class BulkBlockClientsAction
 {

@@ -36,6 +36,8 @@ use Throwable;
  * exchange still fails (S54: a token for a revoked grant is revoked at once).
  *
  * Dispatches {@see McpGrantRevokedEvent}.
+ *
+ * @internal
  */
 final class RevokeConnectedAppAction
 {

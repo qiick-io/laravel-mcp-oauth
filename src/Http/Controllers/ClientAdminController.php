@@ -27,6 +27,8 @@ use Symfony\Component\HttpFoundation\Response;
  * validated here (a 422 on failure): the package does not depend on
  * illuminate/foundation, so it has no FormRequest. The permission is the
  * product's route middleware.
+ *
+ * @internal
  */
 final class ClientAdminController
 {

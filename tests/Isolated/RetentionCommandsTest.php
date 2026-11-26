@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
@@ -86,6 +88,73 @@ function consentRecord(array $attributes): OAuthConsentRecord
 }
 
 // --- mcp-oauth:purge-revoked ----------------------------------------------------
+
+it('purges expired consent records and revoked clients in chunks of 100 (F9)', function (): void {
+    foreach (range(1, 120) as $recordNumber) {
+        consentRecord(['decision' => 'denied', 'retention_until' => now()->subDay()]);
+    }
+
+    foreach (range(1, 101) as $clientNumber) {
+        clientRevokedDaysAgo($this, 91);
+    }
+
+    $statements = [];
+    DB::listen(static function (QueryExecuted $query) use (&$statements): void {
+        $statements[] = $query->sql;
+    });
+
+    $this->artisan('mcp-oauth:purge-revoked')->assertSuccessful();
+
+    $consentRecordDeletes = array_filter($statements, static fn (string $sql): bool => preg_match('/^delete from .?oauth_consent_records/', $sql) === 1);
+    $clientMetadataPages = array_filter($statements, static fn (string $sql): bool => preg_match('/^select .* from .?oauth_client_metadata.? where .*revoked_at.* limit 100$/', $sql) === 1);
+    $consentRecordPages = array_filter($statements, static fn (string $sql): bool => preg_match('/^select .* from .?oauth_consent_records.? where .*retention_until.* limit 100$/', $sql) === 1);
+
+    expect(OAuthConsentRecord::query()->count())->toBe(0)
+        ->and(OAuthClientMetadata::query()->count())->toBe(0)
+        ->and($consentRecordDeletes)->toHaveCount(2)
+        ->and(count($consentRecordPages))->toBeGreaterThanOrEqual(2)
+        ->and(count($clientMetadataPages))->toBeGreaterThanOrEqual(2);
+});
+
+it('keeps a consent record whose retention was extended after the purge selected it (Codex review of #65)', function (): void {
+    $extendedRecord = consentRecord(['decision' => 'denied', 'retention_until' => now()->subDay()]);
+    consentRecord(['decision' => 'denied', 'retention_until' => now()->subDay()]);
+    $hasExtended = false;
+    // Between the page read and its delete, another process extends one deadline.
+    DB::listen(static function (QueryExecuted $query) use ($extendedRecord, &$hasExtended): void {
+        if (! $hasExtended && preg_match('/^select .* from .?oauth_consent_records.? where .*retention_until.* limit 100$/', $query->sql) === 1) {
+            $hasExtended = true;
+            DB::table('oauth_consent_records')->where('id', $extendedRecord->getKey())->update(['retention_until' => now()->addDays(30)]);
+        }
+    });
+
+    $this->artisan('mcp-oauth:purge-revoked')
+        ->expectsOutputToContain('1 consent record')
+        ->assertSuccessful();
+
+    expect(OAuthConsentRecord::query()->pluck('id')->all())->toBe([$extendedRecord->getKey()]);
+});
+
+it('reports the clients it deleted, not a count taken before (Codex review of #65)', function (): void {
+    // A full first page, so the purge reads a second one.
+    foreach (range(1, 100) as $clientNumber) {
+        clientRevokedDaysAgo($this, 91);
+    }
+
+    $hasInserted = false;
+    // Another client revoked long ago lands after the first page: the second page deletes it too.
+    DB::listen(function (QueryExecuted $query) use (&$hasInserted): void {
+        if (! $hasInserted && preg_match('/^select .* from .?oauth_client_metadata.? where .*revoked_at.* limit 100$/', $query->sql) === 1) {
+            $hasInserted = true;
+            clientRevokedDaysAgo($this, 95);
+        }
+    });
+
+    Artisan::call('mcp-oauth:purge-revoked');
+
+    expect(OAuthClientMetadata::query()->count())->toBe(0)
+        ->and(Artisan::output())->toContain('Purged 101 clients');
+});
 
 it('purges a revoked client only once 90 full days have passed', function (int $days, bool $isPurged): void {
     $this->enableOAuth();

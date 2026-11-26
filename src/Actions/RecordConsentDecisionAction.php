@@ -20,6 +20,8 @@ use Qiick\McpOAuth\RedirectUriGuard;
  * evidence too). An approval keeps `retention_until` null while its grant is
  * active; a denial is kept `revoked_retention_days` (90) from now.
  * The IP address and user agent are personal data, purged with the row.
+ *
+ * @internal
  */
 final class RecordConsentDecisionAction
 {

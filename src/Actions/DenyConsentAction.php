@@ -19,6 +19,8 @@ use Qiick\McpOAuth\Services\ConsentPageService;
  * refused phishing attempt leaves evidence (standards review decision 5),
  * McpConsentDeniedEvent, and the request marked denied so league answers
  * `access_denied` to the client.
+ *
+ * @internal
  */
 final class DenyConsentAction
 {

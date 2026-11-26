@@ -8,6 +8,8 @@ use Qiick\McpOAuth\Contracts\AdminSwitch;
 
 /**
  * Default AdminSwitch while the product has not bound its own. Always off.
+ *
+ * @internal
  */
 final class DisabledAdminSwitch implements AdminSwitch
 {

@@ -18,6 +18,8 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  * ever sees and revokes their own active grants; anything else is a 404.
  * The product owns the page: the list answers JSON, and a revoke answers 204
  * to a JSON call and redirects back for a form or Inertia post.
+ *
+ * @internal
  */
 final class ConnectedAppsController
 {

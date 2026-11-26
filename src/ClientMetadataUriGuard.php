@@ -31,7 +31,7 @@ use Qiick\McpOAuth\Internal\BlockedHostCatalog;
  * resolves to an internal address (`127.0.0.1.nip.io`) stays a fetch-time
  * concern for whichever consumer starts fetching.
  *
- * @api
+ * @internal
  */
 final class ClientMetadataUriGuard
 {

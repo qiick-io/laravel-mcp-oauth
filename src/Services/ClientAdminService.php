@@ -18,6 +18,8 @@ use Qiick\McpOAuth\RedirectUriGuard;
  * What the admin clients page reads (design §5.2): the clients this package
  * registered, newest first and paginated, and the blocked hosts. Public ids
  * and display hosts only; never a secret.
+ *
+ * @internal
  */
 final class ClientAdminService
 {

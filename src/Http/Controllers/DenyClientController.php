@@ -13,6 +13,8 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * `DELETE oauth/authorize` (web, auth, verified; CSRF from the web group):
  * the user denied. The client receives `access_denied` with `state` and `iss`.
+ *
+ * @internal
  */
 final class DenyClientController
 {

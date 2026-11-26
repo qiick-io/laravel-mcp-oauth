@@ -10,7 +10,7 @@ use Qiick\McpOAuth\Actions\PurgeRevokedRecordsAction;
 /**
  * Products schedule it daily: `Schedule::command('mcp-oauth:purge-revoked')->daily()->onOneServer()`.
  *
- * @api
+ * @internal
  */
 final class PurgeRevokedRecordsCommand extends Command
 {

@@ -27,6 +27,8 @@ use Qiick\McpOAuth\Models\OAuthAuthCodeExchange;
  * - the grant the code is consumed under is recorded, and a later
  *   presentation revokes the tokens issued with it
  *   ({@see RevokeAuthCodeTokensAction}).
+ *
+ * @internal
  */
 final class OneShotAuthCodeRepository extends AuthCodeRepository
 {

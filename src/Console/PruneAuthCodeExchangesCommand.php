@@ -10,7 +10,7 @@ use Qiick\McpOAuth\Actions\PruneAuthCodeExchangesAction;
 /**
  * Products schedule it daily: `Schedule::command('mcp-oauth:prune-auth-code-exchanges')->daily()->onOneServer()`.
  *
- * @api
+ * @internal
  */
 final class PruneAuthCodeExchangesCommand extends Command
 {

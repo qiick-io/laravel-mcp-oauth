@@ -14,6 +14,8 @@ use Symfony\Component\HttpFoundation\Response;
  * registry consent component (design Resolved #9). Bound only when
  * inertiajs/inertia-laravel is installed. The props mirror {@see ConsentPage}
  * one to one; docs/consent-page.md documents them and the form the page posts.
+ *
+ * @internal
  */
 final class InertiaConsentView implements ConsentView
 {
