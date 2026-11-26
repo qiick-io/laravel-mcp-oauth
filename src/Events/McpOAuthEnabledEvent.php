@@ -5,14 +5,13 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth\Events;
 
 /**
- * Dispatched after commit when an admin blocks a client.
+ * Dispatched after commit when an admin switches OAuth on.
  *
  * @api
  */
-final readonly class McpClientBlocked
+final readonly class McpOAuthEnabledEvent
 {
     public function __construct(
-        public string $clientId,
         public ?string $actorIdentifier,
     ) {}
 }

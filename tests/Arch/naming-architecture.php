@@ -41,23 +41,6 @@ return [
             // keep the FQCN listed if a future rule expands.
             'Qiick\McpOAuth\Data\RevocationReason',
         ],
-        'Events' => [
-            // Design §5.5: verb past-tense names, no Event suffix.
-            'Qiick\McpOAuth\Events\McpOAuthEnabled',
-            'Qiick\McpOAuth\Events\McpOAuthDisabled',
-            'Qiick\McpOAuth\Events\McpClientRegistered',
-            'Qiick\McpOAuth\Events\McpConsentApproved',
-            'Qiick\McpOAuth\Events\McpConsentDenied',
-            'Qiick\McpOAuth\Events\McpGrantRevoked',
-            'Qiick\McpOAuth\Events\McpRefreshTokenReused',
-            'Qiick\McpOAuth\Events\McpTokenRevoked',
-            'Qiick\McpOAuth\Events\McpRevokedRecordsPurged',
-            'Qiick\McpOAuth\Events\McpClientBlocked',
-            'Qiick\McpOAuth\Events\McpRedirectHostBlocked',
-            'Qiick\McpOAuth\Events\McpRedirectHostUnblocked',
-            'Qiick\McpOAuth\Events\McpUnusedClientsPruned',
-            'Qiick\McpOAuth\Events\McpPassportKeysMissing',
-        ],
         // Root @api services use design names (not Services\*Service).
         'Services' => [
             'Qiick\McpOAuth\McpOAuthServer',

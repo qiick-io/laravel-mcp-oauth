@@ -17,8 +17,8 @@ use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\ClientThrottleKey;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
-use Qiick\McpOAuth\Events\McpClientRegistered;
-use Qiick\McpOAuth\Events\McpPassportKeysMissing;
+use Qiick\McpOAuth\Events\McpClientRegisteredEvent;
+use Qiick\McpOAuth\Events\McpPassportKeysFoundMissingEvent;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
@@ -119,7 +119,7 @@ it('with OAuth off matches an unregistered /oauth/register byte-for-byte on ever
 })->with(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
 
 it('answers 503 temporarily_unavailable when Passport keys are missing', function (): void {
-    Event::fake([McpPassportKeysMissing::class]);
+    Event::fake([McpPassportKeysFoundMissingEvent::class]);
 
     config()->set('mcp-oauth.enabled', true);
     config()->set('mcp-oauth.mcp_enabled', true);
@@ -147,11 +147,11 @@ it('answers 503 temporarily_unavailable when Passport keys are missing', functio
             'OAuth is unavailable because Passport keys are missing.',
         );
 
-    Event::assertDispatched(McpPassportKeysMissing::class);
+    Event::assertDispatched(McpPassportKeysFoundMissingEvent::class);
 });
 
 it('registers a public client through the redirect URI guard', function (): void {
-    Event::fake([McpClientRegistered::class]);
+    Event::fake([McpClientRegisteredEvent::class]);
     enableMcpOAuthWithKeys();
     McpOAuthRoutes::register();
 
@@ -169,7 +169,7 @@ it('registers a public client through the redirect URI guard', function (): void
 
     expect(Client::query()->where('revoked', false)->count())->toBe(1);
 
-    Event::assertDispatched(McpClientRegistered::class, function (McpClientRegistered $event): bool {
+    Event::assertDispatched(McpClientRegisteredEvent::class, function (McpClientRegisteredEvent $event): bool {
         return $event->displayHosts === ['app.example'];
     });
 });
@@ -214,7 +214,7 @@ it('leaves no client behind when its metadata row cannot be written (S1)', funct
 });
 
 it('closes its transaction whatever laravel/mcp answers', function (array $body, int $status): void {
-    Event::fake([McpClientRegistered::class]);
+    Event::fake([McpClientRegisteredEvent::class]);
     enableMcpOAuthWithKeys();
     McpOAuthRoutes::register();
     $passportConnection = Passport::client()->getConnection();
@@ -224,7 +224,7 @@ it('closes its transaction whatever laravel/mcp answers', function (array $body,
 
     expect($passportConnection->transactionLevel())->toBe($transactionLevelBefore);
     // Only a registration that happened is announced.
-    Event::assertDispatchedTimes(McpClientRegistered::class, $status === 201 ? 1 : 0);
+    Event::assertDispatchedTimes(McpClientRegisteredEvent::class, $status === 201 ? 1 : 0);
 })->with([
     'registered' => [['client_name' => 'Cursor', 'redirect_uris' => ['https://app.example/callback']], 201],
     'refused by laravel/mcp validation' => [['client_name' => 'Cursor'], 400],

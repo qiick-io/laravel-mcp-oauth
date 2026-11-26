@@ -13,7 +13,7 @@ use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\PendingAuthorizationRequestData;
-use Qiick\McpOAuth\Events\McpConsentApproved;
+use Qiick\McpOAuth\Events\McpConsentApprovedEvent;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Services\ConsentDecisionService;
@@ -38,7 +38,7 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
  *    bound to the new grant, the consent record is written, and the client
  *    is marked authorised the first time (`first_authorized_at`, which
  *    keeps mcp-oauth:prune-unused-clients off it after the grant is purged);
- * 5. McpConsentApproved is dispatched after the commit;
+ * 5. McpConsentApprovedEvent is dispatched after the commit;
  * 6. the request is marked approved, ready for
  *    AuthorizationResponseService::complete().
  */
@@ -111,7 +111,7 @@ final class ApproveConsentAction
             return $grant;
         }));
 
-        $this->events->dispatch(new McpConsentApproved(
+        $this->events->dispatch(new McpConsentApprovedEvent(
             clientId: $clientInfo->id,
             userIdentifier: $userIdentifier,
             grantId: $grant->id,

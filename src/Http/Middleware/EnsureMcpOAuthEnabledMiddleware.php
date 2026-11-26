@@ -6,7 +6,7 @@ namespace Qiick\McpOAuth\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
-use Qiick\McpOAuth\Events\McpPassportKeysMissing;
+use Qiick\McpOAuth\Events\McpPassportKeysFoundMissingEvent;
 use Qiick\McpOAuth\McpOAuthServer;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -16,7 +16,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  * Off → the same 404 the router would emit for an unknown path (status, body
  * and Allow). On without usable Passport keys → 503 temporarily_unavailable
  * (an HTML page for a browser on the consent flow) and
- * {@see McpPassportKeysMissing}.
+ * {@see McpPassportKeysFoundMissingEvent}.
  */
 final class EnsureMcpOAuthEnabledMiddleware
 {
@@ -39,7 +39,7 @@ final class EnsureMcpOAuthEnabledMiddleware
         }
 
         if (! $this->mcpOAuthServer->hasPassportKeys()) {
-            event(new McpPassportKeysMissing(
+            event(new McpPassportKeysFoundMissingEvent(
                 endpoint: $request->path(),
                 reason: 'unreadable',
             ));

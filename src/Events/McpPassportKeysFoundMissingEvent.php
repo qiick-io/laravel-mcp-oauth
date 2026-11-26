@@ -9,7 +9,7 @@ namespace Qiick\McpOAuth\Events;
  *
  * @api
  */
-final readonly class McpPassportKeysMissing
+final readonly class McpPassportKeysFoundMissingEvent
 {
     /**
      * @param  'env_pair_incomplete'|'file_mode'|'unreadable'  $reason

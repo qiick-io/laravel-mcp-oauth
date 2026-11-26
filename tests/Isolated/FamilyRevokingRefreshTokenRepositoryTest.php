@@ -14,7 +14,7 @@ use Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
-use Qiick\McpOAuth\Events\McpRefreshTokenReused;
+use Qiick\McpOAuth\Events\McpRefreshTokenReusedEvent;
 use Qiick\McpOAuth\Testing\FakeGrantStore;
 use Qiick\McpOAuth\Tests\Support\PassportBootedTestCase;
 
@@ -162,7 +162,7 @@ it('marks a live refresh token revoked without touching the family on first revo
 });
 
 it('revokes the token family and throws invalid_grant when a used refresh token is presented again', function (): void {
-    Event::fake([McpRefreshTokenReused::class]);
+    Event::fake([McpRefreshTokenReusedEvent::class]);
 
     /** @var FakeGrantStore $grantStore */
     $grantStore = app(GrantStore::class);
@@ -182,7 +182,7 @@ it('revokes the token family and throws invalid_grant when a used refresh token 
         ->and($grantStore->revocations)->toHaveCount(1)
         ->and($grantStore->revocations[0]['reason'])->toBe(RevocationReason::Reuse);
 
-    Event::assertDispatched(McpRefreshTokenReused::class, function (McpRefreshTokenReused $event) use ($family): bool {
+    Event::assertDispatched(McpRefreshTokenReusedEvent::class, function (McpRefreshTokenReusedEvent $event) use ($family): bool {
         // 2 access + 1 still-live sibling refresh (primary RT already CAS-revoked).
         return $event->grantId === $family['grant']->id
             && $event->clientId === $family['grant']->clientId
@@ -608,7 +608,7 @@ it('treats an empty binding as no binding', function (): void {
 });
 
 it('resolves an integer binding to the grant it names', function (): void {
-    Event::fake([McpRefreshTokenReused::class]);
+    Event::fake([McpRefreshTokenReusedEvent::class]);
     Schema::table('oauth_access_tokens', function (Blueprint $table): void {
         $table->unsignedBigInteger('grant_number')->nullable();
     });
@@ -630,7 +630,7 @@ it('resolves an integer binding to the grant it names', function (): void {
         ->and($grantStore->revocations[0]['grantId'])->toBe('7')
         ->and(Passport::token()->newQuery()->whereKey($family['siblingAccessTokenId'])->value('revoked'))->toBeTrue();
 
-    Event::assertDispatched(McpRefreshTokenReused::class, fn (McpRefreshTokenReused $event): bool => $event->grantId === '7');
+    Event::assertDispatched(McpRefreshTokenReusedEvent::class, fn (McpRefreshTokenReusedEvent $event): bool => $event->grantId === '7');
 });
 
 it('falls back to api_key_id when the binding column is not configured', function (mixed $configuredColumn): void {

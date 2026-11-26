@@ -5,14 +5,13 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth\Events;
 
 /**
- * Dispatched after commit when an admin unblocks a redirect host.
+ * Dispatched after commit when an admin switches OAuth off.
  *
  * @api
  */
-final readonly class McpRedirectHostUnblocked
+final readonly class McpOAuthDisabledEvent
 {
     public function __construct(
-        public string $host,
         public ?string $actorIdentifier,
     ) {}
 }

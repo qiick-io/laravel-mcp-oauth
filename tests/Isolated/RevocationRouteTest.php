@@ -11,8 +11,8 @@ use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
 use League\OAuth2\Server\CryptTrait;
 use Qiick\McpOAuth\Data\RevocationReason;
-use Qiick\McpOAuth\Events\McpRefreshTokenReused;
-use Qiick\McpOAuth\Events\McpTokenRevoked;
+use Qiick\McpOAuth\Events\McpRefreshTokenReusedEvent;
+use Qiick\McpOAuth\Events\McpTokenRevokedEvent;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
@@ -115,7 +115,7 @@ it('is named mcp.oauth.revoke, stateless and throttled with mcp-oauth-revoke', f
 // --- Refresh tokens: family and grant (Resolved #5) --------------------------
 
 it('revokes a refresh token with its family and grant', function (): void {
-    Event::fake([McpTokenRevoked::class, McpRefreshTokenReused::class]);
+    Event::fake([McpTokenRevokedEvent::class, McpRefreshTokenReusedEvent::class]);
     $this->enableOAuth();
     McpOAuthRoutes::register();
     $client = $this->createClient();
@@ -135,7 +135,7 @@ it('revokes a refresh token with its family and grant', function (): void {
             'reason' => RevocationReason::Client,
         ]);
 
-    Event::assertDispatched(McpTokenRevoked::class, static fn (McpTokenRevoked $event): bool => $event->clientId === (string) $client->getKey()
+    Event::assertDispatched(McpTokenRevokedEvent::class, static fn (McpTokenRevokedEvent $event): bool => $event->clientId === (string) $client->getKey()
         && $event->userIdentifier === $tokens['user_id']
         && $event->grantId === $grant->id
         && $event->tokenType === 'refresh_token'
@@ -143,14 +143,14 @@ it('revokes a refresh token with its family and grant', function (): void {
 
     // Presented again, it is unknown: refused, never read as reuse.
     refreshWith($this, $client, (string) $rotated->json('refresh_token'))->assertStatus(400)->assertJsonPath('error', 'invalid_grant');
-    Event::assertNotDispatched(McpRefreshTokenReused::class);
+    Event::assertNotDispatched(McpRefreshTokenReusedEvent::class);
     expect(collect($this->grantStore()->revocations)->pluck('reason'))->not->toContain(RevocationReason::Reuse);
 });
 
 // --- Access tokens: the token and its refresh tokens, not the grant ---------
 
 it('revokes an access token and its refresh token, but not the grant', function (): void {
-    Event::fake([McpTokenRevoked::class, McpRefreshTokenReused::class]);
+    Event::fake([McpTokenRevokedEvent::class, McpRefreshTokenReusedEvent::class]);
     $this->enableOAuth();
     McpOAuthRoutes::register();
     $client = $this->createClient();
@@ -164,13 +164,13 @@ it('revokes an access token and its refresh token, but not the grant', function 
         ->and(DB::table('oauth_refresh_tokens')->count())->toBe(0)
         ->and($this->grantStore()->find($grant->id)?->revoked)->toBeFalse();
 
-    Event::assertDispatched(McpTokenRevoked::class, static fn (McpTokenRevoked $event): bool => $event->tokenType === 'access_token'
+    Event::assertDispatched(McpTokenRevokedEvent::class, static fn (McpTokenRevokedEvent $event): bool => $event->tokenType === 'access_token'
         && $event->grantId === $grant->id
         && $event->revokedTokenCount === 2);
 
     // The refresh token issued with it is refused alone: no family, no reuse.
     refreshWith($this, $client, $tokens['refresh_token'])->assertStatus(400)->assertJsonPath('error', 'invalid_grant');
-    Event::assertNotDispatched(McpRefreshTokenReused::class);
+    Event::assertNotDispatched(McpRefreshTokenReusedEvent::class);
     expect($this->grantStore()->find($grant->id)?->revoked)->toBeFalse()
         ->and($this->grantStore()->revocations)->toBe([]);
 });
@@ -336,7 +336,7 @@ it('refuses a Passport client the package did not register', function (): void {
 });
 
 it('never revokes a newer consent when a token of an older one is revoked', function (): void {
-    Event::fake([McpTokenRevoked::class, McpRefreshTokenReused::class]);
+    Event::fake([McpTokenRevokedEvent::class, McpRefreshTokenReusedEvent::class]);
     $this->enableOAuth();
     McpOAuthRoutes::register();
     $client = $this->createClient();
@@ -353,12 +353,12 @@ it('never revokes a newer consent when a token of an older one is revoked', func
         ->and(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe(1);
     // The re-consent revoked that older refresh token, so it comes back as
     // reuse of the older family, as at the token endpoint; the newer consent stays.
-    Event::assertDispatched(McpRefreshTokenReused::class, static fn (McpRefreshTokenReused $event): bool => $event->grantId !== $newerGrant->id);
-    Event::assertNotDispatched(McpTokenRevoked::class);
+    Event::assertDispatched(McpRefreshTokenReusedEvent::class, static fn (McpRefreshTokenReusedEvent $event): bool => $event->grantId !== $newerGrant->id);
+    Event::assertNotDispatched(McpTokenRevokedEvent::class);
 });
 
 it('names no grant when the revoked token is bound to none that is active', function (): void {
-    Event::fake([McpTokenRevoked::class]);
+    Event::fake([McpTokenRevokedEvent::class]);
     $this->enableOAuth();
     McpOAuthRoutes::register();
     $client = $this->createClient();
@@ -369,7 +369,7 @@ it('names no grant when the revoked token is bound to none that is active', func
     postRevoke($this, ['token' => $tokens['access_token'], 'client_id' => (string) $client->getKey()])->assertOk();
 
     expect(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe(0);
-    Event::assertDispatched(McpTokenRevoked::class, static fn (McpTokenRevoked $event): bool => $event->grantId === null
+    Event::assertDispatched(McpTokenRevokedEvent::class, static fn (McpTokenRevokedEvent $event): bool => $event->grantId === null
         && $event->tokenType === 'access_token');
 });
 
@@ -435,7 +435,7 @@ function expireRefreshToken(string $refreshToken): string
 }
 
 it('treats a rotated refresh token as reuse, as the token endpoint does (B1)', function (): void {
-    Event::fake([McpTokenRevoked::class, McpRefreshTokenReused::class]);
+    Event::fake([McpTokenRevokedEvent::class, McpRefreshTokenReusedEvent::class]);
     $this->enableOAuth();
     McpOAuthRoutes::register();
     $client = $this->createClient();
@@ -450,12 +450,12 @@ it('treats a rotated refresh token as reuse, as the token endpoint does (B1)', f
     expect(collect($this->grantStore()->revocations)->pluck('reason')->all())->toBe([RevocationReason::Reuse])
         ->and($this->grantStore()->find($grant->id)?->revoked)->toBeTrue()
         ->and(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe(0);
-    Event::assertDispatched(McpRefreshTokenReused::class);
-    Event::assertNotDispatched(McpTokenRevoked::class);
+    Event::assertDispatched(McpRefreshTokenReusedEvent::class);
+    Event::assertNotDispatched(McpTokenRevokedEvent::class);
 });
 
 it('changes nothing for an expired or already revoked refresh token (RFC 7009 §2.2)', function (string $case): void {
-    Event::fake([McpTokenRevoked::class, McpRefreshTokenReused::class]);
+    Event::fake([McpTokenRevokedEvent::class, McpRefreshTokenReusedEvent::class]);
     $this->enableOAuth();
     McpOAuthRoutes::register();
     $client = $this->createClient();
@@ -467,7 +467,7 @@ it('changes nothing for an expired or already revoked refresh token (RFC 7009 §
     } else {
         // Revoked through this endpoint: its row is gone, the access token revoked.
         postRevoke($this, ['token' => $tokens['access_token'], 'client_id' => (string) $client->getKey()])->assertOk();
-        Event::fake([McpTokenRevoked::class, McpRefreshTokenReused::class]);
+        Event::fake([McpTokenRevokedEvent::class, McpRefreshTokenReusedEvent::class]);
     }
 
     $liveAccessTokensBefore = DB::table('oauth_access_tokens')->where('revoked', false)->count();
@@ -476,8 +476,8 @@ it('changes nothing for an expired or already revoked refresh token (RFC 7009 §
 
     expect(DB::table('oauth_access_tokens')->where('revoked', false)->count())->toBe($liveAccessTokensBefore)
         ->and($this->grantStore()->revocations)->toBe([]);
-    Event::assertNotDispatched(McpTokenRevoked::class);
-    Event::assertNotDispatched(McpRefreshTokenReused::class);
+    Event::assertNotDispatched(McpTokenRevokedEvent::class);
+    Event::assertNotDispatched(McpRefreshTokenReusedEvent::class);
 })->with(['expired', 'already revoked']);
 
 it('accepts only the form-encoded body RFC 7009 defines', function (): void {
@@ -494,7 +494,7 @@ it('accepts only the form-encoded body RFC 7009 defines', function (): void {
 });
 
 it('changes nothing for a refresh token whose access token was purged', function (): void {
-    Event::fake([McpTokenRevoked::class, McpRefreshTokenReused::class]);
+    Event::fake([McpTokenRevokedEvent::class, McpRefreshTokenReusedEvent::class]);
     $this->enableOAuth();
     McpOAuthRoutes::register();
     $client = $this->createClient();
@@ -508,6 +508,6 @@ it('changes nothing for a refresh token whose access token was purged', function
     expect($this->grantStore()->find($grant->id)?->revoked)->toBeFalse()
         ->and($this->grantStore()->revocations)->toBe([])
         ->and(DB::table('oauth_refresh_tokens')->count())->toBe(1);
-    Event::assertNotDispatched(McpTokenRevoked::class);
-    Event::assertNotDispatched(McpRefreshTokenReused::class);
+    Event::assertNotDispatched(McpTokenRevokedEvent::class);
+    Event::assertNotDispatched(McpRefreshTokenReusedEvent::class);
 });

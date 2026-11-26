@@ -6,7 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
-use Qiick\McpOAuth\Events\McpPassportKeysMissing;
+use Qiick\McpOAuth\Events\McpPassportKeysFoundMissingEvent;
 use Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Testing\FakeAdminSwitch;
@@ -30,7 +30,7 @@ it('aborts 404 when OAuth is off', function (): void {
 });
 
 it('answers 503 with both wire keys when Passport keys are missing', function (): void {
-    Event::fake([McpPassportKeysMissing::class]);
+    Event::fake([McpPassportKeysFoundMissingEvent::class]);
 
     config()->set('mcp-oauth.enabled', true);
     config()->set('mcp-oauth.mcp_enabled', true);
@@ -51,7 +51,7 @@ it('answers 503 with both wire keys when Passport keys are missing', function ()
             'error_description' => 'OAuth is unavailable because Passport keys are missing.',
         ]);
 
-    Event::assertDispatched(McpPassportKeysMissing::class, function (McpPassportKeysMissing $event): bool {
+    Event::assertDispatched(McpPassportKeysFoundMissingEvent::class, function (McpPassportKeysFoundMissingEvent $event): bool {
         return $event->endpoint === 'oauth/register' && $event->reason === 'unreadable';
     });
 });

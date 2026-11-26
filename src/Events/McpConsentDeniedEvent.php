@@ -9,7 +9,7 @@ namespace Qiick\McpOAuth\Events;
  *
  * @api
  */
-final readonly class McpConsentDenied
+final readonly class McpConsentDeniedEvent
 {
     public function __construct(
         public string $clientId,

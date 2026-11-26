@@ -27,12 +27,12 @@ before the change's event:
 
 | Change | Transaction on | Then dispatched |
 | --- | --- | --- |
-| Consent approved | the package's connection, with the default one nested | `McpConsentApproved` |
-| Consent denied | the package's connection | `McpConsentDenied` |
-| Grant revoked from Connected apps, or by the client (RFC 7009 refresh token) | Passport's | `McpGrantRevoked`, `McpTokenRevoked` |
-| Client blocked | Passport's | `McpClientBlocked` |
-| Redirect host blocked, unblocked | the package's | `McpRedirectHostBlocked`, `McpRedirectHostUnblocked` |
-| OAuth switched on or off | the default connection; the entry is written before the product's store | `McpOAuthEnabled`, `McpOAuthDisabled` |
+| Consent approved | the package's connection, with the default one nested | `McpConsentApprovedEvent` |
+| Consent denied | the package's connection | `McpConsentDeniedEvent` |
+| Grant revoked from Connected apps, or by the client (RFC 7009 refresh token) | Passport's | `McpGrantRevokedEvent`, `McpTokenRevokedEvent` |
+| Client blocked | Passport's | `McpClientBlockedEvent` |
+| Redirect host blocked, unblocked | the package's | `McpRedirectHostBlockedEvent`, `McpRedirectHostUnblockedEvent` |
+| OAuth switched on or off | the default connection; the entry is written before the product's store | `McpOAuthEnabledEvent`, `McpOAuthDisabledEvent` |
 
 ## Entries
 
@@ -51,7 +51,7 @@ callback URL, authorization header or request body (S79). The causer is the
 | `mcp_oauth_enabled`, `mcp_oauth_disabled` | the admin, or null | null | none |
 
 An RFC 7009 revoke of an access token leaves the grant in place and writes no
-entry; `McpTokenRevoked` reports it.
+entry; `McpTokenRevokedEvent` reports it.
 
 ## Keeping the 1.5 activity log
 
