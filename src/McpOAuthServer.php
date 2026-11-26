@@ -100,10 +100,20 @@ final class McpOAuthServer
 
         return in_array(strtolower((string) $issuerParts['scheme']), ['http', 'https'], true)
             && (string) $issuerParts['host'] !== ''
-            && ($issuerParts['port'] === null || ($issuerParts['port'] >= 1 && $issuerParts['port'] <= 65_535))
+            && ($issuerParts['port'] === null || $this->hasPlainPort($issuerParts['port']))
             && $issuerParts['user'] === null
             && $issuerParts['query'] === null
             && $issuerParts['fragment'] === null;
+    }
+
+    /**
+     * A port from 1 to 65535, written as digits only: League parses ports
+     * with FILTER_VALIDATE_INT, which also takes `+80`, and every advertised
+     * endpoint would then carry `:+80`.
+     */
+    private function hasPlainPort(int $port): bool
+    {
+        return $port >= 1 && $port <= 65_535 && preg_match('#:'.$port.'(?:/|$)#', $this->issuer()) === 1;
     }
 
     /**
