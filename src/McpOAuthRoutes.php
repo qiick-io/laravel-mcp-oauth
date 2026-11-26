@@ -173,7 +173,8 @@ final class McpOAuthRoutes
      * What stops the package from serving the endpoints its metadata
      * advertises (design §4.3), for switch-on and `mcp-oauth:check`. Each
      * advertised URL (authorize, approve, deny, token, register, revoke when
-     * it is advertised, both metadata documents) is matched against the live
+     * it is advertised, both metadata documents, and the nested protected
+     * resource URL of the WWW-Authenticate challenge) is matched against the live
      * route collection as a request to the issuer would be, host included,
      * and the route it selects must be the package's controller. A route
      * name proves nothing: a prefixed mount, a mount for another domain or a
@@ -202,6 +203,8 @@ final class McpOAuthRoutes
             ['POST', $registrationEndpoint, RegisterClientController::class],
             ['GET', $issuer.'/.well-known/oauth-authorization-server', AuthorizationServerMetadataController::class],
             ['GET', $issuer.'/.well-known/oauth-protected-resource', ProtectedResourceMetadataController::class],
+            // The URL the /mcp challenge advertises in WWW-Authenticate.
+            ['GET', $mcpOAuthServer->protectedResourceMetadataUrl(), ProtectedResourceMetadataController::class],
         ];
         $revocationEndpoint = $mcpOAuthServer->revocationEndpointUrl();
 

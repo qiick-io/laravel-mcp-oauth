@@ -92,6 +92,7 @@ it('refuses to switch on while a foreign handler answers any advertised URL (Cod
     'revoke' => ['POST', 'oauth/revoke'],
     'authorization server metadata' => ['GET', '.well-known/oauth-authorization-server'],
     'protected resource metadata' => ['GET', '.well-known/oauth-protected-resource'],
+    'protected resource metadata at the WWW-Authenticate URL' => ['GET', '.well-known/oauth-protected-resource/mcp'],
 ]);
 
 it('switches on when the routes are mounted for the issuer\'s own domain', function (): void {
