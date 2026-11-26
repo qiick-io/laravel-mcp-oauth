@@ -14,6 +14,7 @@ use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Events\Routing;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Inertia\Inertia;
@@ -73,6 +74,9 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class McpOAuthServiceProvider extends ServiceProvider
 {
+    /** The routes a request is matched against were checked once: they do not change after boot. */
+    private bool $hasCheckedServedRoutes = false;
+
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/mcp-oauth.php', 'mcp-oauth');
@@ -174,6 +178,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
 
         $this->configurePassportTokenLifetimes();
         $this->configurePassportScopes();
+        $this->pinAuthorizationServer();
         Passport::useAuthorizationServerResponseType(new McpBearerTokenResponse);
         Passport::authorizationView(function (array $parameters): Response {
             // The shape AuthorizationController passes to withParameters().
@@ -184,6 +189,16 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->validateRemainingIntegerConfig();
         $this->bindAccessTokensOnCreation();
         $this->assertAdaptersBoundWhileEnabled();
+        // After every provider booted, when uncached routes are loaded. Cached
+        // routes are restored later still, so the first routed request checks
+        // again, on the final route collection (route:cache).
+        $this->app->booted(fn () => $this->assertNoLaravelMcpOAuthRoutesWhileEnabled());
+        $this->app->make(Dispatcher::class)->listen(Routing::class, function (): void {
+            if (! $this->hasCheckedServedRoutes) {
+                $this->assertNoLaravelMcpOAuthRoutesWhileEnabled();
+                $this->hasCheckedServedRoutes = true;
+            }
+        });
 
         if ($this->app->runningInConsole()) {
             $this->commands([
@@ -338,6 +353,38 @@ final class McpOAuthServiceProvider extends ServiceProvider
 
         if ($this->app->resolved(AuthorizationServer::class)) {
             $harden($this->app->make(AuthorizationServer::class));
+        }
+    }
+
+    /**
+     * Fails closed, like a missing adapter, while OAuth is on and laravel/mcp's
+     * own OAuth routes are mounted: they would serve Host-derived documents
+     * beside the package's (S13).
+     *
+     * @throws InvalidMcpOAuthConfigException
+     */
+    private function assertNoLaravelMcpOAuthRoutesWhileEnabled(): void
+    {
+        $laravelMcpRouteNames = McpOAuthRoutes::laravelMcpOAuthRouteNames();
+
+        if ($this->isMcpOAuthEnabled() && $laravelMcpRouteNames !== []) {
+            throw InvalidMcpOAuthConfigException::laravelMcpOAuthRoutesMounted($laravelMcpRouteNames);
+        }
+    }
+
+    /**
+     * laravel/mcp builds its own discovery documents (`Mcp::oauthRoutes()`)
+     * from `mcp.authorization_server`, else from url('/'), the request Host.
+     * The package never mounts them, but a product that also calls it gets
+     * the issuer (APP_URL), never a Host-derived one (design §5.2, S13). A
+     * value the product set is kept.
+     */
+    private function pinAuthorizationServer(): void
+    {
+        $config = $this->app->make(ConfigRepository::class);
+
+        if ($config->get('mcp.authorization_server') === null) {
+            $config->set('mcp.authorization_server', $this->app->make(McpOAuthServer::class)->issuer());
         }
     }
 

@@ -48,6 +48,16 @@ final class InvalidMcpOAuthConfigException extends InvalidArgumentException
         );
     }
 
+    /**
+     * @param  list<string>  $routeNames
+     */
+    public static function laravelMcpOAuthRoutesMounted(array $routeNames): self
+    {
+        return new self(
+            'mcp-oauth is enabled beside laravel/mcp\'s own OAuth routes ['.implode(', ', $routeNames).'], whose documents follow the request Host. Remove Mcp::oauthRoutes(): McpOAuthRoutes::register() serves them.',
+        );
+    }
+
     public static function invalidGrantBindingColumn(): self
     {
         return new self(

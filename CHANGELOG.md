@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- laravel/mcp's own OAuth routes (`Mcp::oauthRoutes()`) build their discovery
+  endpoints and resource from the request Host. With OAuth on, boot now fails
+  (or, with `route:cache`, the first routed request, once the cached routes are
+  restored) while any of them is mounted (its nested documents, or its unguarded
+  `oauth/register`), and `mcp-oauth:check` lists them. `mcp.authorization_server`
+  is pinned to the issuer when the product leaves it null.
 - DCR answers with `client_id_issued_at` (epoch seconds), which RFC 7591
   §3.2.1 requires, and stores and returns `application_type`, `tos_uri`,
   `policy_uri`, `contacts`, `software_id` and `software_version`. A client that

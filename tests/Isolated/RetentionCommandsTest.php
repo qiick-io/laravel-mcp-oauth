@@ -350,6 +350,7 @@ it('reports a ready server with its issuer, resource and key source', function (
         ->expectsOutputToContain('Resource: https://mcp-oauth.test/mcp')
         ->expectsOutputToContain('Passport keys: env, usable')
         ->expectsOutputToContain('Foreign Passport routes: none')
+        ->expectsOutputToContain('laravel/mcp OAuth routes: none')
         ->assertSuccessful();
 });
 
@@ -373,6 +374,17 @@ it('fails beside a foreign Passport route (design §3.3)', function (): void {
 
     $this->artisan('mcp-oauth:check')
         ->expectsOutputToContain('Foreign Passport routes: passport.device')
+        ->assertFailed();
+});
+
+it('fails beside laravel/mcp\'s own OAuth routes (S13)', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    Route::get('.well-known/oauth-authorization-server/{path}', static fn (): string => '')->where('path', '.*')->name('mcp.oauth.authorization-server.nested');
+    Route::getRoutes()->refreshNameLookups();
+
+    $this->artisan('mcp-oauth:check')
+        ->expectsOutputToContain('laravel/mcp OAuth routes: mcp.oauth.authorization-server.nested')
         ->assertFailed();
 });
 
