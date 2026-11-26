@@ -7,7 +7,9 @@ namespace Qiick\McpOAuth\Actions;
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Database\ConnectionInterface;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
+use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Events\McpOAuthDisabled;
 use Qiick\McpOAuth\Events\McpOAuthEnabled;
 use Qiick\McpOAuth\Exceptions\McpOAuthCannotBeEnabledException;
@@ -26,14 +28,18 @@ use Qiick\McpOAuth\McpOAuthServer;
  *   the origin ({@see McpOAuthRoutes::servingProblems()});
  * - switching off is always allowed and leaves grants, clients and blocked
  *   hosts in place;
- * - either way {@see McpOAuthEnabled} or {@see McpOAuthDisabled} is
- *   dispatched, with the actor, once the store is written.
+ * - either way the audit entry is recorded first, then the store written,
+ *   in one transaction ({@see AuditLogger}: a failing sink leaves the store
+ *   untouched), and {@see McpOAuthEnabled} or {@see McpOAuthDisabled} is
+ *   dispatched, with the actor, after the commit.
  */
 final class SwitchMcpOAuthAction
 {
     public function __construct(
         private readonly McpOAuthServer $mcpOAuthServer,
         private readonly Dispatcher $events,
+        private readonly AuditLogger $auditLogger,
+        private readonly ConnectionInterface $database,
     ) {}
 
     /**
@@ -47,7 +53,10 @@ final class SwitchMcpOAuthAction
             $this->assertCanServe();
         }
 
-        $persist($isEnabled);
+        $this->database->transaction(function () use ($isEnabled, $actor, $persist): void {
+            $this->auditLogger->record($isEnabled ? 'mcp_oauth_enabled' : 'mcp_oauth_disabled', $actor, null, []);
+            $persist($isEnabled);
+        });
 
         $actorIdentifier = $actor === null ? null : PassportUserIdentifier::of($actor);
         $this->events->dispatch($isEnabled ? new McpOAuthEnabled($actorIdentifier) : new McpOAuthDisabled($actorIdentifier));

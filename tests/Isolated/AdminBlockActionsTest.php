@@ -401,6 +401,8 @@ it('blocks a host without one transaction around the client walk (S39)', functio
 
     app(BlockRedirectHostAction::class)->execute('app.example', null, isSubdomainMatched: true);
 
-    // One short transaction per blocked client, never nested in a wider one.
-    expect($openedLevels)->toBe([1, 1, 1]);
+    // One short transaction for the block row and its audit entry (firstOrCreate
+    // may add a savepoint inside it), then one per blocked client, never nested.
+    expect(array_slice($openedLevels, -3))->toBe([1, 1, 1])
+        ->and(array_filter($openedLevels, static fn (int $level): bool => $level === 1))->toHaveCount(4);
 });

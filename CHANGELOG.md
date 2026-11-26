@@ -91,6 +91,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the nested protected resource URL of the WWW-Authenticate challenge)
   selects the package's controller when requested at the issuer, host
   included; `mcp-oauth:check` reports the same problems.
+- The package writes its audit entries through `AuditLogger` (design §3.1,
+  §4.3, §8.2, S78), ids and hosts only: `oauth_consent_approved` and
+  `oauth_consent_denied` (client and redirect host), `mcp_oauth_enabled` and
+  `mcp_oauth_disabled`, `oauth_client_blocked`, `oauth_redirect_host_blocked`
+  (in the short transaction with the block row), `oauth_redirect_host_unblocked`
+  and `oauth_grant_revoked` (Connected apps, and an RFC 7009 refresh-token
+  revoke, with the approval's redirect host). Each entry is recorded inside
+  the transaction of its change, before the change's event: a throwing sink
+  rolls the change back and leaves a clean retry. `docs/audit.md` maps the
+  entries onto the 1.5 activity log (`oauth_authorized`, `oauth_revoked`).
+  Until the product binds its sink a no-op logger takes them;
+  `FakeAuditLogger` records them in tests.
 - The remaining contract additions of the standards review (M9), each with a
   default so existing code keeps working: `ClientInfo` carries what the client
   registered (`registrationSource`, the four URIs, `contacts`, software id and
