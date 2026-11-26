@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `oauth_blocked_redirect_hosts.created_by` is indexed so deleting a user can
+  find that user's blocked redirect hosts without scanning the table on
+  PostgreSQL and SQLite.
 - laravel/mcp's own OAuth routes (`Mcp::oauthRoutes()`) build their discovery
   endpoints and resource from the request Host. With OAuth on, boot now fails
   (or, with `route:cache`, the first routed request, once the cached routes are
