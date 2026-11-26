@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
@@ -279,6 +280,30 @@ it('records a grant revoke once when two Connected apps requests revoke the same
     expect(array_column($this->auditLogger->entries, 'event'))->toBe(['oauth_consent_approved', 'oauth_grant_revoked']);
     Event::assertDispatchedTimes(McpGrantRevoked::class, 1);
 });
+
+it('takes the client row lock inside the revoke transaction, before any write (Codex review of #60)', function (string $path): void {
+    $client = $this->createClient();
+    ['refresh_token' => $refreshToken, 'user_id' => $userIdentifier] = auditedTokensFor($this, $client);
+    $grant = $this->grantStore()->activeFor((string) $client->getKey(), $userIdentifier);
+    $connection = Passport::token()->getConnection();
+    $statementsInTransaction = [];
+    $connection->listen(static function (QueryExecuted $query) use (&$statementsInTransaction, $connection): void {
+        if ($connection->transactionLevel() > 0) {
+            $statementsInTransaction[] = $query->sql;
+        }
+    });
+
+    match ($path) {
+        'Connected apps' => app(RevokeConnectedAppAction::class)->execute($grant, TestUser::query()->findOrFail($userIdentifier)),
+        'RFC 7009' => $this->withHeaders(['Accept' => 'application/json'])
+            ->post('/oauth/revoke', ['token' => $refreshToken, 'client_id' => (string) $client->getKey()])
+            ->assertOk(),
+    };
+
+    // The locking read is the transaction's first statement (SQLite compiles
+    // no FOR UPDATE; the other grammars quote identifiers their own way).
+    expect($statementsInTransaction[0] ?? '')->toMatch('/^select \\* from .?oauth_clients.? where .?oauth_clients.?\\..?id.? = \\?/');
+})->with(['Connected apps', 'RFC 7009']);
 
 // --- Mapping to the 1.5 activity log (standards review §5, S78) ----------------
 
