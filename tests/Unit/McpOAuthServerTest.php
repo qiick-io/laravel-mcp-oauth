@@ -425,4 +425,6 @@ it('refuses an issuer without an authority or with an unusable port', function (
     'port 0' => ['https://app.example:0'],
     'port above 65535' => ['https://app.example:65536'],
     'a non-numeric port' => ['https://app.example:https'],
+    'a signed port' => ['https://app.example:+80'],
+    'a port with a leading space' => ['https://app.example: 80'],
 ]);
