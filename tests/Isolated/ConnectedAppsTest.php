@@ -204,3 +204,21 @@ it('leaves a code issued while the revoke runs alone (#49 review)', function ():
     expect(DB::table('oauth_auth_codes')->where('id', $olderCode)->value('revoked'))->toBeTruthy()
         ->and(DB::table('oauth_auth_codes')->where('id', $codeIssuedDuringTheRevoke)->value('revoked'))->toBeFalsy();
 });
+
+it('rolls the whole revoke back, and tells no one, when a step fails (Devin review of #49)', function (): void {
+    Event::fake([McpGrantRevoked::class]);
+    $user = $this->createUser();
+    ['grant' => $grant, 'accessTokenId' => $accessTokenId] = connectedApp($this, $user);
+    $hookedGrantStore = new HookedGrantStore($this->grantStore());
+    app()->instance(GrantStore::class, $hookedGrantStore);
+    // The step after the token revocation fails (a deadlock, a dropped connection).
+    $hookedGrantStore->afterNextActiveFor = static function (): never {
+        throw new RuntimeException('The database went away.');
+    };
+
+    expect(fn () => app(RevokeConnectedAppAction::class)->execute($grant, $user))->toThrow(RuntimeException::class);
+
+    expect(DB::table('oauth_access_tokens')->where('id', $accessTokenId)->value('revoked'))->toBeFalsy()
+        ->and(DB::table('oauth_refresh_tokens')->where('access_token_id', $accessTokenId)->value('revoked'))->toBeFalsy();
+    Event::assertNotDispatched(McpGrantRevoked::class);
+});
