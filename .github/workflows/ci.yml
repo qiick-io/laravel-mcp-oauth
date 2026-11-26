@@ -1,48 +1,52 @@
 name: CI
 
+# The shared package matrix (app-ui docs/package-matrix.md): a pull request
+# runs only what its change can break, a push to develop or main, the nightly
+# run and a manual run everything. Every job always reports under its name; a
+# job with nothing to do skips its steps, never itself, so a required check
+# never stays pending.
 on:
   push:
     branches:
       - main
       - develop
   pull_request:
+    # `edited`: a new title re-runs pr-title / commitlint.
+    types: [opened, edited, synchronize, reopened]
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  package-matrix:
+    # qiick-io/app-ui@v0.15.0
+    uses: qiick-io/app-ui/.github/workflows/package-matrix.yml@0d97ae1429a856411c76e6de1ec258cae0eabab6 # v0.15.0
+    with:
+      app-ui-ref: 0d97ae1429a856411c76e6de1ec258cae0eabab6
+
   tests:
     name: PHP ${{ matrix.php }} Laravel ${{ matrix.laravel }} ${{ matrix.dependency-version }}
+    needs: package-matrix
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      matrix:
-        php:
-          - '8.3'
-          - '8.4'
-          - '8.5'
-        laravel:
-          - '12'
-          - '13'
-        dependency-version:
-          - lowest
-          - stable
-        include:
-          - laravel: '12'
-            testbench: '10'
-          - laravel: '13'
-            testbench: '11'
+      matrix: ${{ fromJSON(needs.package-matrix.outputs.matrix) }}
     steps:
       - name: Checkout
+        if: ${{ !matrix.skip }}
         # actions/checkout@v4.2.2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup PHP
+        if: ${{ !matrix.skip }}
         # shivammathur/setup-php@2.40.0
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
@@ -52,17 +56,23 @@ jobs:
           tools: composer:v2
 
       - name: Validate composer.json
+        if: ${{ !matrix.skip }}
         run: composer validate --strict --no-check-lock
 
       - name: Install dependencies
+        if: ${{ !matrix.skip }}
+        env:
+          LARAVEL_MAJOR: ${{ matrix.laravel }}
+          TESTBENCH_MAJOR: ${{ matrix.testbench }}
+          DEPENDENCY_VERSION: ${{ matrix.dependency-version }}
         run: |
           # illuminate floor 12.41.1 matches laravel/mcp 1.2.1 (design §2 / §10).
-          if [ "${{ matrix.laravel }}" = "12" ]; then
+          if [ "${LARAVEL_MAJOR}" = "12" ]; then
             ILLUMINATE='^12.41.1'
           else
-            ILLUMINATE='^13.0'
+            ILLUMINATE="^${LARAVEL_MAJOR}.0"
           fi
-          composer require --dev --no-interaction --no-update "orchestra/testbench:^${{ matrix.testbench }}.0"
+          composer require --dev --no-interaction --no-update "orchestra/testbench:^${TESTBENCH_MAJOR}.0"
           composer require --no-interaction --no-update \
             "illuminate/console:${ILLUMINATE}" \
             "illuminate/contracts:${ILLUMINATE}" \
@@ -70,42 +80,42 @@ jobs:
             "illuminate/http:${ILLUMINATE}" \
             "illuminate/routing:${ILLUMINATE}" \
             "illuminate/support:${ILLUMINATE}"
-          if [ "${{ matrix.dependency-version }}" = "lowest" ]; then
+          if [ "${DEPENDENCY_VERSION}" = "lowest" ]; then
             composer update --no-interaction --prefer-dist --prefer-lowest --with-all-dependencies
           else
             composer update --no-interaction --prefer-dist --with-all-dependencies
           fi
 
       - name: Composer audit
+        if: ${{ !matrix.skip }}
         run: composer audit --no-interaction
 
       # Static analysis depends on the tool versions, not on the runtime floor:
       # with --prefer-lowest, old polyfills redefine core functions without types.
       - name: Pint
-        if: matrix.dependency-version == 'stable'
+        if: ${{ !matrix.skip && matrix.dependency-version == 'stable' }}
         run: vendor/bin/pint --test
 
       - name: PHPStan
-        if: matrix.dependency-version == 'stable'
+        if: ${{ !matrix.skip && matrix.dependency-version == 'stable' }}
         run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress
 
       # Level max with no baseline: the ratchet fails if a baseline ever appears.
       - name: Larastan baseline only shrinks
+        if: ${{ !matrix.skip }}
         run: node scripts/qiick-ratchet.mjs phpstan --min-level max
 
       - name: Pest
+        if: ${{ !matrix.skip }}
         run: vendor/bin/pest
 
-  # Mutation targets from the design §11.4: one pest --mutate invocation per
-  # class (pcov, no --covered-only, no || true), split round-robin across
-  # parallel shards so no job runs near its timeout: the four slowest classes
-  # get a shard each (DEDICATED_CLASSES in mutate-per-class.sh), the rest
-  # share five (with four, a shared shard reached 18 minutes, and the one that
-  # also carried the service provider hit the 30-minute limit). Add a shared
-  # shard (matrix and MUTATE_SHARDS) before one passes 20 minutes. Locked dependencies, so every shard mutates against the
-  # same versions.
+  # Per-class mutation (design §11.4), at least 95 per class, split over nine
+  # shards (scripts/mutate-per-class.sh): on a full run the four slowest
+  # classes get a shard each and the rest share five; on a pull request only
+  # the curated classes it changed run, dealt over all nine.
   mutation-shards:
     name: Mutation (shard ${{ matrix.shard }}/9)
+    needs: package-matrix
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -114,10 +124,12 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     steps:
       - name: Checkout
+        if: needs.package-matrix.outputs.mutate-scope == 'all' || needs.package-matrix.outputs.mutate-classes != '[]'
         # actions/checkout@v4.2.2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup PHP
+        if: needs.package-matrix.outputs.mutate-scope == 'all' || needs.package-matrix.outputs.mutate-classes != '[]'
         # shivammathur/setup-php@2.40.0
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
@@ -128,10 +140,14 @@ jobs:
           tools: composer:v2
 
       - name: Install dependencies
+        if: needs.package-matrix.outputs.mutate-scope == 'all' || needs.package-matrix.outputs.mutate-classes != '[]'
         run: composer install --no-interaction --prefer-dist
 
-      - name: Pest mutate (security-critical classes, per-class min 95)
+      - name: Pest mutate per class
+        if: needs.package-matrix.outputs.mutate-scope == 'all' || needs.package-matrix.outputs.mutate-classes != '[]'
         env:
+          MUTATE_SCOPE: ${{ needs.package-matrix.outputs.mutate-scope }}
+          MUTATE_CLASSES: ${{ needs.package-matrix.outputs.mutate-classes }}
           MUTATE_SHARD: ${{ matrix.shard }}
           MUTATE_SHARDS: 9
         run: bash scripts/mutate-per-class.sh
@@ -139,19 +155,21 @@ jobs:
   # One stable check name over every shard, for branch protection: it fails
   # unless every shard succeeded (a cancelled or skipped shard fails it too).
   mutation:
-    name: Mutation
+    name: Mutation (per-class ≥95%)
     needs: mutation-shards
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Every shard passed
-        run: test "${{ needs.mutation-shards.result }}" = "success"
+        env:
+          SHARDS_RESULT: ${{ needs.mutation-shards.result }}
+        run: test "$SHARDS_RESULT" = success
 
-  # Real HTTP against php -S. Feature PRs fill the Pest `http` group; once any
-  # test joins that group the job must fail if the group is empty.
+  # Real HTTP against php -S (the Pest `http` group).
   http-server:
     name: Real HTTP (Laravel ${{ matrix.laravel }})
+    needs: package-matrix
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -164,10 +182,12 @@ jobs:
             testbench: '11'
     steps:
       - name: Checkout
+        if: needs.package-matrix.outputs.docs-only != 'true'
         # actions/checkout@v4.2.2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup PHP
+        if: needs.package-matrix.outputs.docs-only != 'true'
         # shivammathur/setup-php@2.40.0
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
@@ -177,13 +197,17 @@ jobs:
           tools: composer:v2
 
       - name: Install dependencies
+        if: needs.package-matrix.outputs.docs-only != 'true'
+        env:
+          LARAVEL_MAJOR: ${{ matrix.laravel }}
+          TESTBENCH_MAJOR: ${{ matrix.testbench }}
         run: |
-          if [ "${{ matrix.laravel }}" = "12" ]; then
+          if [ "${LARAVEL_MAJOR}" = "12" ]; then
             ILLUMINATE='^12.41.1'
           else
             ILLUMINATE='^13.0'
           fi
-          composer require --dev --no-interaction --no-update "orchestra/testbench:^${{ matrix.testbench }}.0"
+          composer require --dev --no-interaction --no-update "orchestra/testbench:^${TESTBENCH_MAJOR}.0"
           composer require --no-interaction --no-update \
             "illuminate/console:${ILLUMINATE}" \
             "illuminate/contracts:${ILLUMINATE}" \
@@ -194,87 +218,52 @@ jobs:
           composer update --no-interaction --prefer-dist --with-all-dependencies
 
       - name: Pest (real HTTP group)
+        if: needs.package-matrix.outputs.docs-only != 'true'
         run: |
-          if vendor/bin/pest --list-tests 2>/dev/null | grep -qE '\(http\)|/Http/'; then
-            count="$(vendor/bin/pest --list-tests --group=http 2>/dev/null | grep -c . || true)"
-            if [ "${count}" -eq 0 ]; then
-              echo "http Pest group is empty; failing as required once HTTP tests exist."
-              exit 1
-            fi
-            vendor/bin/pest --group=http
-          else
-            echo "No http group yet (scaffold); feature PRs add the suite and then empty fails."
-            vendor/bin/pest
+          count="$(vendor/bin/pest --list-tests --group=http 2>/dev/null | grep -c . || true)"
+          if [ "${count}" -eq 0 ]; then
+            echo "The http Pest group is empty."
+            exit 1
           fi
+          vendor/bin/pest --group=http
 
-  # Four engines for the whole suite (design §11.3).
-  # Scaffold keeps the job shape; migration PRs wire services and DB_CONNECTION.
-  # One engine per job so MySQL and MariaDB never share a runner (GHA services
-  # start every declared container on every matrix cell).
+  # The whole suite and the erasure conformance runner on each server engine
+  # of the shared matrix (design §11.3): token, refresh, revocation and consent
+  # queries differ by dialect (MySQL refuses an UPDATE whose subquery reads the
+  # same table, error 1093). SQLite runs in the test matrix and the erasure job.
   databases:
-    name: Databases (${{ matrix.engine }})
+    name: Pest on ${{ matrix.database.name }}
+    needs: package-matrix
     runs-on: ubuntu-latest
     # The whole suite on a server engine: MariaDB took over 10 minutes locally.
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - engine: sqlite
-            db_connection: sqlite
-            db_port: ''
-            db_database: ':memory:'
-            db_username: ''
-            db_password: ''
-          - engine: pgsql
-            db_connection: pgsql
-            db_port: '5432'
-            db_database: mcp_oauth_test
-            db_username: postgres
-            db_password: postgres
-            image: postgres:16
-            health: pg_isready -U postgres
-            docker_env: '-e POSTGRES_DB=mcp_oauth_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres'
-          - engine: mysql
-            db_connection: mysql
-            db_port: '3306'
-            db_database: mcp_oauth_test
-            db_username: root
-            db_password: ''
-            image: mysql:8.4
-            health: mysqladmin ping -h 127.0.0.1 -uroot --silent
-            docker_env: '-e MYSQL_DATABASE=mcp_oauth_test -e MYSQL_ALLOW_EMPTY_PASSWORD=yes'
-          - engine: mariadb
-            db_connection: mariadb
-            db_port: '3306'
-            db_database: mcp_oauth_test
-            db_username: root
-            db_password: ''
-            image: mariadb:11.4
-            health: healthcheck.sh --connect --innodb_initialized
-            docker_env: '-e MYSQL_DATABASE=mcp_oauth_test -e MYSQL_ALLOW_EMPTY_PASSWORD=yes'
+        database: ${{ fromJSON(needs.package-matrix.outputs.databases) }}
+    services:
+      database:
+        # An empty image starts no container on a pull request that does not need it.
+        image: ${{ needs.package-matrix.outputs.run-databases == 'true' && matrix.database.image || '' }}
+        env: ${{ matrix.database.environment }}
+        ports:
+          - ${{ matrix.database.port }}:${{ matrix.database.port }}
+        options: ${{ matrix.database.options }}
+    env:
+      DB_CONNECTION: ${{ matrix.database.connection }}
+      DB_HOST: 127.0.0.1
+      DB_PORT: ${{ matrix.database.port }}
+      DB_DATABASE: qiick_package
+      DB_USERNAME: ${{ matrix.database.username }}
+      DB_PASSWORD: ${{ matrix.database.password }}
     steps:
       - name: Checkout
+        if: needs.package-matrix.outputs.run-databases == 'true'
         # actions/checkout@v4.2.2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Start ${{ matrix.engine }}
-        if: matrix.engine != 'sqlite'
-        run: |
-          docker run -d --name mcp-oauth-db \
-            -p ${{ matrix.db_port }}:${{ matrix.db_port == '5432' && '5432' || '3306' }} \
-            ${{ matrix.docker_env }} \
-            ${{ matrix.image }}
-          for attempt in $(seq 1 30); do
-            if docker exec mcp-oauth-db ${{ matrix.health }}; then
-              exit 0
-            fi
-            sleep 2
-          done
-          docker logs mcp-oauth-db
-          exit 1
-
       - name: Setup PHP
+        if: needs.package-matrix.outputs.run-databases == 'true'
         # shivammathur/setup-php@2.40.0
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
@@ -284,6 +273,7 @@ jobs:
           tools: composer:v2
 
       - name: Install dependencies
+        if: needs.package-matrix.outputs.run-databases == 'true'
         run: |
           composer require --dev --no-interaction --no-update "orchestra/testbench:^11.0"
           composer require --no-interaction --no-update \
@@ -297,33 +287,60 @@ jobs:
 
       # Check the migrated package schema before the real HTTP tests add the
       # test product's grant table to this database.
-      - run: node tests/Erasure/run.mjs
+      - name: Erasure conformance
+        if: needs.package-matrix.outputs.run-databases == 'true'
+        run: node tests/Erasure/run.mjs
 
-      # The whole suite, not only the schema tests: token, refresh, revocation
-      # and consent queries differ by dialect (MySQL refuses an UPDATE whose
-      # subquery reads the same table, error 1093).
-      - name: Pest on ${{ matrix.engine }}
+      - name: Pest
+        if: needs.package-matrix.outputs.run-databases == 'true'
         run: vendor/bin/pest
 
-    env:
-      DB_CONNECTION: ${{ matrix.db_connection }}
-      DB_HOST: 127.0.0.1
-      DB_PORT: ${{ matrix.db_port }}
-      DB_DATABASE: ${{ matrix.db_database }}
-      DB_USERNAME: ${{ matrix.db_username }}
-      DB_PASSWORD: ${{ matrix.db_password }}
-
-  # S81: installing without Inertia (suggest) boots; --no-dev proves that.
-  no-dev-boot:
-    name: No-dev boot (no Inertia)
+  erasure:
+    name: Erasure (E1–E14)
+    needs: package-matrix
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
     steps:
       - name: Checkout
+        if: needs.package-matrix.outputs.docs-only != 'true'
         # actions/checkout@v4.2.2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup PHP
+        if: needs.package-matrix.outputs.docs-only != 'true'
+        # shivammathur/setup-php@2.40.0
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.4'
+          coverage: none
+          extensions: intl, openssl, pdo_sqlite
+          tools: composer:v2
+
+      - name: Install dependencies
+        if: needs.package-matrix.outputs.docs-only != 'true'
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Erasure conformance
+        if: needs.package-matrix.outputs.docs-only != 'true'
+        run: node tests/Erasure/run.mjs
+
+  # S81: installing without Inertia (suggest) boots; --no-dev proves that.
+  no-dev-boot:
+    name: No-dev boot (no Inertia)
+    needs: package-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        if: needs.package-matrix.outputs.docs-only != 'true'
+        # actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup PHP
+        if: needs.package-matrix.outputs.docs-only != 'true'
         # shivammathur/setup-php@2.40.0
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
@@ -333,6 +350,7 @@ jobs:
           tools: composer:v2
 
       - name: Install runtime dependencies only
+        if: needs.package-matrix.outputs.docs-only != 'true'
         run: |
           composer update --no-interaction --prefer-dist --no-dev
           php -r 'require "vendor/autoload.php"; echo class_exists("Qiick\\McpOAuth\\McpOAuthServiceProvider") ? "ok\n" : exit(1);'
@@ -348,3 +366,21 @@ jobs:
     if: github.event_name == 'pull_request'
     # qiick-io/app-ui@v0.15.0
     uses: qiick-io/app-ui/.github/workflows/pr-title.yml@0d97ae1429a856411c76e6de1ec258cae0eabab6 # v0.15.0
+
+  # A failed nightly run opens an issue, so nobody has to watch it.
+  nightly-failure:
+    needs: [package-matrix, tests, mutation, http-server, databases, erasure, no-dev-boot, standards]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open an issue for the failing run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Nightly CI failed on $(date -u +%F)" \
+            --body "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --label bug
