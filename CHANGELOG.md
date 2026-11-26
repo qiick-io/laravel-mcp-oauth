@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.1] - 2026-11-26
+
+First release: a beta. A later beta may still change the public API and the
+migrations (`UPGRADING.md`).
+
 ### Changed
 
 - The package schedules its retention commands itself (fleet convention F9)
@@ -361,3 +366,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependency register `docs/dependencies.md`: one row per runtime
   `composer.json` `require` entry with constraint rationale, usage,
   maintainer, license, known risk and an in-package exit plan.
+
+[Unreleased]: https://github.com/qiick-io/laravel-mcp-oauth/compare/v1.0.0-beta.1...develop
+[1.0.0-beta.1]: https://github.com/qiick-io/laravel-mcp-oauth/releases/tag/v1.0.0-beta.1
