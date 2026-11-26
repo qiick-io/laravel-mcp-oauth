@@ -54,7 +54,8 @@ until keys exist and the admin switch is flipped.
 and the RFC 8414 / RFC 9728 discovery documents. Do not also call
 `Mcp::oauthRoutes()`: its documents are built from the request `Host` and sit
 outside the off-gate, and its `oauth/register` would replace the package's.
-With OAuth on, boot fails while any of its routes is mounted, and
+With OAuth on, boot (or, with `route:cache`, the first request) fails while
+any of its routes is mounted, and
 `mcp-oauth:check` lists them.
 
 Browser-based MCP clients (the MCP inspector, for example) call these endpoints

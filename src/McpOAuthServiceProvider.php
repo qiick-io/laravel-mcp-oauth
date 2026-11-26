@@ -14,6 +14,7 @@ use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Events\Routing;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Inertia\Inertia;
@@ -73,6 +74,9 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class McpOAuthServiceProvider extends ServiceProvider
 {
+    /** The routes a request is matched against were checked once: they do not change after boot. */
+    private bool $hasCheckedServedRoutes = false;
+
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/mcp-oauth.php', 'mcp-oauth');
@@ -185,8 +189,16 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->validateRemainingIntegerConfig();
         $this->bindAccessTokensOnCreation();
         $this->assertAdaptersBoundWhileEnabled();
-        // After every provider booted, when the product's routes are loaded.
+        // After every provider booted, when uncached routes are loaded. Cached
+        // routes are restored later still, so the first routed request checks
+        // again, on the final route collection (route:cache).
         $this->app->booted(fn () => $this->assertNoLaravelMcpOAuthRoutesWhileEnabled());
+        $this->app->make(Dispatcher::class)->listen(Routing::class, function (): void {
+            if (! $this->hasCheckedServedRoutes) {
+                $this->assertNoLaravelMcpOAuthRoutesWhileEnabled();
+                $this->hasCheckedServedRoutes = true;
+            }
+        });
 
         if ($this->app->runningInConsole()) {
             $this->commands([
