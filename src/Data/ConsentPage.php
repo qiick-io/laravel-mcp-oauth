@@ -12,11 +12,13 @@ namespace Qiick\McpOAuth\Data;
 final readonly class ConsentPage
 {
     /**
+     * @param  list<array{label: string, value: string}>  $advanced  the Advanced section's rows, closed by default
      * @param  array{id: string, name: string, redirectHost: string, nameIsSelfAsserted: true, isRedirectLoopback: bool}  $client
      */
     public function __construct(
         public array $client,
         public string $authToken,
         public ConsentOptions $options,
+        public array $advanced = [],
     ) {}
 }

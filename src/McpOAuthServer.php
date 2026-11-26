@@ -24,16 +24,25 @@ final class McpOAuthServer
 {
     public const string WIRE_SCOPE = Registrar::OAUTH_SCOPE;
 
-    /*
-     * pcov never covers a constant declaration, so mutation cannot run tests
-     * against these two; McpOAuthServerTest pins both values instead.
+    /**
+     * The grants the token endpoint accepts and the metadata advertises.
+     * Methods, not constants: pcov never covers a constant, so mutation
+     * could not test the values.
+     *
+     * @return list<string>
      */
+    public static function supportedGrantTypes(): array
+    {
+        return ['authorization_code', 'refresh_token'];
+    }
 
-    /** @var list<string> */
-    public const array SUPPORTED_GRANT_TYPES = ['authorization_code', 'refresh_token']; // @pest-mutate-ignore: RemoveArrayItem
-
-    /** @var list<string> */
-    public const array SUPPORTED_CODE_CHALLENGE_METHODS = ['S256']; // @pest-mutate-ignore: RemoveArrayItem
+    /**
+     * @return list<string>
+     */
+    public static function supportedCodeChallengeMethods(): array
+    {
+        return ['S256'];
+    }
 
     public function __construct(
         private readonly ConfigRepository $config,
@@ -255,8 +264,8 @@ final class McpOAuthServer
             'revocation_endpoint' => $revocationEndpointUrl,
             'scopes_supported' => [self::WIRE_SCOPE],
             'response_types_supported' => ['code'],
-            'grant_types_supported' => self::SUPPORTED_GRANT_TYPES,
-            'code_challenge_methods_supported' => self::SUPPORTED_CODE_CHALLENGE_METHODS,
+            'grant_types_supported' => self::supportedGrantTypes(),
+            'code_challenge_methods_supported' => self::supportedCodeChallengeMethods(),
             'token_endpoint_auth_methods_supported' => $clientAuthenticationMethods,
             'revocation_endpoint_auth_methods_supported' => $clientAuthenticationMethods,
             'authorization_response_iss_parameter_supported' => true,

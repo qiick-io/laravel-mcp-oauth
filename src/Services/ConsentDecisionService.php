@@ -12,6 +12,7 @@ use Illuminate\Validation\ValidationException;
 use Qiick\McpOAuth\Data\ConsentDecision;
 use Qiick\McpOAuth\Data\ConsentOption;
 use Qiick\McpOAuth\Data\ConsentOptions;
+use Qiick\McpOAuth\Data\PendingAuthorizationRequestData;
 
 /**
  * Turns the posted consent form into a {@see ConsentDecision}, judged against
@@ -28,6 +29,9 @@ use Qiick\McpOAuth\Data\ConsentOptions;
  *   decision 2026-11-22); with none it is refused. It reaches the grant as
  *   `attributes['organisation']`.
  *
+ * The resource, consent text version and locale are those of the rendered
+ * page, never read again on submit.
+ *
  * The product's own checks run afterwards in ConsentProvider::validate().
  */
 final class ConsentDecisionService
@@ -39,7 +43,7 @@ final class ConsentDecisionService
     /**
      * @throws ValidationException 422 field errors
      */
-    public function fromRequest(Request $request, ConsentOptions $consentOptions, string $clientId, string $userIdentifier, string $redirectUri): ConsentDecision
+    public function fromRequest(Request $request, ConsentOptions $consentOptions, PendingAuthorizationRequestData $pendingAuthorizationRequest, string $clientId, string $userIdentifier, string $redirectUri): ConsentDecision
     {
         $organisations = $consentOptions->organisations;
         // Closure rules compare strictly against the grantable values, so they
@@ -85,6 +89,10 @@ final class ConsentDecisionService
             resources: $isAllResources ? [] : ($validated['resources'] ?? []),
             allResources: $isAllResources,
             attributes: $organisation === null ? [] : ['organisation' => $organisation],
+            // The request's resource was checked against the server's exactly (RFC 8707).
+            resource: $pendingAuthorizationRequest->renderedResource,
+            consentVersion: $pendingAuthorizationRequest->renderedConsentVersion,
+            locale: $pendingAuthorizationRequest->renderedLocale,
         );
     }
 

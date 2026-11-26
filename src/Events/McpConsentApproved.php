@@ -22,5 +22,6 @@ final readonly class McpConsentApproved
         public string $redirectHost,
         public array $scopes,
         public array $resources,
+        public ?string $resource = null,
     ) {}
 }

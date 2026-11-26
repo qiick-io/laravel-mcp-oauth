@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Qiick\McpOAuth;
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Laravel\Mcp\Server\Http\Controllers\OAuthRegisterController;
@@ -20,6 +21,7 @@ use Qiick\McpOAuth\Http\Controllers\RevokeTokenController;
 use Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware;
 use Qiick\McpOAuth\Http\Middleware\ValidateAuthorizationRequestMiddleware;
 use Qiick\McpOAuth\Http\Middleware\ValidateTokenRequestMiddleware;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 
 /**
@@ -169,34 +171,57 @@ final class McpOAuthRoutes
 
     /**
      * What stops the package from serving the endpoints its metadata
-     * advertises (design §4.3), for switch-on and `mcp-oauth:check`: each
-     * package route must be mounted, at its root URI, for its method, on the
-     * package's controller. A name alone proves nothing: a prefixed mount or
-     * a foreign handler under the same name would pass it. Also lists foreign
+     * advertises (design §4.3), for switch-on and `mcp-oauth:check`. Each
+     * advertised URL (authorize, approve, deny, token, register, revoke when
+     * it is advertised, both metadata documents) is matched against the live
+     * route collection as a request to the issuer would be, host included,
+     * and the route it selects must be the package's controller. A route
+     * name proves nothing: a prefixed mount, a mount for another domain or a
+     * foreign handler under the same URL would pass it. Also lists foreign
      * `passport.*` routes and laravel/mcp's own OAuth routes.
      *
      * @return list<string>
      */
     public static function servingProblems(): array
     {
-        $expectedRoutes = [
-            'passport.token' => ['POST', 'oauth/token', IssueTokenController::class],
-            'mcp.oauth.register' => ['POST', 'oauth/register', RegisterClientController::class],
-            'passport.authorizations.authorize' => ['GET', 'oauth/authorize', AuthorizeClientController::class],
-            'passport.authorizations.approve' => ['POST', 'oauth/authorize', ApproveClientController::class],
-            'passport.authorizations.deny' => ['DELETE', 'oauth/authorize', DenyClientController::class],
-            'mcp.oauth.authorization-server' => ['GET', '.well-known/oauth-authorization-server', AuthorizationServerMetadataController::class],
-            'mcp.oauth.protected-resource' => ['GET', '.well-known/oauth-protected-resource', ProtectedResourceMetadataController::class],
+        $mcpOAuthServer = app(McpOAuthServer::class);
+        $issuer = $mcpOAuthServer->issuer();
+        $metadata = $mcpOAuthServer->authorizationServerMetadata();
+        /** @var string $authorizationEndpoint */
+        $authorizationEndpoint = $metadata['authorization_endpoint'];
+        /** @var string $tokenEndpoint */
+        $tokenEndpoint = $metadata['token_endpoint'];
+        /** @var string $registrationEndpoint */
+        $registrationEndpoint = $metadata['registration_endpoint'];
+
+        $advertisedEndpoints = [
+            ['GET', $authorizationEndpoint, AuthorizeClientController::class],
+            ['POST', $authorizationEndpoint, ApproveClientController::class],
+            ['DELETE', $authorizationEndpoint, DenyClientController::class],
+            ['POST', $tokenEndpoint, IssueTokenController::class],
+            ['POST', $registrationEndpoint, RegisterClientController::class],
+            ['GET', $issuer.'/.well-known/oauth-authorization-server', AuthorizationServerMetadataController::class],
+            ['GET', $issuer.'/.well-known/oauth-protected-resource', ProtectedResourceMetadataController::class],
         ];
+        $revocationEndpoint = $mcpOAuthServer->revocationEndpointUrl();
+
+        if ($revocationEndpoint !== null) {
+            $advertisedEndpoints[] = ['POST', $revocationEndpoint, RevokeTokenController::class];
+        }
+
         $problems = [];
 
-        foreach ($expectedRoutes as $routeName => [$method, $uri, $controllerClass]) {
-            $route = Route::getRoutes()->getByName($routeName);
+        foreach ($advertisedEndpoints as [$method, $url, $controllerClass]) {
+            try {
+                $selectedRoute = Route::getRoutes()->match(Request::create($url, $method));
+            } catch (HttpException) {
+                $problems[] = "{$method} {$url} is not served";
 
-            if ($route === null) {
-                $problems[] = "{$routeName} is not mounted";
-            } elseif ($route->uri() !== $uri || ! in_array($method, $route->methods(), true) || $route->getControllerClass() !== $controllerClass) {
-                $problems[] = "{$routeName} is not the package's {$method} /{$uri}";
+                continue;
+            }
+
+            if ($selectedRoute->getControllerClass() !== $controllerClass) {
+                $problems[] = "{$method} {$url} is served by another handler";
             }
         }
 

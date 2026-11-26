@@ -15,6 +15,7 @@ use Laravel\Passport\Passport;
 use Qiick\McpOAuth\ClientMetadataUriGuard;
 use Qiick\McpOAuth\Events\McpClientRegistered;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
+use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
 
@@ -25,13 +26,6 @@ use Qiick\McpOAuth\RedirectUriGuard;
  */
 final class RegisterClientController extends OAuthRegisterController
 {
-    /**
-     * Public DCR bodies stay small; larger payloads are refused with 413.
-     * pcov never covers a constant declaration, so mutation cannot run tests
-     * against it; the boundary tests pin 65 536 as a literal instead.
-     */
-    public const int MAX_BODY_BYTES = 65_536; // @pest-mutate-ignore: DecrementInteger,IncrementInteger
-
     /**
      * The RFC 7591 client fields laravel/mcp does not validate, checked in
      * __invoke and written by persistClientMetadata() in the same request.
@@ -201,6 +195,7 @@ final class RegisterClientController extends OAuthRegisterController
             'client_id' => $client->getKey(),
             'registration_source' => 'dcr',
             'token_endpoint_auth_method' => 'none',
+            'spec_revision' => app(McpOAuthServer::class)->specRevision(),
             'client_id_issued_at' => $issuedAt,
             ...$registeredFields,
         ]);
@@ -255,17 +250,23 @@ final class RegisterClientController extends OAuthRegisterController
         return $displayHost !== '' ? $displayHost : 'MCP Client';
     }
 
+    /**
+     * Public DCR bodies stay small: over 65 536 bytes is a 413. A local value,
+     * not a class constant: pcov never covers a constant, so mutation could
+     * not test the limit.
+     */
     private function bodyExceedsLimit(Request $request): bool
     {
+        $maxBodyBytes = 65_536;
         $contentLengthHeader = $request->headers->get('Content-Length');
 
         // Header path and raw-body path both refuse oversize payloads. A digit
         // string compares numerically with an int, so no cast is needed.
-        if (is_string($contentLengthHeader) && ctype_digit($contentLengthHeader) && $contentLengthHeader > self::MAX_BODY_BYTES) {
+        if (is_string($contentLengthHeader) && ctype_digit($contentLengthHeader) && $contentLengthHeader > $maxBodyBytes) {
             return true;
         }
 
-        return strlen($request->getContent()) > self::MAX_BODY_BYTES;
+        return strlen($request->getContent()) > $maxBodyBytes;
     }
 
     /**

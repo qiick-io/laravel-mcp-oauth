@@ -170,8 +170,8 @@ it('exposes wire scope, grant types, challenge methods and TTLs', function (): v
     $server = makeServer(true, true);
 
     expect($server::WIRE_SCOPE)->toBe('mcp:use')
-        ->and($server::SUPPORTED_GRANT_TYPES)->toBe(['authorization_code', 'refresh_token'])
-        ->and($server::SUPPORTED_CODE_CHALLENGE_METHODS)->toBe(['S256'])
+        ->and($server::supportedGrantTypes())->toBe(['authorization_code', 'refresh_token'])
+        ->and($server::supportedCodeChallengeMethods())->toBe(['S256'])
         ->and($server->scopeDescriptions())->toHaveKey('mcp:use')
         ->and($server->accessTokenLifetime()->format('%i'))->toBe('60')
         ->and($server->refreshTokenLifetime()->format('%d'))->toBe('30');

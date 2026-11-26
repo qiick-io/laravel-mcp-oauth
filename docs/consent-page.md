@@ -55,6 +55,14 @@ interface OAuthAuthorizePageProps {
     };
     /** Must be posted back as `auth_token` */
     authToken: string;
+    /**
+     * The Advanced section, closed by default: the client id, registration
+     * source, the resource, the callback this approval returns to, then what
+     * the client registered (callbacks, website, terms, privacy policy,
+     * contacts, software), each row only when it has a value. The registered
+     * fields are the client's own claim.
+     */
+    advanced: { label: string; value: string }[];
     options: {
         scopes: ConsentOption[];
         /** Empty: the product has no role choice; post no `role` */
@@ -122,9 +130,15 @@ Both answer with a redirect to the client: the code (approve) or
 `error=access_denied` (deny), with `state` and `iss`. An Inertia visit gets a
 409 with `X-Inertia-Location`, so the browser leaves with a full page load.
 
+An approval posted after `ConsentOptions::$consentVersion` changed (a deploy
+or a policy change since the page was shown) answers 409 without a location
+and drops the pending request: the user must start again and see the current
+text before it is recorded as accepted.
+
 ## Evidence
 
-Every decision writes one row in `oauth_consent_records`: `approved` with the
-new grant id, or `denied` with `retention_until` set 90 days ahead
+Every decision writes one row in `oauth_consent_records`, with the consent
+version, locale and resource of the page the user saw (stored in the session
+when it was rendered): `approved` with the new grant id, or `denied` with `retention_until` set 90 days ahead
 (`revoked_retention_days`). Approve also dispatches `McpConsentApproved`, deny
 `McpConsentDenied`.

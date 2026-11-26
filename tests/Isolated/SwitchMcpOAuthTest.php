@@ -57,17 +57,66 @@ it('refuses to switch on unless the package itself serves its routes at the orig
 
     expect($store->writes)->toBe([]);
 })->with([
-    'not mounted' => [static fn () => null, 'passport.token is not mounted'],
-    'mounted under a prefix' => [static fn () => Route::prefix('api')->group(static fn () => McpOAuthRoutes::register()), 'passport.token is not the package\'s POST /oauth/token'],
-    'a foreign handler under the token name' => [static function (): void {
+    'not mounted' => [static fn () => null, 'POST https://mcp-oauth.test/oauth/token is not served'],
+    'mounted under a prefix' => [static fn () => Route::prefix('api')->group(static fn () => McpOAuthRoutes::register()), 'GET https://mcp-oauth.test/oauth/authorize is not served'],
+    'mounted for another domain' => [static fn () => Route::domain('other.example')->group(static fn () => McpOAuthRoutes::register()), 'POST https://mcp-oauth.test/oauth/token is not served'],
+    'a foreign handler at the token URL' => [static function (): void {
         McpOAuthRoutes::register();
         Route::post('oauth/token', static fn (): string => 'foreign')->name('passport.token');
-    }, 'passport.token is not the package\'s POST /oauth/token'],
+    }, 'POST https://mcp-oauth.test/oauth/token is served by another handler'],
+    'a foreign handler at the advertised revocation URL' => [static function (): void {
+        McpOAuthRoutes::register();
+        Route::post('oauth/revoke', static fn (): string => 'foreign');
+    }, 'POST https://mcp-oauth.test/oauth/revoke is served by another handler'],
     'beside laravel/mcp\'s own OAuth routes' => [static function (): void {
         McpOAuthRoutes::register();
         Route::get('.well-known/oauth-protected-resource/{path}', static fn (): string => '')->where('path', '.*')->name('mcp.oauth.protected-resource.nested');
     }, 'laravel/mcp OAuth route mcp.oauth.protected-resource.nested'],
 ]);
+
+it('refuses to switch on while a foreign handler answers any advertised URL (Codex review of #62)', function (string $method, string $uri): void {
+    Route::setRoutes(new RouteCollection);
+    McpOAuthRoutes::register();
+    Route::match([$method], $uri, static fn (): string => 'foreign');
+    Route::getRoutes()->refreshNameLookups();
+    $store = switchStore();
+
+    expect(fn () => app(SwitchMcpOAuthAction::class)->execute(true, null, $store->persist))
+        ->toThrow(static fn (McpOAuthCannotBeEnabledException $exception) => expect($exception->getMessage())->toContain("{$method} https://mcp-oauth.test/{$uri} is served by another handler"));
+})->with([
+    'authorize' => ['GET', 'oauth/authorize'],
+    'approve' => ['POST', 'oauth/authorize'],
+    'deny' => ['DELETE', 'oauth/authorize'],
+    'token' => ['POST', 'oauth/token'],
+    'register' => ['POST', 'oauth/register'],
+    'revoke' => ['POST', 'oauth/revoke'],
+    'authorization server metadata' => ['GET', '.well-known/oauth-authorization-server'],
+    'protected resource metadata' => ['GET', '.well-known/oauth-protected-resource'],
+]);
+
+it('switches on when the routes are mounted for the issuer\'s own domain', function (): void {
+    Route::setRoutes(new RouteCollection);
+    Route::domain('mcp-oauth.test')->group(static fn () => McpOAuthRoutes::register());
+    Route::getRoutes()->refreshNameLookups();
+    $store = switchStore();
+
+    app(SwitchMcpOAuthAction::class)->execute(true, null, $store->persist);
+
+    expect($store->writes)->toBe([true]);
+});
+
+it('does not ask for the revocation route while revocation is not advertised', function (): void {
+    config()->set('mcp-oauth.revocation_enabled', false);
+    Route::setRoutes(new RouteCollection);
+    McpOAuthRoutes::register();
+    Route::post('oauth/revoke', static fn (): string => 'foreign');
+    Route::getRoutes()->refreshNameLookups();
+    $store = switchStore();
+
+    app(SwitchMcpOAuthAction::class)->execute(true, null, $store->persist);
+
+    expect($store->writes)->toBe([true]);
+});
 
 it('switches on when OAuth can serve, writing the store and telling the product', function (): void {
     $store = switchStore();

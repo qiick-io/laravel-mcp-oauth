@@ -22,13 +22,18 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  * left it in the session (`authToken`, `authRequest`), design §8.3 step 4
  * and S45.
  *
+ * The consent page also stores what it showed under
+ * {@see self::RENDERED_CONSENT_SESSION_KEY}, tied to the same `authToken`.
+ *
  * Approve and deny accept it only when the posted `auth_token` matches the
- * session one, the request belongs to the signed-in user, and its client is
+ * session one and the page's record, the request belongs to the signed-in user, and its client is
  * still active and unblocked. Anything else is a 403 that never redirects,
  * so a stale or forged form cannot send the browser to the client.
  */
 final class PendingAuthorizationRequestService
 {
+    public const RENDERED_CONSENT_SESSION_KEY = 'mcpOAuthRenderedConsent';
+
     public function __construct(
         private readonly RedirectUriGuard $redirectUriGuard,
     ) {}
@@ -46,6 +51,12 @@ final class PendingAuthorizationRequestService
         $postedAuthToken = $request->input('auth_token');
 
         if (! is_string($sessionAuthToken) || ! is_string($postedAuthToken) || ! hash_equals($sessionAuthToken, $postedAuthToken)) {
+            $this->refuse($request);
+        }
+
+        $renderedConsent = $session->get(self::RENDERED_CONSENT_SESSION_KEY);
+
+        if (! is_array($renderedConsent) || ($renderedConsent['authToken'] ?? null) !== $sessionAuthToken) {
             $this->refuse($request);
         }
 
@@ -80,7 +91,15 @@ final class PendingAuthorizationRequestService
             $this->refuse($request);
         }
 
-        return new PendingAuthorizationRequestData($authorizationRequest, $client, $signedInUser);
+        /** @var array{authToken: string, consentVersion: ?string, locale: string, resource: string} $renderedConsent written by ConsentPageService::render() */
+        return new PendingAuthorizationRequestData(
+            $authorizationRequest,
+            $client,
+            $signedInUser,
+            renderedConsentVersion: $renderedConsent['consentVersion'],
+            renderedLocale: $renderedConsent['locale'],
+            renderedResource: $renderedConsent['resource'],
+        );
     }
 
     /**
@@ -89,7 +108,7 @@ final class PendingAuthorizationRequestService
      */
     public function forget(Request $request): void
     {
-        $request->session()->forget(['authToken', 'authRequest']);
+        $request->session()->forget(['authToken', 'authRequest', self::RENDERED_CONSENT_SESSION_KEY]);
     }
 
     /**

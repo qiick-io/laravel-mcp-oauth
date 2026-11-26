@@ -361,7 +361,7 @@ it('fails when OAuth is on but the package routes are not served at the origin (
     Route::getRoutes()->refreshNameLookups();
 
     $this->artisan('mcp-oauth:check')
-        ->expectsOutputToContain("Package routes: passport.token is not the package's POST /oauth/token")
+        ->expectsOutputToContain('Package routes: GET https://mcp-oauth.test/oauth/authorize is not served')
         ->assertFailed();
 });
 
