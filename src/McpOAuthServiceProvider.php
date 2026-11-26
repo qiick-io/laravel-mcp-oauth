@@ -185,6 +185,8 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->validateRemainingIntegerConfig();
         $this->bindAccessTokensOnCreation();
         $this->assertAdaptersBoundWhileEnabled();
+        // After every provider booted, when the product's routes are loaded.
+        $this->app->booted(fn () => $this->assertNoLaravelMcpOAuthRoutesWhileEnabled());
 
         if ($this->app->runningInConsole()) {
             $this->commands([
@@ -339,6 +341,22 @@ final class McpOAuthServiceProvider extends ServiceProvider
 
         if ($this->app->resolved(AuthorizationServer::class)) {
             $harden($this->app->make(AuthorizationServer::class));
+        }
+    }
+
+    /**
+     * Fails closed, like a missing adapter, while OAuth is on and laravel/mcp's
+     * own OAuth routes are mounted: they would serve Host-derived documents
+     * beside the package's (S13).
+     *
+     * @throws InvalidMcpOAuthConfigException
+     */
+    private function assertNoLaravelMcpOAuthRoutesWhileEnabled(): void
+    {
+        $laravelMcpRouteNames = McpOAuthRoutes::laravelMcpOAuthRouteNames();
+
+        if ($this->isMcpOAuthEnabled() && $laravelMcpRouteNames !== []) {
+            throw InvalidMcpOAuthConfigException::laravelMcpOAuthRoutesMounted($laravelMcpRouteNames);
         }
     }
 

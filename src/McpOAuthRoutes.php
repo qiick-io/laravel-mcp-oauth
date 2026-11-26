@@ -6,6 +6,7 @@ namespace Qiick\McpOAuth;
 
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
+use Laravel\Mcp\Server\Http\Controllers\OAuthRegisterController;
 use Laravel\Mcp\Server\Middleware\AddAuthorizationFramingHeaders;
 use LogicException;
 use Qiick\McpOAuth\Http\Controllers\ApproveClientController;
@@ -164,6 +165,32 @@ final class McpOAuthRoutes
                         ->name('passport.authorizations.deny');
                 });
             });
+    }
+
+    /**
+     * laravel/mcp's own OAuth routes (`Mcp::oauthRoutes()`): its nested
+     * discovery documents build every endpoint and the resource from the
+     * request Host, and its registration has none of the package's guards.
+     * The package's routes replace them (design §5.2, S13), so beside OAuth
+     * they must not be mounted. The root documents share the package's names
+     * and are skipped by laravel/mcp once the package registered them.
+     *
+     * @return list<string>
+     */
+    public static function laravelMcpOAuthRouteNames(): array
+    {
+        $laravelMcpRouteNames = [];
+
+        foreach (Route::getRoutes()->getRoutes() as $route) {
+            $routeName = (string) $route->getName();
+            $isNestedDocument = in_array($routeName, ['mcp.oauth.protected-resource.nested', 'mcp.oauth.authorization-server.nested'], true);
+
+            if ($isNestedDocument || $route->getControllerClass() === OAuthRegisterController::class) {
+                $laravelMcpRouteNames[] = $routeName;
+            }
+        }
+
+        return $laravelMcpRouteNames;
     }
 
     /**
