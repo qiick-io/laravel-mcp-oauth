@@ -287,17 +287,18 @@ jobs:
 
       # Check the migrated package schema before the real HTTP tests add the
       # test product's grant table to this database.
-      - name: Erasure conformance
+      - run: node tests/Erasure/run.mjs
+        name: Erasure conformance
         if: needs.package-matrix.outputs.run-databases == 'true'
-        run: node tests/Erasure/run.mjs
 
       - name: Pest
         if: needs.package-matrix.outputs.run-databases == 'true'
         run: vendor/bin/pest
 
+  # Always in full, also on a docs-only pull request: the standards check
+  # requires one unconditional run of the erasure suite, and it takes a minute.
   erasure:
     name: Erasure (E1–E14)
-    needs: package-matrix
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -305,12 +306,10 @@ jobs:
       DB_DATABASE: ':memory:'
     steps:
       - name: Checkout
-        if: needs.package-matrix.outputs.docs-only != 'true'
         # actions/checkout@v4.2.2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup PHP
-        if: needs.package-matrix.outputs.docs-only != 'true'
         # shivammathur/setup-php@2.40.0
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
@@ -320,12 +319,10 @@ jobs:
           tools: composer:v2
 
       - name: Install dependencies
-        if: needs.package-matrix.outputs.docs-only != 'true'
         run: composer install --no-interaction --prefer-dist
 
-      - name: Erasure conformance
-        if: needs.package-matrix.outputs.docs-only != 'true'
-        run: node tests/Erasure/run.mjs
+      - run: node tests/Erasure/run.mjs
+        name: Erasure conformance
 
   # S81: installing without Inertia (suggest) boots; --no-dev proves that.
   no-dev-boot:
