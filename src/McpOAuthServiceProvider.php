@@ -39,6 +39,7 @@ use Qiick\McpOAuth\Console\PruneUnusedClientsCommand;
 use Qiick\McpOAuth\Console\PurgeRevokedRecordsCommand;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Contracts\ApiKeyDoor;
+use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\ConsentView;
 use Qiick\McpOAuth\Contracts\GrantAuthorizer;
@@ -50,6 +51,7 @@ use Qiick\McpOAuth\Internal\BlockedHostCatalog;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Internal\ConsumedAuthCodeGrant;
 use Qiick\McpOAuth\Internal\DisabledAdminSwitch;
+use Qiick\McpOAuth\Internal\NullAuditLogger;
 use Qiick\McpOAuth\Services\ConsentPageService;
 use Qiick\McpOAuth\Views\InertiaConsentView;
 use ReflectionProperty;
@@ -86,6 +88,8 @@ final class McpOAuthServiceProvider extends ServiceProvider
         Passport::$deviceCodeGrantEnabled = false;
 
         $this->app->singletonIf(AdminSwitch::class, DisabledAdminSwitch::class);
+        // Audit is optional: the package always writes, a product binds its sink.
+        $this->app->bindIf(AuditLogger::class, NullAuditLogger::class);
 
         // Design Resolved #9: the default consent page needs Inertia, which is only a suggest.
         if (class_exists(Inertia::class)) {
@@ -135,6 +139,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
                 $app->make(ResourceServer::class),
                 $app->make(ConfigRepository::class),
                 $app->make(Dispatcher::class),
+                $app->make(AuditLogger::class),
                 Passport::tokenEncryptionKey($app->make(Encrypter::class)),
             );
         });

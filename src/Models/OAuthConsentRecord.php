@@ -51,6 +51,22 @@ final class OAuthConsentRecord extends Model
         'created_at',
     ];
 
+    /**
+     * The redirect host the grant was approved for, named by the audit entry
+     * of its revoke (S78); null once its evidence is purged or for a grant
+     * the package did not approve.
+     */
+    public static function redirectHostOfGrant(string $grantId): ?string
+    {
+        /** @var string|null $redirectHost */
+        $redirectHost = self::query()
+            ->where('grant_id', $grantId)
+            ->where('decision', 'approved')
+            ->value('redirect_host');
+
+        return $redirectHost;
+    }
+
     protected static function booted(): void
     {
         self::updating(static function (): never {

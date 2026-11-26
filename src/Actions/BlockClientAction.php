@@ -7,6 +7,7 @@ namespace Qiick\McpOAuth\Actions;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
+use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Events\McpClientBlocked;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
@@ -25,6 +26,7 @@ final class BlockClientAction
 {
     public function __construct(
         private readonly GrantStore $grantStore,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     public function execute(Client $client, ?Authenticatable $actor): void
@@ -33,7 +35,7 @@ final class BlockClientAction
         $clientId = $client->getKey();
         $actorIdentifier = $actor === null ? null : PassportUserIdentifier::of($actor);
 
-        $client->getConnection()->transaction(function () use ($client, $clientId, $actorIdentifier): void {
+        $client->getConnection()->transaction(function () use ($client, $clientId, $actor, $actorIdentifier): void {
             $client->forceFill(['revoked' => true])->save();
 
             OAuthClientMetadata::query()
@@ -48,6 +50,7 @@ final class BlockClientAction
             Passport::authCode()->newQuery()->where('client_id', $clientId)->update(['revoked' => true]);
 
             $this->grantStore->revokeAllForClient($clientId, $actorIdentifier);
+            $this->auditLogger->record('oauth_client_blocked', $actor, null, ['client_id' => $clientId]);
         });
 
         event(new McpClientBlocked($clientId, $actorIdentifier));

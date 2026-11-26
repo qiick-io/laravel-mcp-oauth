@@ -8,6 +8,7 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\Request;
 use Laravel\Passport\Passport;
+use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
@@ -51,6 +52,7 @@ final class ApproveConsentAction
         private readonly RecordConsentDecisionAction $recordConsentDecision,
         private readonly ConnectionInterface $database,
         private readonly Dispatcher $events,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     /**
@@ -85,7 +87,7 @@ final class ApproveConsentAction
         // comes later sees first_authorized_at and keeps the client. On one
         // connection the inner transaction is a savepoint.
         /** @var GrantRecord $grant Laravel 12 types transaction() as mixed */
-        $grant = OAuthClientMetadata::query()->getConnection()->transaction(fn (): mixed => $this->database->transaction(function () use ($request, $pendingAuthorizationRequest, $redirectUri, $decision, $clientInfo, $userIdentifier): GrantRecord {
+        $grant = OAuthClientMetadata::query()->getConnection()->transaction(fn (): mixed => $this->database->transaction(function () use ($request, $pendingAuthorizationRequest, $redirectUri, $decision, $clientInfo, $userIdentifier, $user): GrantRecord {
             $isStillRegistered = OAuthClientMetadata::query()->where('client_id', $clientInfo->id)->lockForUpdate()->exists();
 
             if (! $isStillRegistered) {
@@ -99,6 +101,12 @@ final class ApproveConsentAction
                 ->where('client_id', $clientInfo->id)
                 ->whereNull('first_authorized_at')
                 ->update(['first_authorized_at' => now()]);
+            $this->auditLogger->record('oauth_consent_approved', $user, $grant->id, [
+                'client_id' => $clientInfo->id,
+                'redirect_host' => $clientInfo->redirectHost,
+                'scopes' => $decision->scopes,
+                'resources' => $decision->resources,
+            ]);
 
             return $grant;
         }));
