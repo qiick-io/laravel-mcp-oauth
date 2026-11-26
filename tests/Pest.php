@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 use Qiick\McpOAuth\Tests\Support\PackageTestCase;
 
 /*
@@ -12,3 +13,4 @@ use Qiick\McpOAuth\Tests\Support\PackageTestCase;
 // Not tests/Http: those drive real `php -S` servers, and PackageTestCase
 // would drop and recreate the tables they share on a server engine.
 pest()->extend(PackageTestCase::class)->in('Feature', 'Unit');
+pest()->extend(AuthorizeFlowTestCase::class)->in('Erasure');

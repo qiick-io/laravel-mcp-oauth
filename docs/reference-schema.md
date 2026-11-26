@@ -89,17 +89,19 @@ is nullable with **no** database default (registration writes the value).
 
 ## `oauth_consent_records` (package, SHOULD for 1.0 / S4)
 
-Append-only: no `updated_at`.
+Append-only for normal application writes. Fleet erasure scrubs identifying
+columns in place, and the retention job removes expired evidence. There is
+no `updated_at`.
 
 | Column | Type | Null | Default | Index |
 | --- | --- | --- | --- | --- |
 | `id` | uuid | no | UUID v7 | PK |
 | `client_id` | uuid | no | — | index |
-| `user_identifier` | string(64) | no | — | index |
+| `user_identifier` | string(64) | yes | null | index |
 | `grant_id` | uuid | yes | null | index |
 | `decision` | string(16) | no | — | — |
-| `redirect_uri` | text | no | — | — |
-| `redirect_host` | string | no | — | — |
+| `redirect_uri` | text | yes | null | — |
+| `redirect_host` | string | yes | null | — |
 | `resource` | string(512) | yes | null | — |
 | `requested_scopes` | json | no | — | — |
 | `granted_scopes` | json | yes | null | — |
@@ -133,6 +135,7 @@ and `schema_version` like every package table.
 | --- | --- | --- | --- | --- |
 | `auth_code_id` | string(100) | no | — | PK (Passport `oauth_auth_codes.id`) |
 | `grant_id` | uuid | no | — | index |
+| `user_identifier` | string(64) | yes | null | index, preserves erasure lookup after the original code expires |
 | `metadata` | json | yes | null | — |
 | `schema_version` | unsignedSmallInteger | no | 1 | — |
 | `created_at` | timestamp | no | current | index (future prune after the refresh-token TTL) |

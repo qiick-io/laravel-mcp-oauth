@@ -84,6 +84,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `McpOAuthEraser` implements fleet personal data erasure. It removes MCP
+  credentials, unlinks blocked-host attribution, and anonymises consent
+  evidence until its retention deadline. Dry runs and post-commit events share
+  the counts-only report.
 - `SwitchMcpOAuthAction` (design §4.3): the product's settings page switches
   OAuth on or off through it. Switching on is refused with
   `McpOAuthCannotBeEnabledException` (the reason to show) while the Passport

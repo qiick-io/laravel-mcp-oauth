@@ -584,8 +584,11 @@ it('revokes the tokens of a code replayed after it expired', function (): void {
     $this->enableOAuth();
     McpOAuthRoutes::register();
     $client = $this->createClient();
-    ['code' => $code] = $this->obtainAuthorizationCode($client);
+    ['code' => $code, 'user' => $user] = $this->obtainAuthorizationCode($client);
     postToken($this, $this->codeExchange($client, $code))->assertOk();
+
+    // The exchange stays attributable after Passport drops the spent code.
+    expect(DB::table('oauth_auth_code_exchanges')->value('user_identifier'))->toBe((string) $user->getKey());
 
     postToken($this, $this->codeExchange($client, expireAuthorizationCode($code)))
         ->assertStatus(400)

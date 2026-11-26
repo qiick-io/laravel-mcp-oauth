@@ -8,8 +8,8 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * Append-only consent evidence (S4 / §2.4). Written on approve and deny; purged
- * with the 90-day retention rule. No updated_at: the only later write is
- * retention_until when a grant is revoked.
+ * with the 90-day retention rule. No updated_at: retention and erasure
+ * are the only operations allowed to modify existing evidence.
  */
 return new class extends Migration
 {
@@ -18,11 +18,11 @@ return new class extends Migration
         Schema::create('oauth_consent_records', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->uuid('client_id')->index();
-            $table->string('user_identifier', 64)->index();
+            $table->string('user_identifier', 64)->nullable()->index();
             $table->uuid('grant_id')->nullable()->index();
             $table->string('decision', 16);
-            $table->text('redirect_uri');
-            $table->string('redirect_host');
+            $table->text('redirect_uri')->nullable();
+            $table->string('redirect_host')->nullable();
             $table->string('resource', 512)->nullable();
             $table->json('requested_scopes');
             $table->json('granted_scopes')->nullable();
