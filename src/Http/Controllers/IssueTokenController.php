@@ -26,6 +26,8 @@ use Symfony\Component\HttpFoundation\Response;
  * endpoint never says which check failed (RFC 6749 §5.2); and a used code
  * replayed after it expired still revokes the tokens issued with it, because
  * league refuses it for its expiry before OneShotAuthCodeRepository sees it.
+ *
+ * @internal
  */
 final class IssueTokenController extends AccessTokenController
 {

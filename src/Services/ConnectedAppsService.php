@@ -17,6 +17,8 @@ use Qiick\McpOAuth\RedirectUriGuard;
  * (GrantStore::activeForUser()), each with the client it was given to. A
  * grant whose client no longer exists is still listed, so the user can
  * revoke it.
+ *
+ * @internal
  */
 final class ConnectedAppsService
 {

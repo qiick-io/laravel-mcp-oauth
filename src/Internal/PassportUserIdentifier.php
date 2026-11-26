@@ -11,6 +11,8 @@ use LogicException;
  * The user identifier Passport writes on auth codes and tokens
  * (`Bridge\User` = the auth identifier), as the string GrantStore,
  * ConsentDecision and consent records use.
+ *
+ * @internal
  */
 final class PassportUserIdentifier
 {

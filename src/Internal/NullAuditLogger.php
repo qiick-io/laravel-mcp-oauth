@@ -11,6 +11,8 @@ use Qiick\McpOAuth\Contracts\AuditLogger;
  * The {@see AuditLogger} the package binds until the product binds its own
  * sink: audit is optional, so the package writes its entries either way and
  * this one drops them.
+ *
+ * @internal
  */
 final class NullAuditLogger implements AuditLogger
 {

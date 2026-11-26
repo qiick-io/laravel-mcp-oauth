@@ -21,6 +21,8 @@ use League\OAuth2\Server\Exception\OAuthServerException;
  * of another client and a redirect URI that does not match. RFC 6749 §5.2
  * names those `invalid_grant`, so they are reclassified by their hint: the
  * hints are league's fixed strings, and the tests pin each case.
+ *
+ * @internal
  */
 final class TokenErrorResponseService
 {

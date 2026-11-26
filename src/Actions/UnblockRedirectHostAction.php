@@ -15,6 +15,8 @@ use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
  * register again, and the user consents again.
  *
  * Dispatches {@see McpRedirectHostUnblockedEvent}.
+ *
+ * @internal
  */
 final class UnblockRedirectHostAction
 {

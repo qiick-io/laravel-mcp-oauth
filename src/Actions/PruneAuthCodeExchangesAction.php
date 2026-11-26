@@ -13,6 +13,8 @@ use Qiick\McpOAuth\Models\OAuthAuthCodeExchange;
  * presented again has nothing left to revoke. A row of an active grant stays
  * however old it is: refresh rotation keeps that grant's tokens alive past
  * any fixed window.
+ *
+ * @internal
  */
 final class PruneAuthCodeExchangesAction
 {

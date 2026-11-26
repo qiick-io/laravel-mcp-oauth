@@ -21,6 +21,8 @@ use Qiick\McpOAuth\Models\OAuthClientMetadata;
  * it holds revoked. The next consent, token request and `/mcp` call fail.
  *
  * Dispatches {@see McpClientBlockedEvent} after the commit.
+ *
+ * @internal
  */
 final class BlockClientAction
 {

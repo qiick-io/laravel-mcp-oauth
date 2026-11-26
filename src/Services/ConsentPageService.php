@@ -32,6 +32,8 @@ use Symfony\Component\HttpFoundation\Response;
  * What the page shows (consent text version, locale, resource) is stored in
  * the session beside Passport's `authToken`, so approve and deny record the
  * page the user saw (PendingAuthorizationRequestService).
+ *
+ * @internal
  */
 final class ConsentPageService
 {

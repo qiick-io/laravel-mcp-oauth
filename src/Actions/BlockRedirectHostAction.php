@@ -31,6 +31,8 @@ use Qiick\McpOAuth\RedirectUriGuard;
  * unblock.
  *
  * Dispatches {@see McpRedirectHostBlockedEvent} once the row is written.
+ *
+ * @internal
  */
 final class BlockRedirectHostAction
 {

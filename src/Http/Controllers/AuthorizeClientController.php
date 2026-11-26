@@ -35,6 +35,8 @@ use Symfony\Component\HttpFoundation\Response;
  * - an OAuth error league redirects to the client (`prompt=none` →
  *   `consent_required` / `login_required`) carries `iss` like every other
  *   authorization response.
+ *
+ * @internal
  */
 final class AuthorizeClientController extends AuthorizationController
 {

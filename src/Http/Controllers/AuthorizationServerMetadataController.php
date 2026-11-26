@@ -12,6 +12,8 @@ use Qiick\McpOAuth\McpOAuthServer;
  * review M1, M2, S1). The document is built by
  * {@see McpOAuthServer::authorizationServerMetadata()}, so adopters read the
  * same members the endpoint serves.
+ *
+ * @internal
  */
 final class AuthorizationServerMetadataController
 {

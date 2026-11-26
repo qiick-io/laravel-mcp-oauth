@@ -12,6 +12,8 @@ use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
  * Documented maxima keep a typo’d env from issuing near-permanent tokens
  * or over-long auth codes. Invalid values throw; they are never floored
  * or replaced with a default.
+ *
+ * @internal
  */
 final class BoundedPositiveInt
 {

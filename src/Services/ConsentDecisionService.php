@@ -33,6 +33,8 @@ use Qiick\McpOAuth\Data\PendingAuthorizationRequestData;
  * page, never read again on submit.
  *
  * The product's own checks run afterwards in ConsentProvider::validate().
+ *
+ * @internal
  */
 final class ConsentDecisionService
 {

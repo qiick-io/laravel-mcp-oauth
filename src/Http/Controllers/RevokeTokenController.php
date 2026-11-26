@@ -14,6 +14,8 @@ use Qiick\McpOAuth\Services\RevocationRequestService;
  * `POST oauth/revoke` (RFC 7009): authenticates the client, revokes the token
  * if it is the client's, and answers 200 with an empty body whatever the
  * token was (§2.2), so the endpoint is not a token oracle.
+ *
+ * @internal
  */
 final class RevokeTokenController
 {

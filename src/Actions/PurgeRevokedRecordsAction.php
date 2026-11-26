@@ -30,6 +30,8 @@ use Qiick\McpOAuth\Models\OAuthConsentRecord;
  *   GrantRecord carries the revocation time).
  *
  * A dry run counts the package's rows and leaves the product's grants alone.
+ *
+ * @internal
  */
 final class PurgeRevokedRecordsAction
 {

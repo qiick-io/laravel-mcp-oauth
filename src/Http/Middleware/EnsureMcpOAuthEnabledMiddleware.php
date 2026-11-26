@@ -17,6 +17,8 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  * and Allow). On without usable Passport keys → 503 temporarily_unavailable
  * (an HTML page for a browser on the consent flow) and
  * {@see McpPassportKeysFoundMissingEvent}.
+ *
+ * @internal
  */
 final class EnsureMcpOAuthEnabledMiddleware
 {

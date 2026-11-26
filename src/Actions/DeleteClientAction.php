@@ -17,6 +17,8 @@ use Qiick\McpOAuth\Models\OAuthClientMetadata;
  * stay. They hold no credential, and their own retention removes them
  * (`retention_until` in mcp-oauth:purge-revoked, and
  * mcp-oauth:prune-auth-code-exchanges).
+ *
+ * @internal
  */
 final class DeleteClientAction
 {

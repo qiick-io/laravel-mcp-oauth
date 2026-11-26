@@ -23,6 +23,8 @@ use Qiick\McpOAuth\Models\OAuthAuthCodeExchange;
  * that is already revoked is left as it is. A code that was never consumed
  * has no row, so it revokes nothing, and an older code never touches the
  * grant of a newer consent.
+ *
+ * @internal
  */
 final class RevokeAuthCodeTokensAction
 {

@@ -24,6 +24,8 @@ use Qiick\McpOAuth\Models\OAuthClientMetadata;
  * one included): a grant alone would be forgotten once purged. A client in
  * retention (`revoked_at` set) is left to `mcp-oauth:purge-revoked`, and a
  * product's own Passport client (no metadata row) is never touched.
+ *
+ * @internal
  */
 final class PruneUnusedClientsAction
 {

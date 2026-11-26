@@ -41,6 +41,8 @@ use Symfony\Component\HttpFoundation\Response;
  * one. A repeated (array) parameter league reads is refused by league itself
  * as a JSON `invalid_request`. The requested scope is dropped (RFC 6749 §3.3):
  * league then applies Passport's default, `mcp:use`.
+ *
+ * @internal
  */
 final class ValidateAuthorizationRequestMiddleware
 {
