@@ -113,7 +113,10 @@ final class McpOAuthServer
      */
     private function hasPlainPort(int $port): bool
     {
-        return $port >= 1 && $port <= 65_535 && preg_match('#:'.$port.'(?:/|$)#', $this->issuer()) === 1;
+        // The authority alone: scheme://authority, up to the first / ? or #.
+        preg_match('#^[^:/?\#]+://([^/?\#]*)#', $this->issuer(), $issuerMatch);
+
+        return $port >= 1 && $port <= 65_535 && str_ends_with($issuerMatch[1] ?? '', ':'.$port);
     }
 
     /**
