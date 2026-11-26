@@ -80,12 +80,17 @@ final class OneShotAuthCodeRepository extends AuthCodeRepository
 
         /** @var array{client_id: string, user_id: int|string} $codeOwner Passport writes both when it persists a code */
         $codeOwner = $authCode->only(['client_id', 'user_id']);
-        $grant = $this->grantStore->activeFor($codeOwner['client_id'], (string) $codeOwner['user_id']);
+        $userIdentifier = (string) $codeOwner['user_id'];
+        $grant = $this->grantStore->activeFor($codeOwner['client_id'], $userIdentifier);
 
         $this->consumedAuthCodeGrant->record($grant?->id);
 
         if ($grant !== null) {
-            OAuthAuthCodeExchange::query()->create(['auth_code_id' => $codeId, 'grant_id' => $grant->id]);
+            OAuthAuthCodeExchange::query()->create([
+                'auth_code_id' => $codeId,
+                'grant_id' => $grant->id,
+                'user_identifier' => $userIdentifier,
+            ]);
         }
     }
 }

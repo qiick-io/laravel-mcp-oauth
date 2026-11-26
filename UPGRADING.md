@@ -31,3 +31,7 @@ Products must adopt with an exact `0.x` version constraint until `1.0.0`.
   edited in place, so run `migrate:fresh` (and re-seed) on any database that
   already ran them. Without the column, approving a client fails with an SQL
   error.
+- The consent and authorization-code exchange `create_` migrations also
+  changed for erasure. Re-publish any customized copies and carry forward the
+  nullable consent columns and the indexed `oauth_auth_code_exchanges.user_identifier`
+  column before rebuilding a pre-release development or test database.
