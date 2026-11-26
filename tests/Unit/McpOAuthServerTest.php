@@ -349,7 +349,7 @@ it('accepts an issuer with a host, a port and a path', function (string $appUrl)
     config()->set('app.url', $appUrl);
 
     expect($server->hasAbsoluteIssuer())->toBeTrue();
-})->with(['https://app.example', 'http://127.0.0.1:8000', 'https://app.example:65535', 'https://app.example:1', 'https://app.example/base', 'HTTPS://APP.EXAMPLE']);
+})->with(['https://app.example', 'http://127.0.0.1:8000', 'https://app.example:65535', 'https://app.example:1', 'https://app.example/', 'HTTPS://APP.EXAMPLE']);
 
 // --- A key pair Passport's signer can use (Codex review of #44) -----------------
 
@@ -427,5 +427,6 @@ it('refuses an issuer without an authority or with an unusable port', function (
     'a non-numeric port' => ['https://app.example:https'],
     'a signed port' => ['https://app.example:+80'],
     'a signed port, the digits in the path' => ['https://app.example:+80/base:80'],
+    'a path, where no package route is served' => ['https://app.example/base'],
     'a port with a leading space' => ['https://app.example: 80'],
 ]);

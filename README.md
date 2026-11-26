@@ -120,10 +120,12 @@ Route::middleware(['web', 'auth'])->prefix('admin')->group(
 | `GET mcp-oauth-clients` | JSON: the package's clients (50 a page) and the blocked hosts |
 | `POST mcp-oauth-clients/{client}/block` | revokes the client, its grants, tokens and codes |
 | `POST mcp-oauth-clients/bulk-block` | the same for 1 to 100 distinct client UUIDs |
+| `POST mcp-oauth-clients/prune-unused` | runs the unused-client prune now; JSON `prunedClientCount` |
 | `POST mcp-oauth-clients/blocked-hosts` | blocks a host (`match_mode` `exact` or, by default, with its subdomains) and every client that redirects there; a host already blocked keeps its first mode and reason |
 | `DELETE mcp-oauth-clients/blocked-hosts/{id}` | lifts a block; blocked clients stay revoked |
 
-Writes answer 204 to a JSON call and redirect back for a form or Inertia post.
+Writes answer 204 to a JSON call (the prune 200, with `prunedClientCount`) and
+redirect back for a form or Inertia post.
 Only clients the package registered are listed or blocked, never the product's
 own Passport clients.
 

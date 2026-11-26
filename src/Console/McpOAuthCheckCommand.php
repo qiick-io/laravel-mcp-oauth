@@ -12,8 +12,10 @@ use Qiick\McpOAuth\McpOAuthServer;
 /**
  * `mcp-oauth:check` (design §5.4): reports whether OAuth is on, the issuer
  * and resource it advertises, where the Passport keys come from and whether
- * they are usable, and any foreign `passport.*` route (design §3.3). It
- * exits 1 when OAuth is on but not ready, or beside a foreign Passport route.
+ * they are usable, any foreign `passport.*` route (design §3.3), and whether
+ * the package alone serves its routes at the origin, the same check the
+ * admin switch makes. It exits 1 beside a foreign Passport or laravel/mcp
+ * OAuth route, or when OAuth is on but not ready or not served.
  *
  * It reads McpOAuthServer directly rather than McpOAuthReadiness: that probe
  * reports only `passport_keys` for a product's /up endpoint, while an
@@ -34,6 +36,7 @@ final class McpOAuthCheckCommand extends Command
         $hasEnvKeys = self::isFilled($config->get('passport.private_key')) || self::isFilled($config->get('passport.public_key'));
         $foreignRouteNames = McpOAuthRoutes::foreignPassportRouteNames();
         $laravelMcpRouteNames = McpOAuthRoutes::laravelMcpOAuthRouteNames();
+        $servingProblems = McpOAuthRoutes::servingProblems();
 
         $this->line('OAuth: '.($isEnabled ? 'on' : 'off'));
         $this->line('Issuer: '.$mcpOAuthServer->issuer());
@@ -41,8 +44,9 @@ final class McpOAuthCheckCommand extends Command
         $this->line('Passport keys: '.($hasEnvKeys ? 'env' : 'file').', '.($mcpOAuthServer->hasPassportKeys() ? 'usable' : 'missing or unusable'));
         $this->line('Foreign Passport routes: '.($foreignRouteNames === [] ? 'none' : implode(', ', $foreignRouteNames)));
         $this->line('laravel/mcp OAuth routes: '.($laravelMcpRouteNames === [] ? 'none' : implode(', ', $laravelMcpRouteNames)));
+        $this->line('Package routes: '.($servingProblems === [] ? 'served at the origin' : implode('; ', $servingProblems)));
 
-        $isHealthy = $foreignRouteNames === [] && $laravelMcpRouteNames === [] && (! $isEnabled || $mcpOAuthServer->isReady());
+        $isHealthy = $foreignRouteNames === [] && $laravelMcpRouteNames === [] && (! $isEnabled || ($mcpOAuthServer->isReady() && $servingProblems === []));
 
         return $isHealthy ? self::SUCCESS : self::FAILURE;
     }

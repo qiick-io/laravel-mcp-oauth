@@ -6,6 +6,7 @@ namespace Qiick\McpOAuth;
 
 use Illuminate\Support\Facades\Route;
 use Qiick\McpOAuth\Http\Controllers\ClientAdminController;
+use Qiick\McpOAuth\Http\Controllers\PruneUnusedClientsController;
 
 /**
  * The admin routes for MCP clients and blocked hosts (design §5.2). The
@@ -22,6 +23,7 @@ final class McpOAuthAdminRoutes
         Route::middleware($permissionMiddleware)->prefix('mcp-oauth-clients')->name('mcp-oauth.admin.')->group(static function (): void {
             Route::get('/', [ClientAdminController::class, 'index'])->name('index');
             Route::post('bulk-block', [ClientAdminController::class, 'bulkBlock'])->name('bulk-block');
+            Route::post('prune-unused', PruneUnusedClientsController::class)->name('prune-unused');
             Route::post('blocked-hosts', [ClientAdminController::class, 'blockHost'])->name('blocked-hosts.store');
             Route::delete('blocked-hosts/{blockedHostId}', [ClientAdminController::class, 'unblockHost'])->name('blocked-hosts.destroy');
             Route::post('{clientId}/block', [ClientAdminController::class, 'block'])->name('block');
