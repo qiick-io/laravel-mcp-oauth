@@ -11,6 +11,10 @@ Products must adopt with an exact `0.x` version constraint until `1.0.0`.
 
 ## Unreleased
 
+- `McpOAuthServer::SUPPORTED_GRANT_TYPES` and `SUPPORTED_CODE_CHALLENGE_METHODS`
+  are now the static methods `supportedGrantTypes()` and
+  `supportedCodeChallengeMethods()`, and `RegisterClientController::MAX_BODY_BYTES`
+  is gone (the limit is still 65 536 bytes).
 - If you already ran the blocked redirect hosts migration on PostgreSQL or
   SQLite, add the index in place:
 
