@@ -15,7 +15,11 @@ before the change's event:
   exception reaches the caller, so a retry starts from the state before it
   (a denial leaves no evidence row, an unblock leaves the host blocked);
 - a sink on another connection or outside the database should defer its
-  write to the commit if an entry for a rolled-back change matters.
+  write to the commit if an entry for a rolled-back change matters;
+- a grant revoke writes the product's `GrantStore` last, after the token
+  changes and the entry, holding the client's row lock: a failing sink
+  leaves the grant active even in a store that commits on its own, and two
+  concurrent revokes of one grant record one entry and one event.
 
 | Change | Transaction on | Then dispatched |
 | --- | --- | --- |

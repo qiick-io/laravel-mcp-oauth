@@ -444,6 +444,8 @@ it('approves: narrowed grant, consent record, event, then the code with state an
         role: 'editor',
         resources: ['news', 'events'],
         allResources: false,
+        resource: AuthorizeFlowTestCase::RESOURCE,
+        locale: app()->getLocale(),
     ))->and($grant)->not->toBeNull();
 
     $authCode = DB::table('oauth_auth_codes')->sole();

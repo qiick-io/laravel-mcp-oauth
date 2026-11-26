@@ -235,23 +235,49 @@ it('blocks nothing when the audit of a client or host block fails', function ():
     Event::assertNotDispatched(McpRedirectHostBlocked::class);
 });
 
-it('revokes no token when the audit of a Connected apps or RFC 7009 revoke fails', function (): void {
+it('leaves the grant active and the tokens in place when a revoke cannot be audited, even with a store that commits on its own (Codex review of #60)', function (): void {
     Event::fake([McpGrantRevoked::class, McpTokenRevoked::class]);
     $client = $this->createClient();
     ['refresh_token' => $refreshToken, 'user_id' => $userIdentifier] = auditedTokensFor($this, $client);
     $grant = $this->grantStore()->activeFor((string) $client->getKey(), $userIdentifier);
-    app()->instance(AuditLogger::class, throwingAuditLogger());
+    $auditLogger = throwingAuditLogger($this->auditLogger);
+    app()->instance(AuditLogger::class, $auditLogger);
 
-    // RFC 7009 first: the in-memory FakeGrantStore has no transaction to roll back.
+    // The in-memory FakeGrantStore never rolls back: it commits on its own.
+    expect(fn () => app(RevokeConnectedAppAction::class)->execute($grant, TestUser::query()->findOrFail($userIdentifier)))->toThrow(RuntimeException::class);
     $this->withHeaders(['Accept' => 'application/json'])
         ->post('/oauth/revoke', ['token' => $refreshToken, 'client_id' => (string) $client->getKey()])
         ->assertServerError();
-    expect(fn () => app(RevokeConnectedAppAction::class)->execute($grant, TestUser::query()->findOrFail($userIdentifier)))->toThrow(RuntimeException::class);
 
-    expect(Passport::token()->newQuery()->where('revoked', true)->count())->toBe(0)
+    expect($this->grantStore()->activeFor((string) $client->getKey(), $userIdentifier)?->id)->toBe($grant?->id)
+        ->and(Passport::token()->newQuery()->where('revoked', true)->count())->toBe(0)
         ->and(Passport::refreshToken()->newQuery()->count())->toBe(1);
     Event::assertNotDispatched(McpGrantRevoked::class);
     Event::assertNotDispatched(McpTokenRevoked::class);
+
+    // The retry finds the grant and records the revoke once.
+    $auditLogger->isDown = false;
+    $this->withHeaders(['Accept' => 'application/json'])
+        ->post('/oauth/revoke', ['token' => $refreshToken, 'client_id' => (string) $client->getKey()])
+        ->assertOk();
+
+    expect($this->grantStore()->activeFor((string) $client->getKey(), $userIdentifier))->toBeNull()
+        ->and(array_column($this->auditLogger->entries, 'event'))->toBe(['oauth_consent_approved', 'oauth_grant_revoked']);
+    Event::assertDispatched(McpTokenRevoked::class);
+});
+
+it('records a grant revoke once when two Connected apps requests revoke the same grant (Codex review of #60)', function (): void {
+    Event::fake([McpGrantRevoked::class]);
+    $client = $this->createClient();
+    ['user' => $user] = $this->obtainAuthorizationCode($client);
+    // Both requests resolved the grant while it was active.
+    $grant = $this->grantStore()->activeFor((string) $client->getKey(), (string) $user->getKey());
+
+    app(RevokeConnectedAppAction::class)->execute($grant, $user);
+    app(RevokeConnectedAppAction::class)->execute($grant, $user);
+
+    expect(array_column($this->auditLogger->entries, 'event'))->toBe(['oauth_consent_approved', 'oauth_grant_revoked']);
+    Event::assertDispatchedTimes(McpGrantRevoked::class, 1);
 });
 
 // --- Mapping to the 1.5 activity log (standards review §5, S78) ----------------

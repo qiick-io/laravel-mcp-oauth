@@ -96,7 +96,8 @@ final class FakeGrantStore implements GrantStore
             return;
         }
 
-        $this->revokedAtById[$grantId] = Date::now()->toDateTimeImmutable();
+        $revokedAt = Date::now()->toDateTimeImmutable();
+        $this->revokedAtById[$grantId] = $revokedAt;
 
         $this->grantsById[$grantId] = new GrantRecord(
             id: $existingGrant->id,
@@ -107,6 +108,9 @@ final class FakeGrantStore implements GrantStore
             authorizedAt: $existingGrant->authorizedAt,
             lastUsedAt: $existingGrant->lastUsedAt,
             display: $existingGrant->display,
+            revokedAt: $revokedAt,
+            revocationReason: $reason,
+            metadata: $existingGrant->metadata,
         );
     }
 

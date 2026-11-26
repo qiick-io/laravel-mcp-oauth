@@ -37,6 +37,13 @@ interface GrantStore
 
     /**
      * Idempotent: revoking a revoked grant changes nothing.
+     *
+     * The package calls it last in a transaction on Passport's connection,
+     * after the token changes and the audit entry, holding the client's row
+     * lock (Connected apps, RFC 7009). A store on that connection rolls back
+     * with them; one that commits on its own is written only once everything
+     * before it succeeded, so a failed audit never leaves a revoked grant
+     * without its entry.
      */
     public function revoke(string $grantId, ?string $actorIdentifier, RevocationReason $reason): void;
 

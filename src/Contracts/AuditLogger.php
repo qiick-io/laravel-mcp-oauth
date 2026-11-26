@@ -24,6 +24,11 @@ use Illuminate\Contracts\Auth\Authenticatable;
  *   file) keeps an entry written before a later rollback; it should defer
  *   its write to the commit when that matters.
  *
+ * A grant revoke writes the product's GrantStore last, after its entry, so
+ * a failing sink leaves the grant active even in a store that commits on its
+ * own (GrantStore::revoke()); two concurrent revokes of one grant record one
+ * entry.
+ *
  * The admin switch writes the product's store through a closure; its entry
  * is recorded before that closure runs, in a transaction on the default
  * connection, so a failing sink leaves the store untouched.

@@ -27,6 +27,7 @@ final class InertiaConsentView implements ConsentView
             'client' => $page->client,
             'authToken' => $page->authToken,
             'options' => $page->options,
+            'advanced' => $page->advanced,
         ])->toResponse($parameters['request']);
     }
 }

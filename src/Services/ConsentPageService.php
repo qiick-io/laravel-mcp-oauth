@@ -9,10 +9,13 @@ use Illuminate\Contracts\Container\Container;
 use Illuminate\Http\Request;
 use Laravel\Passport\Client;
 use Laravel\Passport\Scope;
+use LogicException;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\ConsentView;
 use Qiick\McpOAuth\Data\ClientInfo;
 use Qiick\McpOAuth\Data\ConsentPage;
+use Qiick\McpOAuth\McpOAuthServer;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -25,16 +28,23 @@ use Symfony\Component\HttpFoundation\Response;
  * ValidateAuthorizationRequestMiddleware), or the client's only URI.
  * ConsentProvider and ConsentView are resolved per render, so a product that
  * has not bound them yet still boots while OAuth is off.
+ *
+ * What the page shows (consent text version, locale, resource) is stored in
+ * the session beside Passport's `authToken`, so approve and deny record the
+ * page the user saw (PendingAuthorizationRequestService).
  */
 final class ConsentPageService
 {
     public function __construct(
         private readonly Container $container,
         private readonly RedirectUriGuard $redirectUriGuard,
+        private readonly McpOAuthServer $mcpOAuthServer,
     ) {}
 
     /**
      * @param  array{request: Request, user: Authenticatable, client: Client, scopes: list<Scope>, authToken: string}  $parameters
+     *
+     * @throws LogicException when the version or the locale would not fit its consent record column
      */
     public function render(array $parameters): Response
     {
@@ -43,6 +53,24 @@ final class ConsentPageService
 
         $consentOptions = $this->container->make(ConsentProvider::class)
             ->options($parameters['request'], $parameters['user'], $clientInfo);
+        $resource = $this->mcpOAuthServer->resourceIdentifier();
+        $locale = app()->getLocale();
+
+        // The oauth_consent_records columns: string(32) and string(16).
+        if ($consentOptions->consentVersion !== null && mb_strlen($consentOptions->consentVersion) > 32) {
+            throw new LogicException('The consent version must be at most 32 characters.');
+        }
+
+        if (mb_strlen($locale) > 16) {
+            throw new LogicException('The application locale must be at most 16 characters to be recorded with consent.');
+        }
+
+        $parameters['request']->session()->put(PendingAuthorizationRequestService::RENDERED_CONSENT_SESSION_KEY, [
+            'authToken' => $parameters['authToken'],
+            'consentVersion' => $consentOptions->consentVersion,
+            'locale' => $locale,
+            'resource' => $resource,
+        ]);
 
         $consentPage = new ConsentPage(
             client: [
@@ -54,6 +82,7 @@ final class ConsentPageService
             ],
             authToken: $parameters['authToken'],
             options: $consentOptions,
+            advanced: self::advancedRows($clientInfo, $resource, is_string($redirectUri) ? $redirectUri : $clientInfo->redirectUris[0]),
         );
 
         return $this->container->make(ConsentView::class)->render($parameters, $consentPage);
@@ -72,14 +101,64 @@ final class ConsentPageService
         /** @var string $clientName */
         $clientName = $client->getAttribute('name');
 
+        // Only package clients reach consent (ValidateAuthorizationRequestMiddleware), so the row exists.
+        /** @var array{registration_source: string, client_uri: ?string, logo_uri: ?string, policy_uri: ?string, tos_uri: ?string, contacts: ?list<string>, software_id: ?string, software_version: ?string, metadata_document_url: ?string} $registered */
+        $registered = OAuthClientMetadata::query()->where('client_id', $clientId)->firstOrFail()->only([
+            'registration_source', 'client_uri', 'logo_uri', 'policy_uri', 'tos_uri',
+            'contacts', 'software_id', 'software_version', 'metadata_document_url',
+        ]);
+
         return new ClientInfo(
             id: $clientId,
             name: $clientName,
             redirectHost: $this->redirectUriGuard->displayHostOf($redirectUri ?? $registeredRedirectUris[0]),
             redirectUris: $registeredRedirectUris,
+            registrationSource: $registered['registration_source'],
+            clientUri: $registered['client_uri'],
+            logoUri: $registered['logo_uri'],
+            policyUri: $registered['policy_uri'],
+            tosUri: $registered['tos_uri'],
+            contacts: $registered['contacts'] ?? [],
+            softwareId: $registered['software_id'],
+            softwareVersion: $registered['software_version'],
+            metadataDocumentUrl: $registered['metadata_document_url'],
             // The callback this approval returns to, not the whole registration:
             // a client with an https and a loopback callback still warns (S3).
             isRedirectLoopback: $this->redirectUriGuard->isLoopbackRedirectUri($redirectUri ?? $registeredRedirectUris[0]),
         );
+    }
+
+    /**
+     * The page's Advanced section (closed by default, standards review §4):
+     * the resource and the callback this approval returns to, then what the
+     * client registered, each row only when it has a value.
+     *
+     * @return list<array{label: string, value: string}>
+     */
+    private static function advancedRows(ClientInfo $clientInfo, string $resource, string $returnUri): array
+    {
+        $software = trim(($clientInfo->softwareId ?? '').' '.($clientInfo->softwareVersion ?? ''));
+        $rows = [
+            'Client ID' => $clientInfo->id,
+            'Registered through' => $clientInfo->registrationSource,
+            'Resource' => $resource,
+            'Returns to' => $returnUri,
+            'Callbacks' => implode(', ', $clientInfo->redirectUris),
+            'Website' => $clientInfo->clientUri,
+            'Terms' => $clientInfo->tosUri,
+            'Privacy policy' => $clientInfo->policyUri,
+            'Contacts' => implode(', ', $clientInfo->contacts),
+            'Software' => $software,
+        ];
+
+        $advancedRows = [];
+
+        foreach ($rows as $label => $value) {
+            if ($value !== null && $value !== '') {
+                $advancedRows[] = ['label' => $label, 'value' => $value];
+            }
+        }
+
+        return $advancedRows;
     }
 }

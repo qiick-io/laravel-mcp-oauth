@@ -54,29 +54,41 @@ final class RevokeConnectedAppAction
             BoundedPositiveInt::AUTH_CODE_TTL_MINUTES_MAX,
         );
 
-        // One transaction on Passport's connection: the tokens and codes are
-        // revoked together or not at all, and with them the product's grant
-        // when its GrantStore writes on that connection. The event follows
-        // the commit, so listeners never hear of a revoke that rolled back.
-        Passport::token()->getConnection()->transaction(function () use ($grant, $user, $userIdentifier, $revokeStartedAt, $authCodeTtlMinutes): void {
-            $this->grantStore->revoke($grant->id, $userIdentifier, RevocationReason::User);
-            $this->revokeGrantTokens->execute($grant);
+        // One transaction on Passport's connection, holding the client's row
+        // lock so two revokes of one grant run one after the other: the
+        // second finds it no longer active and changes and records nothing.
+        // The grant is written last, after the tokens, codes and audit entry
+        // (AuditLogger): a failure before it leaves the grant active, even in
+        // a GrantStore that commits on its own, and the revoke can be retried.
+        // The event follows the commit, so listeners never hear of a revoke
+        // that rolled back.
+        $isRevoked = Passport::token()->getConnection()->transaction(function () use ($grant, $user, $userIdentifier, $revokeStartedAt, $authCodeTtlMinutes): bool {
+            Passport::client()->newQuery()->whereKey($grant->clientId)->lockForUpdate()->first();
 
-            if ($this->grantStore->activeFor($grant->clientId, $grant->userIdentifier) === null) {
-                Passport::authCode()->newQuery()
-                    ->where('client_id', $grant->clientId)
-                    ->where('user_id', $grant->userIdentifier)
-                    ->where('expires_at', '<', $revokeStartedAt->copy()->addMinutes($authCodeTtlMinutes))
-                    ->update(['revoked' => true]);
+            if ($this->grantStore->activeFor($grant->clientId, $grant->userIdentifier)?->id !== $grant->id) {
+                return false;
             }
 
+            $this->revokeGrantTokens->execute($grant);
+            // The pair's only active grant is going (replace() keeps one), so
+            // its unexchanged codes go too.
+            Passport::authCode()->newQuery()
+                ->where('client_id', $grant->clientId)
+                ->where('user_id', $grant->userIdentifier)
+                ->where('expires_at', '<', $revokeStartedAt->copy()->addMinutes($authCodeTtlMinutes))
+                ->update(['revoked' => true]);
             $this->auditLogger->record('oauth_grant_revoked', $user, $grant->id, [
                 'client_id' => $grant->clientId,
                 'redirect_host' => OAuthConsentRecord::redirectHostOfGrant($grant->id),
                 'reason' => RevocationReason::User->value,
             ]);
+            $this->grantStore->revoke($grant->id, $userIdentifier, RevocationReason::User);
+
+            return true;
         });
 
-        event(new McpGrantRevoked($grant->id, $grant->clientId, $grant->userIdentifier, $userIdentifier, RevocationReason::User));
+        if ($isRevoked) {
+            event(new McpGrantRevoked($grant->id, $grant->clientId, $grant->userIdentifier, $userIdentifier, RevocationReason::User));
+        }
     }
 }

@@ -333,7 +333,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
             // separate server Passport gives PersonalAccessTokenFactory, so the
             // product's own createToken() keeps working. A local list, not a
             // class constant: pcov never covers a constant.
-            $serverGrantTypes = [...McpOAuthServer::SUPPORTED_GRANT_TYPES, 'personal_access'];
+            $serverGrantTypes = [...McpOAuthServer::supportedGrantTypes(), 'personal_access'];
 
             foreach ($enabledGrantTypes as $grantIdentifier => $grant) {
                 // Password, implicit, client credentials, device: whatever Passport enables.

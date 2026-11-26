@@ -112,10 +112,20 @@ final class RevokeTokenAction
             return;
         }
 
-        // The family, the grant and the audit entry together or not at all;
-        // the event follows the commit.
-        /** @var array{grant: GrantRecord|null, revokedTokenCount: int} $revocation Laravel 12 types transaction() as mixed */
-        $revocation = Passport::token()->getConnection()->transaction(function () use ($accessToken): array {
+        // The family, the audit entry and the grant together or not at all,
+        // holding the client's row lock so a concurrent revoke of the same
+        // family runs after this one and finds its refresh token gone. The
+        // grant is written last (AuditLogger): a failure before it leaves the
+        // grant active, even in a GrantStore that commits on its own, so a
+        // retry finds and records it. The event follows the commit.
+        /** @var array{grant: GrantRecord|null, revokedTokenCount: int}|null $revocation Laravel 12 types transaction() as mixed */
+        $revocation = Passport::token()->getConnection()->transaction(function () use ($accessToken, $refreshTokenPayload): ?array {
+            Passport::client()->newQuery()->whereKey($accessToken->getAttribute('client_id'))->lockForUpdate()->first();
+
+            if (! Passport::refreshToken()->newQuery()->whereKey($refreshTokenPayload['refresh_token_id'])->exists()) {
+                return null;
+            }
+
             $bindingColumn = GrantBindingColumn::from($this->config);
             $familyAccessTokenIds = Passport::token()->newQuery()
                 ->where('client_id', $accessToken->getAttribute('client_id'))
@@ -132,16 +142,20 @@ final class RevokeTokenAction
             $grant = $this->boundGrantOf($accessToken);
 
             if ($grant !== null) {
-                $this->grantStore->revoke($grant->id, null, RevocationReason::Client);
                 $this->auditLogger->record('oauth_grant_revoked', null, $grant->id, [
                     'client_id' => $grant->clientId,
                     'redirect_host' => OAuthConsentRecord::redirectHostOfGrant($grant->id),
                     'reason' => RevocationReason::Client->value,
                 ]);
+                $this->grantStore->revoke($grant->id, null, RevocationReason::Client);
             }
 
             return ['grant' => $grant, 'revokedTokenCount' => $revokedTokenCount];
         });
+
+        if ($revocation === null) {
+            return;
+        }
 
         $this->dispatchRevoked($accessToken, $revocation['grant'], 'refresh_token', $revocation['revokedTokenCount']);
     }
