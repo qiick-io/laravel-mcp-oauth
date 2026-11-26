@@ -46,15 +46,28 @@ beforeEach(function (): void {
     McpOAuthRoutes::register();
 });
 
-it('refuses to switch on while the package\'s routes are not mounted', function (): void {
+it('refuses to switch on unless the package itself serves its routes at the origin (Codex review of #62)', function (Closure $mountRoutes, string $problem): void {
     Route::setRoutes(new RouteCollection);
+    $mountRoutes();
+    Route::getRoutes()->refreshNameLookups();
     $store = switchStore();
 
     expect(fn () => app(SwitchMcpOAuthAction::class)->execute(true, null, $store->persist))
-        ->toThrow(static fn (McpOAuthCannotBeEnabledException $exception) => expect($exception->getMessage())->toBe('OAuth cannot be switched on until McpOAuthRoutes::register() mounts its routes.'));
+        ->toThrow(static fn (McpOAuthCannotBeEnabledException $exception) => expect($exception->getMessage())->toContain($problem));
 
     expect($store->writes)->toBe([]);
-});
+})->with([
+    'not mounted' => [static fn () => null, 'passport.token is not mounted'],
+    'mounted under a prefix' => [static fn () => Route::prefix('api')->group(static fn () => McpOAuthRoutes::register()), 'passport.token is not the package\'s POST /oauth/token'],
+    'a foreign handler under the token name' => [static function (): void {
+        McpOAuthRoutes::register();
+        Route::post('oauth/token', static fn (): string => 'foreign')->name('passport.token');
+    }, 'passport.token is not the package\'s POST /oauth/token'],
+    'beside laravel/mcp\'s own OAuth routes' => [static function (): void {
+        McpOAuthRoutes::register();
+        Route::get('.well-known/oauth-protected-resource/{path}', static fn (): string => '')->where('path', '.*')->name('mcp.oauth.protected-resource.nested');
+    }, 'laravel/mcp OAuth route mcp.oauth.protected-resource.nested'],
+]);
 
 it('switches on when OAuth can serve, writing the store and telling the product', function (): void {
     $store = switchStore();

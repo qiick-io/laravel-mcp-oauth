@@ -219,6 +219,22 @@ function adminUser(AuthorizeFlowTestCase $testCase): TestUser
     return $admin;
 }
 
+it('refuses an admin write without the CSRF token once the web group\'s CSRF check is active (Codex review of #62)', function (): void {
+    registerAdminRoutes();
+    $unusedClient = $this->createClient();
+    $unusedClient->forceFill(['created_at' => now()->subHours(25)])->save();
+    // Laravel skips the CSRF check while the environment is `testing`.
+    $this->app['env'] = 'local';
+
+    try {
+        $this->actingAs(adminUser($this))->post('/mcp-oauth-clients/prune-unused')->assertStatus(419);
+    } finally {
+        $this->app['env'] = 'testing';
+    }
+
+    expect(Client::query()->whereKey($unusedClient->getKey())->exists())->toBeTrue();
+});
+
 it('prunes unused clients from the admin route, for an admin only (design §5.2)', function (): void {
     registerAdminRoutes();
     $unusedClient = $this->createClient();
