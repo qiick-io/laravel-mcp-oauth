@@ -54,6 +54,7 @@ CLASSES=(
   'Qiick\McpOAuth\Http\Controllers\ConnectedAppsController'
   'Qiick\McpOAuth\Http\Controllers\DenyClientController'
   'Qiick\McpOAuth\Http\Controllers\IssueTokenController'
+  'Qiick\McpOAuth\Http\Controllers\PruneUnusedClientsController'
   'Qiick\McpOAuth\Http\Controllers\RegisterClientController'
   'Qiick\McpOAuth\Http\Controllers\RevokeTokenController'
   'Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware'

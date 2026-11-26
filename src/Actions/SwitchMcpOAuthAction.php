@@ -24,7 +24,8 @@ use Qiick\McpOAuth\McpOAuthServer;
  *
  * - switching on is refused, with a reason to show, while OAuth could not
  *   serve: Passport keys missing or not one usable pair, APP_URL not a
- *   valid issuer, or a foreign `passport.*` route;
+ *   valid issuer, or the OAuth routes not served by the package alone at
+ *   the origin ({@see McpOAuthRoutes::servingProblems()});
  * - switching off is always allowed and leaves grants, clients and blocked
  *   hosts in place;
  * - either way the audit entry is recorded first, then the store written,
@@ -78,10 +79,11 @@ final class SwitchMcpOAuthAction
             throw new McpOAuthCannotBeEnabledException('OAuth cannot be switched on until APP_URL is an absolute http(s) URL.');
         }
 
-        $foreignRouteNames = McpOAuthRoutes::foreignPassportRouteNames();
+        // The same route checks mcp-oauth:check reports.
+        $servingProblems = McpOAuthRoutes::servingProblems();
 
-        if ($foreignRouteNames !== []) {
-            throw new McpOAuthCannotBeEnabledException('OAuth cannot be switched on beside another Passport server: '.implode(', ', $foreignRouteNames).'.');
+        if ($servingProblems !== []) {
+            throw new McpOAuthCannotBeEnabledException('OAuth cannot be switched on until McpOAuthRoutes::register() alone serves the OAuth routes at the origin: '.implode('; ', $servingProblems).'.');
         }
     }
 }

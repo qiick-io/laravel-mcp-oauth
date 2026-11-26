@@ -84,6 +84,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `POST mcp-oauth-clients/prune-unused` (design §5.2): an admin runs the
+  unused-client prune now. Switching OAuth on is now also refused while
+  APP_URL has a path, and until every advertised URL (authorize, approve,
+  deny, token, register, revoke when advertised, both metadata documents,
+  the nested protected resource URL of the WWW-Authenticate challenge)
+  selects the package's controller when requested at the issuer, host
+  included; `mcp-oauth:check` reports the same problems.
 - The package writes its audit entries through `AuditLogger` (design §3.1,
   §4.3, §8.2, S78), ids and hosts only: `oauth_consent_approved` and
   `oauth_consent_denied` (client and redirect host), `mcp_oauth_enabled` and

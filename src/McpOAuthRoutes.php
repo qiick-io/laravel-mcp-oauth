@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Qiick\McpOAuth;
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Laravel\Mcp\Server\Http\Controllers\OAuthRegisterController;
@@ -20,6 +21,7 @@ use Qiick\McpOAuth\Http\Controllers\RevokeTokenController;
 use Qiick\McpOAuth\Http\Middleware\EnsureMcpOAuthEnabledMiddleware;
 use Qiick\McpOAuth\Http\Middleware\ValidateAuthorizationRequestMiddleware;
 use Qiick\McpOAuth\Http\Middleware\ValidateTokenRequestMiddleware;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 
 /**
@@ -165,6 +167,76 @@ final class McpOAuthRoutes
                         ->name('passport.authorizations.deny');
                 });
             });
+    }
+
+    /**
+     * What stops the package from serving the endpoints its metadata
+     * advertises (design §4.3), for switch-on and `mcp-oauth:check`. Each
+     * advertised URL (authorize, approve, deny, token, register, revoke when
+     * it is advertised, both metadata documents, and the nested protected
+     * resource URL of the WWW-Authenticate challenge) is matched against the live
+     * route collection as a request to the issuer would be, host included,
+     * and the route it selects must be the package's controller. A route
+     * name proves nothing: a prefixed mount, a mount for another domain or a
+     * foreign handler under the same URL would pass it. Also lists foreign
+     * `passport.*` routes and laravel/mcp's own OAuth routes.
+     *
+     * @return list<string>
+     */
+    public static function servingProblems(): array
+    {
+        $mcpOAuthServer = app(McpOAuthServer::class);
+        $issuer = $mcpOAuthServer->issuer();
+        $metadata = $mcpOAuthServer->authorizationServerMetadata();
+        /** @var string $authorizationEndpoint */
+        $authorizationEndpoint = $metadata['authorization_endpoint'];
+        /** @var string $tokenEndpoint */
+        $tokenEndpoint = $metadata['token_endpoint'];
+        /** @var string $registrationEndpoint */
+        $registrationEndpoint = $metadata['registration_endpoint'];
+
+        $advertisedEndpoints = [
+            ['GET', $authorizationEndpoint, AuthorizeClientController::class],
+            ['POST', $authorizationEndpoint, ApproveClientController::class],
+            ['DELETE', $authorizationEndpoint, DenyClientController::class],
+            ['POST', $tokenEndpoint, IssueTokenController::class],
+            ['POST', $registrationEndpoint, RegisterClientController::class],
+            ['GET', $issuer.'/.well-known/oauth-authorization-server', AuthorizationServerMetadataController::class],
+            ['GET', $issuer.'/.well-known/oauth-protected-resource', ProtectedResourceMetadataController::class],
+            // The URL the /mcp challenge advertises in WWW-Authenticate.
+            ['GET', $mcpOAuthServer->protectedResourceMetadataUrl(), ProtectedResourceMetadataController::class],
+        ];
+        $revocationEndpoint = $mcpOAuthServer->revocationEndpointUrl();
+
+        if ($revocationEndpoint !== null) {
+            $advertisedEndpoints[] = ['POST', $revocationEndpoint, RevokeTokenController::class];
+        }
+
+        $problems = [];
+
+        foreach ($advertisedEndpoints as [$method, $url, $controllerClass]) {
+            try {
+                $selectedRoute = Route::getRoutes()->match(Request::create($url, $method));
+            } catch (HttpException) {
+                $problems[] = "{$method} {$url} is not served";
+
+                continue;
+            }
+
+            if ($selectedRoute->getControllerClass() !== $controllerClass) {
+                $problems[] = "{$method} {$url} is served by another handler";
+            }
+        }
+
+        foreach (self::foreignPassportRouteNames() as $routeName) {
+            $problems[] = "foreign Passport route {$routeName}";
+        }
+
+        foreach (self::laravelMcpOAuthRouteNames() as $routeName) {
+            $problems[] = "laravel/mcp OAuth route {$routeName}";
+        }
+
+        return $problems;
     }
 
     /**

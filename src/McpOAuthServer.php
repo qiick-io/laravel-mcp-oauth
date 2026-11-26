@@ -96,8 +96,9 @@ final class McpOAuthServer
 
     /**
      * APP_URL is an issuer RFC 8414 §2 accepts: an http(s) URL with a host,
-     * a usable port if any (1 to 65535), and no userinfo, query or fragment. Every document and challenge is
-     * built from it, so OAuth cannot serve without one.
+     * a usable port if any (1 to 65535), no path, and no userinfo, query or
+     * fragment. Every document and challenge is built from it, so OAuth
+     * cannot serve without one.
      */
     public function hasAbsoluteIssuer(): bool
     {
@@ -111,6 +112,9 @@ final class McpOAuthServer
             && (string) $issuerParts['host'] !== ''
             && ($issuerParts['port'] === null || $this->hasPlainPort($issuerParts['port']))
             && $issuerParts['user'] === null
+            // Origin only: every endpoint is the issuer plus /oauth/…, and the
+            // package mounts its routes at the root (issuer() drops a final /).
+            && (string) $issuerParts['path'] === ''
             && $issuerParts['query'] === null
             && $issuerParts['fragment'] === null;
     }
