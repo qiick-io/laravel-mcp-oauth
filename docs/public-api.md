@@ -7,17 +7,17 @@ neither `@api` nor `@internal`, or when an `@api` class is missing from this pag
 
 ## Classes, interfaces and enums
 
-Public means the class name, its public methods and constructor, and for enums
-the case names and backing values (backing values are wire values). Events are
-public with their constructor arguments; the `Testing` fakes are public for the
-product's own tests.
+Public means the class name and its public methods, except a method marked
+`@internal`; for enums the case names and backing values (backing values are
+wire values). Constructors are public for the data objects (`Data`), events,
+exceptions and the `Testing` fakes, which products build; the services and
+guards are resolved from the container, so their constructors are not. The
+commands are public by name and signature (below), not as PHP classes.
 
 ### `Qiick\McpOAuth`
 
 - `AccessTokenAuthenticator` (class)
-- `ClientMetadataUriGuard` (class)
 - `ClientThrottleKey` (class)
-- `McpBearerTokenResponse` (class)
 - `McpOAuthAdminRoutes` (class)
 - `McpOAuthReadiness` (class)
 - `McpOAuthRoutes` (class)
@@ -30,12 +30,9 @@ product's own tests.
 
 - `SwitchMcpOAuthAction` (class)
 
-### `Qiick\McpOAuth\Console`
+### `Qiick\McpOAuth\Bridge`
 
-- `McpOAuthCheckCommand` (class)
-- `PruneAuthCodeExchangesCommand` (class)
-- `PruneUnusedClientsCommand` (class)
-- `PurgeRevokedRecordsCommand` (class)
+- `FamilyRevokingRefreshTokenRepository` (class)
 
 ### `Qiick\McpOAuth\Contracts`
 
@@ -143,7 +140,10 @@ with the variable that sets it where there is one:
 
 ## Commands
 
-- `mcp-oauth:check`: reports whether OAuth is on and can serve; exits 1 when it cannot.
+- `mcp-oauth:check`: reports the switch, issuer, resource, keys and routes. It
+  exits 1 beside a foreign Passport route or one of laravel/mcp's OAuth routes,
+  whatever the switch, and when OAuth is on but not ready or not served at the
+  origin; with OAuth off it exits 0 otherwise.
 - `mcp-oauth:prune-auth-code-exchanges {--dry-run}`
 - `mcp-oauth:prune-unused-clients {--dry-run}`
 - `mcp-oauth:purge-revoked {--dry-run}`
@@ -156,7 +156,8 @@ public too; `docs/audit.md` lists them with their properties.
 
 ## Routes
 
-`McpOAuthRoutes::register()` mounts, at the origin:
+`McpOAuthRoutes::register()` mounts, at the origin (Laravel adds `HEAD` to
+every `GET`; `{mcp_path}` is `mcp-oauth.mcp_path`):
 
 | Method | URI | Name |
 | --- | --- | --- |
@@ -164,6 +165,7 @@ public too; `docs/audit.md` lists them with their properties.
 | `GET` | `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/{mcp_path}` | `mcp.oauth.protected-resource`, `mcp.oauth.protected-resource.mcp` |
 | `POST` | `/oauth/register` | `mcp.oauth.register` |
 | `GET`, `POST`, `DELETE` | `/oauth/authorize` | `passport.authorizations.authorize`, `.approve`, `.deny` |
+| `PUT`, `PATCH`, `OPTIONS` | `/oauth/authorize` (answers 405) | `passport.authorizations.unsupported-method` |
 | `POST` | `/oauth/token` | `passport.token` |
 | `POST` | `/oauth/revoke` (when `revocation_enabled`) | `mcp.oauth.revoke` |
 
@@ -171,7 +173,8 @@ public too; `docs/audit.md` lists them with their properties.
 product's group, under `mcp-oauth-clients` with names `mcp-oauth.admin.*`:
 `GET /` (`index`), `POST {clientId}/block` (`block`), `POST bulk-block`
 (`bulk-block`), `POST prune-unused` (`prune-unused`), `POST blocked-hosts`
-(`blocked-hosts.store`) and `DELETE blocked-hosts/{blockedHostId}`.
+(`blocked-hosts.store`) and `DELETE blocked-hosts/{blockedHostId}`
+(`blocked-hosts.destroy`).
 `McpOAuthSettingsRoutes::register()` mounts Connected apps under
 `settings/connected-apps` with names `mcp-oauth.connected-apps.*`: `GET /`
 (`index`) and `DELETE {grantId}` (`destroy`). The README describes each.
@@ -186,11 +189,21 @@ binding column on `oauth_access_tokens` (`grant_binding_column`).
 
 ## Error codes
 
-The `error` values on the wire are OAuth's (RFC 6749 §5.2, RFC 6750 §3.1,
-RFC 7591 §3.2.2): the package writes `invalid_request`, `invalid_client_metadata`,
-`invalid_redirect_uri`, `invalid_token` and `temporarily_unavailable` itself;
-Passport and league write the rest (`invalid_client`, `invalid_grant`,
-`unsupported_grant_type`, `access_denied`, …). Their bodies are fixed strings.
+The `error` values on the wire are OAuth's, by surface. Every OAuth endpoint
+also answers `temporarily_unavailable` (503) while the Passport keys are
+missing.
+
+| Surface | `error` values |
+| --- | --- |
+| `GET /oauth/authorize` (RFC 6749 §4.1.2.1, RFC 8707) | `invalid_request`, `invalid_client`, `unsupported_response_type`, `invalid_target`; `access_denied` on a denial (league) |
+| `POST /oauth/token` (RFC 6749 §5.2, RFC 8707) | `invalid_request`, `invalid_client`, `invalid_grant`, `unsupported_grant_type`, `invalid_scope`, `invalid_target`, and league's `server_error` |
+| `POST /oauth/register` (RFC 7591 §3.2.2) | `invalid_request`, `invalid_client_metadata`, `invalid_redirect_uri` |
+| `POST /oauth/revoke` (RFC 7009 §2.2.1) | `invalid_request`, `invalid_client` |
+| `/mcp` Bearer challenge (RFC 6750 §3.1) | `invalid_token` (401), `insufficient_scope` (403) |
+
+The token and revocation error descriptions are league's fixed strings. On
+`/mcp`, `insufficient_scope` carries the description the product's
+`GrantAuthorizer` returns.
 
 ## Deprecation policy
 

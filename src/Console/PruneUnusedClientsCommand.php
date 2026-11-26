@@ -10,7 +10,7 @@ use Qiick\McpOAuth\Actions\PruneUnusedClientsAction;
 /**
  * Products schedule it hourly: `Schedule::command('mcp-oauth:prune-unused-clients')->hourly()->onOneServer()`.
  *
- * @api
+ * @internal
  */
 final class PruneUnusedClientsCommand extends Command
 {

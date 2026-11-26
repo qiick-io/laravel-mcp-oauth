@@ -5,6 +5,7 @@
 **Decision.**
 
 - `AuditLogger::record()` runs inside the database transaction of the change it describes, before the change's event. A sink that throws rolls the change back, no event is dispatched, and the caller can retry from a clean state.
+- A sink that writes on the change's connection commits or rolls back with it. A sink on another connection or outside the database keeps an entry it already wrote if the change later rolls back; it should defer its write to the commit when that matters (`docs/audit.md`).
 - A grant revoke writes the product's `GrantStore` last, after the token changes and the entry, holding the Passport client's row lock: two concurrent revokes of one grant record one entry.
 - If Passport's transaction fails after a `GrantStore` on another connection has committed, the revoke completes forward: the tokens and the entry are written again and the failure is reported. A revoked grant is never un-revoked.
 

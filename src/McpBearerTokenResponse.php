@@ -12,7 +12,7 @@ use League\OAuth2\Server\ResponseTypes\BearerTokenResponse;
  * Token endpoint JSON body for MCP OAuth. League’s stock Bearer response omits
  * `scope`; S21 / design §5.6 require the issued wire scopes in the body.
  *
- * @api
+ * @internal
  */
 final class McpBearerTokenResponse extends BearerTokenResponse
 {

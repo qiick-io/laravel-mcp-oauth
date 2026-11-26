@@ -21,7 +21,7 @@ use Qiick\McpOAuth\McpOAuthServer;
  * reports only `passport_keys` for a product's /up endpoint, while an
  * operator here needs the reason (which source, which route).
  *
- * @api
+ * @internal
  */
 final class McpOAuthCheckCommand extends Command
 {

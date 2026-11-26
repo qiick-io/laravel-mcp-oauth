@@ -31,7 +31,7 @@ use Qiick\McpOAuth\Events\McpRefreshTokenReusedEvent;
  * {@see isRefreshTokenRevoked()} also refuses a live refresh whose access
  * token has no active bound grant (S59).
  *
- * @internal
+ * @api
  */
 final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
 {
