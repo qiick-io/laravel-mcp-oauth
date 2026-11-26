@@ -19,8 +19,8 @@ use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Data\ConsentDecision;
 use Qiick\McpOAuth\Data\ConsentOption;
 use Qiick\McpOAuth\Data\ConsentOptions;
-use Qiick\McpOAuth\Events\McpConsentApproved;
-use Qiick\McpOAuth\Events\McpConsentDenied;
+use Qiick\McpOAuth\Events\McpConsentApprovedEvent;
+use Qiick\McpOAuth\Events\McpConsentDeniedEvent;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\Http\Controllers\AuthorizeClientController;
 use Qiick\McpOAuth\McpOAuthRoutes;
@@ -410,7 +410,7 @@ it('throttles the authorization endpoint with mcp-oauth-authorize', function ():
 // --- Approve -----------------------------------------------------------------
 
 it('approves: narrowed grant, consent record, event, then the code with state and iss', function (): void {
-    Event::fake([McpConsentApproved::class]);
+    Event::fake([McpConsentApprovedEvent::class]);
     $this->enableOAuth();
     McpOAuthRoutes::register();
     $client = $this->createClient();
@@ -473,7 +473,7 @@ it('approves: narrowed grant, consent record, event, then the code with state an
         ->and($consentRecord->user_agent)->toBe('ConsentTest/1.0')
         ->and($consentRecord->retention_until)->toBeNull();
 
-    Event::assertDispatched(McpConsentApproved::class, static function (McpConsentApproved $event) use ($client, $user, $grant): bool {
+    Event::assertDispatched(McpConsentApprovedEvent::class, static function (McpConsentApprovedEvent $event) use ($client, $user, $grant): bool {
         return $event->clientId === (string) $client->getKey()
             && $event->userIdentifier === (string) $user->getKey()
             && $event->grantId === $grant->id
@@ -923,7 +923,7 @@ it('protects approve and deny with the CSRF token', function (string $method): v
 // --- Deny --------------------------------------------------------------------
 
 it('denies: access_denied with state and iss, a denied record kept 90 days, nothing granted', function (): void {
-    Event::fake([McpConsentDenied::class]);
+    Event::fake([McpConsentDeniedEvent::class]);
     $this->enableOAuth();
     McpOAuthRoutes::register();
     $client = $this->createClient();
@@ -955,7 +955,7 @@ it('denies: access_denied with state and iss, a denied record kept 90 days, noth
         ->and($consentRecord->redirect_host)->toBe('app.example')
         ->and($consentRecord->retention_until?->toDateTimeString())->toBe(now()->addDays(90)->toDateTimeString());
 
-    Event::assertDispatched(McpConsentDenied::class, static fn (McpConsentDenied $event): bool => $event->clientId === (string) $client->getKey()
+    Event::assertDispatched(McpConsentDeniedEvent::class, static fn (McpConsentDeniedEvent $event): bool => $event->clientId === (string) $client->getKey()
         && $event->userIdentifier === (string) $user->getKey());
 });
 

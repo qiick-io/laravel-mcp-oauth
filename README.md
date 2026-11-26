@@ -92,8 +92,8 @@ points at the protected resource metadata built from `APP_URL`.
 
 The product's settings page switches OAuth on and off through
 `SwitchMcpOAuthAction`, which refuses to switch on (with a reason to show)
-while OAuth could not serve, and dispatches `McpOAuthEnabled` or
-`McpOAuthDisabled`. The product keeps its own store behind `AdminSwitch`, and
+while OAuth could not serve, and dispatches `McpOAuthEnabledEvent` or
+`McpOAuthDisabledEvent`. The product keeps its own store behind `AdminSwitch`, and
 every write to that store must go through the action (behind the product's
 admin permission and CSRF), or the rule can be bypassed:
 

@@ -9,7 +9,7 @@ namespace Qiick\McpOAuth\Events;
  *
  * @api
  */
-final readonly class McpConsentApproved
+final readonly class McpConsentApprovedEvent
 {
     /**
      * @param  list<string>  $scopes

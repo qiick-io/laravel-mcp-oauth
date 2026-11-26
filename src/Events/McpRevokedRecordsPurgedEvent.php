@@ -10,7 +10,7 @@ namespace Qiick\McpOAuth\Events;
  *
  * @api
  */
-final readonly class McpRevokedRecordsPurged
+final readonly class McpRevokedRecordsPurgedEvent
 {
     public function __construct(
         public int $clientCount,

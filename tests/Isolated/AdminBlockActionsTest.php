@@ -15,9 +15,9 @@ use Qiick\McpOAuth\Actions\BulkBlockClientsAction;
 use Qiick\McpOAuth\Actions\UnblockRedirectHostAction;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
-use Qiick\McpOAuth\Events\McpClientBlocked;
-use Qiick\McpOAuth\Events\McpRedirectHostBlocked;
-use Qiick\McpOAuth\Events\McpRedirectHostUnblocked;
+use Qiick\McpOAuth\Events\McpClientBlockedEvent;
+use Qiick\McpOAuth\Events\McpRedirectHostBlockedEvent;
+use Qiick\McpOAuth\Events\McpRedirectHostUnblockedEvent;
 use Qiick\McpOAuth\McpOAuthAdminRoutes;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
@@ -81,7 +81,7 @@ beforeEach(function (): void {
 });
 
 it('blocks a client: revokes it, its grants, tokens and codes, and marks its metadata', function (): void {
-    Event::fake([McpClientBlocked::class]);
+    Event::fake([McpClientBlockedEvent::class]);
     ['client' => $client, 'user' => $user] = clientWithCredentials($this);
     ['client' => $otherClient] = clientWithCredentials($this);
     $admin = $this->createUser();
@@ -97,12 +97,12 @@ it('blocks a client: revokes it, its grants, tokens and codes, and marks its met
         ->and($metadata->revoked_at)->not->toBeNull()
         ->and($metadata->revocation_reason)->toBe('admin');
 
-    Event::assertDispatched(McpClientBlocked::class, static fn (McpClientBlocked $event): bool => $event->clientId === (string) $client->getKey()
+    Event::assertDispatched(McpClientBlockedEvent::class, static fn (McpClientBlockedEvent $event): bool => $event->clientId === (string) $client->getKey()
         && $event->actorIdentifier === (string) $admin->getKey());
 });
 
 it('bulk blocks each listed client and ignores unknown or already revoked ones (S40)', function (): void {
-    Event::fake([McpClientBlocked::class]);
+    Event::fake([McpClientBlockedEvent::class]);
     ['client' => $firstClient] = clientWithCredentials($this);
     ['client' => $secondClient] = clientWithCredentials($this);
     ['client' => $untouchedClient] = clientWithCredentials($this);
@@ -117,11 +117,11 @@ it('bulk blocks each listed client and ignores unknown or already revoked ones (
         ->and(isClientFullyRevoked($secondClient))->toBeTrue()
         ->and(DB::table('oauth_access_tokens')->where('client_id', $untouchedClient->getKey())->where('revoked', false)->exists())->toBeTrue();
 
-    Event::assertDispatchedTimes(McpClientBlocked::class, 2);
+    Event::assertDispatchedTimes(McpClientBlockedEvent::class, 2);
 });
 
 it('blocks a host and its subdomains, normalised to ASCII, and blocks the clients that redirect there', function (): void {
-    Event::fake([McpRedirectHostBlocked::class, McpClientBlocked::class]);
+    Event::fake([McpRedirectHostBlockedEvent::class, McpClientBlockedEvent::class]);
     $hostClient = $this->createClient(['https://xn--bcher-kva.example/callback']);
     $subdomainClient = $this->createClient(['https://app.xn--bcher-kva.example/callback']);
     $otherClient = $this->createClient(['https://other.example/callback']);
@@ -138,7 +138,7 @@ it('blocks a host and its subdomains, normalised to ASCII, and blocks the client
         ->and(isClientRevoked($subdomainClient))->toBeTrue()
         ->and(isClientRevoked($otherClient))->toBeFalse();
 
-    Event::assertDispatched(McpRedirectHostBlocked::class, static fn (McpRedirectHostBlocked $event): bool => $event->host === 'xn--bcher-kva.example'
+    Event::assertDispatched(McpRedirectHostBlockedEvent::class, static fn (McpRedirectHostBlockedEvent $event): bool => $event->host === 'xn--bcher-kva.example'
         && $event->actorIdentifier === (string) $admin->getKey());
 });
 
@@ -179,7 +179,7 @@ it('refuses a host that does not normalise', function (string $host): void {
 ]);
 
 it('unblocks a host: the row goes, revoked clients stay revoked', function (): void {
-    Event::fake([McpRedirectHostUnblocked::class]);
+    Event::fake([McpRedirectHostUnblockedEvent::class]);
     // The registered redirect URI is on app.example.
     ['client' => $hostClient] = clientWithCredentials($this);
     $blockedHost = app(BlockRedirectHostAction::class)->execute('app.example', null, isSubdomainMatched: true);
@@ -190,7 +190,7 @@ it('unblocks a host: the row goes, revoked clients stay revoked', function (): v
     expect(OAuthBlockedRedirectHost::query()->count())->toBe(0)
         ->and(isClientFullyRevoked($hostClient))->toBeTrue();
 
-    Event::assertDispatched(McpRedirectHostUnblocked::class, static fn (McpRedirectHostUnblocked $event): bool => $event->host === 'app.example'
+    Event::assertDispatched(McpRedirectHostUnblockedEvent::class, static fn (McpRedirectHostUnblockedEvent $event): bool => $event->host === 'app.example'
         && $event->actorIdentifier === (string) $admin->getKey());
 });
 

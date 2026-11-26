@@ -11,8 +11,8 @@ use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
-use Qiick\McpOAuth\Events\McpRevokedRecordsPurged;
-use Qiick\McpOAuth\Events\McpUnusedClientsPruned;
+use Qiick\McpOAuth\Events\McpRevokedRecordsPurgedEvent;
+use Qiick\McpOAuth\Events\McpUnusedClientsPrunedEvent;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
@@ -149,8 +149,8 @@ it('never purges a Passport client the package did not register', function (): v
     expect(Client::query()->whereKey($productClient->getKey())->exists())->toBeTrue();
 });
 
-it('reports the purge and dispatches McpRevokedRecordsPurged', function (): void {
-    Event::fake([McpRevokedRecordsPurged::class]);
+it('reports the purge and dispatches McpRevokedRecordsPurgedEvent', function (): void {
+    Event::fake([McpRevokedRecordsPurgedEvent::class]);
     $this->enableOAuth();
     clientRevokedDaysAgo($this, 91);
     grantRevokedDaysAgo($this, 91);
@@ -160,14 +160,14 @@ it('reports the purge and dispatches McpRevokedRecordsPurged', function (): void
         ->expectsOutput('Purged 1 clients, 1 grants and 1 consent records revoked before '.now()->subDays(90)->toIso8601String().'.')
         ->assertSuccessful();
 
-    Event::assertDispatched(McpRevokedRecordsPurged::class, static fn (McpRevokedRecordsPurged $event): bool => $event->clientCount === 1
+    Event::assertDispatched(McpRevokedRecordsPurgedEvent::class, static fn (McpRevokedRecordsPurgedEvent $event): bool => $event->clientCount === 1
         && $event->grantCount === 1
         && $event->consentRecordCount === 1
         && $event->cutoffIso8601 === now()->subDays(90)->toIso8601String());
 });
 
 it('only counts with --dry-run, and leaves the product grants alone', function (): void {
-    Event::fake([McpRevokedRecordsPurged::class]);
+    Event::fake([McpRevokedRecordsPurgedEvent::class]);
     $this->enableOAuth();
     $client = clientRevokedDaysAgo($this, 91);
     $grant = grantRevokedDaysAgo($this, 91);
@@ -180,7 +180,7 @@ it('only counts with --dry-run, and leaves the product grants alone', function (
     expect(Client::query()->whereKey($client->getKey())->exists())->toBeTrue()
         ->and($this->grantStore()->find($grant->id))->not->toBeNull()
         ->and(OAuthConsentRecord::query()->whereKey($denial->getKey())->exists())->toBeTrue();
-    Event::assertNotDispatched(McpRevokedRecordsPurged::class);
+    Event::assertNotDispatched(McpRevokedRecordsPurgedEvent::class);
 });
 
 it('follows revoked_retention_days', function (): void {
@@ -207,7 +207,7 @@ function clientRegisteredHoursAgo(AuthorizeFlowTestCase $testCase, int $hours): 
 }
 
 it('prunes DCR clients never authorised after 24 hours, and nothing else', function (): void {
-    Event::fake([McpUnusedClientsPruned::class]);
+    Event::fake([McpUnusedClientsPrunedEvent::class]);
     $this->enableOAuth();
     $unused = clientRegisteredHoursAgo($this, 25);
     $fresh = clientRegisteredHoursAgo($this, 23);
@@ -228,7 +228,7 @@ it('prunes DCR clients never authorised after 24 hours, and nothing else', funct
     expect(Client::query()->whereKey($unused->getKey())->exists())->toBeFalse()
         ->and(OAuthClientMetadata::query()->where('client_id', $unused->getKey())->exists())->toBeFalse()
         ->and(Client::query()->whereKey([$fresh->getKey(), $authorised->getKey(), $inRetention->getKey(), $productClient->getKey()])->count())->toBe(4);
-    Event::assertDispatched(McpUnusedClientsPruned::class, static fn (McpUnusedClientsPruned $event): bool => $event->count === 1
+    Event::assertDispatched(McpUnusedClientsPrunedEvent::class, static fn (McpUnusedClientsPrunedEvent $event): bool => $event->count === 1
         && $event->cutoffIso8601 === now()->subHours(24)->toIso8601String());
 });
 
@@ -281,7 +281,7 @@ it('marks a client authorised at its first approval and keeps that date on re-co
 });
 
 it('only counts unused clients with --dry-run', function (): void {
-    Event::fake([McpUnusedClientsPruned::class]);
+    Event::fake([McpUnusedClientsPrunedEvent::class]);
     $this->enableOAuth();
     $unused = clientRegisteredHoursAgo($this, 25);
 
@@ -290,7 +290,7 @@ it('only counts unused clients with --dry-run', function (): void {
         ->assertSuccessful();
 
     expect(Client::query()->whereKey($unused->getKey())->exists())->toBeTrue();
-    Event::assertNotDispatched(McpUnusedClientsPruned::class);
+    Event::assertNotDispatched(McpUnusedClientsPrunedEvent::class);
 });
 
 it('keeps a client authorised or put in retention after the prune selected it (#31 review M1)', function (string $change): void {

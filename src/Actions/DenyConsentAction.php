@@ -8,7 +8,7 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Http\Request;
 use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Data\PendingAuthorizationRequestData;
-use Qiick\McpOAuth\Events\McpConsentDenied;
+use Qiick\McpOAuth\Events\McpConsentDeniedEvent;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
 use Qiick\McpOAuth\Services\ConsentPageService;
@@ -17,7 +17,7 @@ use Qiick\McpOAuth\Services\ConsentPageService;
  * The signed-in user denied the client (design §8.3 step 5, S50): no grant
  * and no credential change, one `denied` consent record kept 90 days so a
  * refused phishing attempt leaves evidence (standards review decision 5),
- * McpConsentDenied, and the request marked denied so league answers
+ * McpConsentDeniedEvent, and the request marked denied so league answers
  * `access_denied` to the client.
  */
 final class DenyConsentAction
@@ -46,7 +46,7 @@ final class DenyConsentAction
             ]);
         });
 
-        $this->events->dispatch(new McpConsentDenied(
+        $this->events->dispatch(new McpConsentDeniedEvent(
             clientId: $clientInfo->id,
             userIdentifier: PassportUserIdentifier::of($pendingAuthorizationRequest->user),
         ));

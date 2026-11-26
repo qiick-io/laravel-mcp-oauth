@@ -14,7 +14,7 @@ use Laravel\Passport\Token;
 use League\OAuth2\Server\Exception\OAuthServerException;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\RevocationReason;
-use Qiick\McpOAuth\Events\McpRefreshTokenReused;
+use Qiick\McpOAuth\Events\McpRefreshTokenReusedEvent;
 
 /**
  * Passport refresh-token bridge with atomic reuse detection (design §8.4).
@@ -197,7 +197,7 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
                 $grantId,
                 $revokedTokenCount,
             ): void {
-                $eventDispatcher->dispatch(new McpRefreshTokenReused(
+                $eventDispatcher->dispatch(new McpRefreshTokenReusedEvent(
                     clientId: $clientId,
                     userIdentifier: $eventUserIdentifier,
                     grantId: $grantId,

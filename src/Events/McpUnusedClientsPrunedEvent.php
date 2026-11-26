@@ -9,7 +9,7 @@ namespace Qiick\McpOAuth\Events;
  *
  * @api
  */
-final readonly class McpUnusedClientsPruned
+final readonly class McpUnusedClientsPrunedEvent
 {
     public function __construct(
         public int $count,

@@ -10,7 +10,7 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Support\Facades\Date;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\RevokedRecordsPurgeData;
-use Qiick\McpOAuth\Events\McpRevokedRecordsPurged;
+use Qiick\McpOAuth\Events\McpRevokedRecordsPurgedEvent;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
@@ -59,7 +59,7 @@ final class PurgeRevokedRecordsAction
 
         $grantCount = $this->grantStore->purgeRevokedBefore($cutoff->toDateTimeImmutable());
 
-        $this->events->dispatch(new McpRevokedRecordsPurged(
+        $this->events->dispatch(new McpRevokedRecordsPurgedEvent(
             clientCount: $clientCount,
             grantCount: $grantCount,
             consentRecordCount: $consentRecordCount,

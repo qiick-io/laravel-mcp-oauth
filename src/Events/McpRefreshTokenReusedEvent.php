@@ -9,7 +9,7 @@ namespace Qiick\McpOAuth\Events;
  *
  * @api
  */
-final readonly class McpRefreshTokenReused
+final readonly class McpRefreshTokenReusedEvent
 {
     public function __construct(
         public string $clientId,

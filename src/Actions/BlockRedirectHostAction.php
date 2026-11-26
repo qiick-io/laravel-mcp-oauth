@@ -11,7 +11,7 @@ use InvalidArgumentException;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\AuditLogger;
-use Qiick\McpOAuth\Events\McpRedirectHostBlocked;
+use Qiick\McpOAuth\Events\McpRedirectHostBlockedEvent;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
@@ -30,7 +30,7 @@ use Qiick\McpOAuth\RedirectUriGuard;
  * `/mcp` call re-check the client's hosts. The loop makes it stick after an
  * unblock.
  *
- * Dispatches {@see McpRedirectHostBlocked} once the row is written.
+ * Dispatches {@see McpRedirectHostBlockedEvent} once the row is written.
  */
 final class BlockRedirectHostAction
 {
@@ -62,7 +62,7 @@ final class BlockRedirectHostAction
             return $blockedHost;
         });
 
-        event(new McpRedirectHostBlocked($normalizedHost, $actor === null ? null : PassportUserIdentifier::of($actor)));
+        event(new McpRedirectHostBlockedEvent($normalizedHost, $actor === null ? null : PassportUserIdentifier::of($actor)));
 
         $chunkSize = BoundedPositiveInt::require(
             $this->config->get('mcp-oauth.host_block_chunk_size'),
