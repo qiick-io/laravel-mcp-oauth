@@ -1072,6 +1072,37 @@ it('ignores prompt=login, so a link cannot sign the user out', function (string 
     $this->assertAuthenticatedAs($user);
 })->with(['login', 'login consent', 'consent login']);
 
+// --- Loopback-only redirect warning (S3) ----------------------------------------
+
+it('flags the callback this request returns to when it is loopback http, so the page can warn (S3)', function (array $redirectUris, string $selectedRedirectUri, bool $isLoopback): void {
+    $this->enableOAuth();
+    config()->set('mcp.custom_schemes', ['cursor']);
+    McpOAuthRoutes::register();
+    $client = $this->createClient($redirectUris);
+
+    $this->actingAs($this->createUser())
+        ->get($this->authorizeUrl($client, ['redirect_uri' => $selectedRedirectUri]), INERTIA_HEADERS)
+        ->assertOk()
+        ->assertJsonPath('props.client.isRedirectLoopback', $isLoopback);
+})->with([
+    'loopback only' => [['http://127.0.0.1:33418/callback', 'http://localhost/callback', 'http://[::1]/callback'], 'http://[::1]/callback', true],
+    'mixed, the loopback one selected' => [['https://app.example/callback', 'http://127.0.0.1/callback'], 'http://127.0.0.1/callback', true],
+    'mixed, the https one selected' => [['http://127.0.0.1/callback', 'https://app.example/callback'], 'https://app.example/callback', false],
+    'https' => [['https://app.example/callback'], 'https://app.example/callback', false],
+    'a private-use scheme' => [['cursor://anysphere.cursor-retrieval/oauth/callback'], 'cursor://anysphere.cursor-retrieval/oauth/callback', false],
+]);
+
+it('flags a loopback callback when the request names none and the first registered one is used', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient(['http://127.0.0.1/callback']);
+
+    $this->actingAs($this->createUser())
+        ->get($this->authorizeUrl($client, ['redirect_uri' => null]), INERTIA_HEADERS)
+        ->assertOk()
+        ->assertJsonPath('props.client.isRedirectLoopback', true);
+});
+
 // --- The session guard the authorize controller signs users in with ---------
 
 it('gives the authorize controller the guard passport.guard names', function (): void {

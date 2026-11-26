@@ -33,14 +33,16 @@ final class McpOAuthCheckCommand extends Command
         // McpOAuthServer::hasPassportKeys() reads the env pair first, then the key files.
         $hasEnvKeys = self::isFilled($config->get('passport.private_key')) || self::isFilled($config->get('passport.public_key'));
         $foreignRouteNames = McpOAuthRoutes::foreignPassportRouteNames();
+        $laravelMcpRouteNames = McpOAuthRoutes::laravelMcpOAuthRouteNames();
 
         $this->line('OAuth: '.($isEnabled ? 'on' : 'off'));
         $this->line('Issuer: '.$mcpOAuthServer->issuer());
         $this->line('Resource: '.$mcpOAuthServer->resourceIdentifier());
         $this->line('Passport keys: '.($hasEnvKeys ? 'env' : 'file').', '.($mcpOAuthServer->hasPassportKeys() ? 'usable' : 'missing or unusable'));
         $this->line('Foreign Passport routes: '.($foreignRouteNames === [] ? 'none' : implode(', ', $foreignRouteNames)));
+        $this->line('laravel/mcp OAuth routes: '.($laravelMcpRouteNames === [] ? 'none' : implode(', ', $laravelMcpRouteNames)));
 
-        $isHealthy = $foreignRouteNames === [] && (! $isEnabled || $mcpOAuthServer->isReady());
+        $isHealthy = $foreignRouteNames === [] && $laravelMcpRouteNames === [] && (! $isEnabled || $mcpOAuthServer->isReady());
 
         return $isHealthy ? self::SUCCESS : self::FAILURE;
     }

@@ -8,6 +8,7 @@ use DateInterval;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Laravel\Mcp\Server\Registrar;
 use Laravel\Passport\Passport;
+use League\Uri\UriString;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
@@ -81,7 +82,68 @@ final class McpOAuthServer
             return false;
         }
 
-        return preg_match('#^https?://[^/]#i', $this->issuer()) === 1;
+        return $this->hasAbsoluteIssuer();
+    }
+
+    /**
+     * APP_URL is an issuer RFC 8414 §2 accepts: an http(s) URL with a host,
+     * a usable port if any (1 to 65535), and no userinfo, query or fragment. Every document and challenge is
+     * built from it, so OAuth cannot serve without one.
+     */
+    public function hasAbsoluteIssuer(): bool
+    {
+        try {
+            $issuerParts = UriString::parse($this->issuer());
+        } catch (Throwable) {
+            return false;
+        }
+
+        return in_array(strtolower((string) $issuerParts['scheme']), ['http', 'https'], true)
+            && (string) $issuerParts['host'] !== ''
+            && ($issuerParts['port'] === null || $this->hasPlainPort($issuerParts['port']))
+            && $issuerParts['user'] === null
+            && $issuerParts['query'] === null
+            && $issuerParts['fragment'] === null;
+    }
+
+    /**
+     * A port from 1 to 65535, written as digits only: League parses ports
+     * with FILTER_VALIDATE_INT, which also takes `+80`, and every advertised
+     * endpoint would then carry `:+80`.
+     */
+    private function hasPlainPort(int $port): bool
+    {
+        // The authority alone: scheme://authority, up to the first / ? or #.
+        preg_match('#^[^:/?\#]+://([^/?\#]*)#', $this->issuer(), $issuerMatch);
+
+        return $port >= 1 && $port <= 65_535 && str_ends_with($issuerMatch[1] ?? '', ':'.$port);
+    }
+
+    /**
+     * The Passport keys parse, form one pair, and suit the signer league uses
+     * for access tokens (RS256: RSA of at least 2048 bits), read the way
+     * Passport reads them (env PEM with `\n` escapes, else the key files). Parses both keys,
+     * so it runs where an admin switches OAuth on, not on every request:
+     * hasPassportKeys() stays the cheap per-request check.
+     */
+    public function hasUsablePassportKeyPair(): bool
+    {
+        // Missing keys read as empty material or an absent file: both fail to parse.
+        $privateKey = openssl_pkey_get_private($this->passportKeyMaterial('private'));
+        $publicKey = openssl_pkey_get_public($this->passportKeyMaterial('public'));
+
+        if ($privateKey === false || $publicKey === false) {
+            return false;
+        }
+
+        // A parsed key always has details; is_array() only narrows the type.
+        $privateKeyDetails = openssl_pkey_get_details($privateKey);
+        $publicKeyDetails = openssl_pkey_get_details($publicKey);
+
+        return is_array($privateKeyDetails) && is_array($publicKeyDetails)
+            && $privateKeyDetails['type'] === OPENSSL_KEYTYPE_RSA
+            && $privateKeyDetails['bits'] >= 2_048
+            && $privateKeyDetails['key'] === $publicKeyDetails['key'];
     }
 
     public function issuer(): string
@@ -296,6 +358,18 @@ final class McpOAuthServer
 
         // Null / unset: gate 3 fails closed (OAuth cannot be on).
         return false;
+    }
+
+    /**
+     * @param  'private'|'public'  $keyType
+     */
+    private function passportKeyMaterial(string $keyType): string
+    {
+        $envKey = $this->config->get("passport.{$keyType}_key");
+
+        return is_string($envKey) && $envKey !== ''
+            ? str_replace('\\n', "\n", $envKey)
+            : 'file://'.Passport::keyPath("oauth-{$keyType}.key");
     }
 
     private function keyFileIsUsable(string $path): bool

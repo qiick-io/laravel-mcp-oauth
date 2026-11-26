@@ -37,7 +37,7 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 | S21 | Token response names `scope=mcp:use` | covered | `Unit/McpBearerTokenResponseTest`; `Isolated/TokenEndpointRouteTest` |
 | S22 | Fragments and dangerous schemes refused, even when listed | covered | `Unit/RedirectUriGuardTest` "refuses fragments and dangerous schemes even when listed as custom"; `Unit/RedirectUriGuardAdversarialTest` |
 | S23 | `https`, loopback `http`, listed schemes accepted; other `http` refused | covered | `Unit/RedirectUriGuardTest` "accepts https and loopback http including IPv6"; `Unit/RedirectUriGuardCanonicalParseTest` N1; `Http/RealHttpFlowTest` step 2 |
-| S24 | `http://[::1]` completes the whole flow | covered (#51) | `Http/RealHttpFlowTest` "runs the whole flow to tools/list with an IPv6 loopback callback" |
+| S24 | `http://[::1]` completes the whole flow | covered | `Http/RealHttpFlowTest` "runs the whole flow to tools/list with an IPv6 loopback callback" |
 | S25 | Non-ASCII registered hosts refused | covered | `Unit/RedirectUriGuardTest` "refuses non-ASCII registered hosts"; `Unit/RedirectUriGuardAdversarialTest` |
 | S26 | League `UriString` only; no `parse_url` in `src/` | covered | `Arch/PackageArchitectureTest` "src never calls parse_url"; `Unit/RedirectUriGuardAdversarialTest` "forbids parse_url anywhere under src" |
 | S27 | Per-address registration limit | covered | `Isolated/DcrRegisterRouteTest` "limits unauthenticated registrations per address with Retry-After"; `Feature/RateLimiterBootTest` |
@@ -47,12 +47,12 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 | S31 | Prune: unused clients past retention; keeps ever-authorised and fresh ones | covered | `Isolated/RetentionCommandsTest` prune tests, the 23/24/25-hour boundary, B1 (grant purged) and M1 (authorised during the prune) |
 | S32 | DCR refuses a blocked host | covered | `Isolated/DcrRegisterRouteTest` "refuses registration for a blocked redirect host" |
 | S33 | Admin Unicode host stored as ASCII; invalid IDNA refused | covered | `Isolated/AdminBlockActionsTest` "blocks a host and its subdomains, normalised to ASCII", "refuses a host that does not normalise"; `Unit/RedirectUriGuardTest` |
-| S34 | The NFC punycode form of a blocked IDN refused | covered (#51) | `Isolated/DcrRegisterRouteTest` "refuses the punycode of an IDN an admin blocked in Unicode, composed or not" (allowed before the block) |
+| S34 | The NFC punycode form of a blocked IDN refused | covered | `Isolated/DcrRegisterRouteTest` "refuses the punycode of an IDN an admin blocked in Unicode, composed or not" (allowed before the block) |
 | S35 | Exact or subdomain match; `notapp.test` ≠ `app.test` | covered | `Unit/RedirectUriGuardTest` "blocks exact hosts and subdomains but not sibling suffixes" |
 | S36 | A host that does not normalise counts as blocked | covered | `Unit/RedirectUriGuardTest` "treats a host that does not normalise as blocked" |
 | S37 | Existing clients refused at authorize, token and `/mcp` after a block | covered | `Isolated/AuthorizeConsentRouteTest`, `TokenEndpointRouteTest`, `McpDoorRouteTest` (blocked host); `Http/RealHttpFlowTest` step 5 |
 | S38 | Token-endpoint block check reads the client id from HTTP Basic | covered | `Isolated/TokenEndpointRouteTest` "refuses a client whose redirect host was blocked, by body or HTTP Basic client_id" |
-| S39 | Host block: short transaction, chunked revocation outside it | covered (#51) | `Isolated/AdminBlockActionsTest` "blocks every matching client across more than one chunk", "blocks a host without one transaction around the client walk" (one transaction per blocked client, never nested) |
+| S39 | Host block: short transaction, chunked revocation outside it | covered | `Isolated/AdminBlockActionsTest` "blocks every matching client across more than one chunk", "blocks a host without one transaction around the client walk" (one transaction per blocked client, never nested) |
 | S40 | Bulk block: 1–100 distinct ids, each fully revoked | covered | `Isolated/AdminBlockActionsTest` bulk test and the 422 matrix |
 | S41 | Blocking a client revokes it and every credential | covered | `Isolated/AdminBlockActionsTest` "blocks a client: revokes it, its grants, tokens and codes"; refusal of a revoked client in `McpDoorRouteTest`, `TokenEndpointRouteTest`, `AuthorizeConsentRouteTest` |
 | S42 | A guest goes to login; the authorize query survives login | covered | `Isolated/AuthorizeConsentRouteTest` "sends a guest to the login page and keeps the full authorize URL as intended" (password and passkey login are the product's) |
@@ -86,16 +86,16 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 | S70 | Bare challenge; RFC 6750 codes survive; `resource_metadata` when on | covered | `Isolated/McpDoorRouteTest` "asks for credentials with the resource metadata and the scope, without an error code", "renders the product's refusal"; `Http/RealHttpFlowTest` step 3 |
 | S71 | API keys keep their wording when OAuth is on | covered | `Isolated/McpDoorRouteTest` "keeps API keys working with OAuth on", "names insufficient_scope when the product refuses an API key with 403" |
 | S72 | Both doors bind identically | product | `McpCredentialBinder` |
-| S73 | `/mcp` outside `web`: a session cookie never authenticates | covered (#48) | `Isolated/McpDoorRouteTest` "refuses a signed-in browser session without a Bearer, even on a route inside web" (a control route proves the session is live) |
+| S73 | `/mcp` outside `web`: a session cookie never authenticates | covered | `Isolated/McpDoorRouteTest` "refuses a signed-in browser session without a Bearer, even on a route inside web" (a control route proves the session is live) |
 | S74 | Failure brake 429 before the per-key throttle | covered | `Isolated/McpDoorRouteTest` "answers 429 before reading the credential once an address has failed too often" |
 | S75 | Connected apps lists only the user's own active grants | covered | `Isolated/ConnectedAppsTest` (API keys are the product's) |
 | S76 | A user revoke refuses the next call and refresh, and revokes unexchanged codes | covered (#49) | `Isolated/ConnectedAppsTest`: the grant, its access and refresh tokens, and the codes it issued (codes issued before the revoke, while no newer grant is active); a newer consent's code and a code issued during the revoke survive |
 | S77 | Revoke after losing AI access, and while OAuth is off | covered | `Isolated/ConnectedAppsTest` "lists … with OAuth off too" (losing access is the product's) |
 | S78 | Audit entries name client and redirect host | product | `AuditLogger`; the events carry the ids and hosts (`Unit/Events/McpEventsCarryUuidsOnlyTest`) |
-| S79 | Token material never in logs, exceptions, events, audit | covered (#52) | `Isolated/SecretsStayOutOfLogsTest` (every log line and package event across exchange, rotation, reuse, replay and revocation); `Unit/Events/McpEventsCarryUuidsOnlyTest`; token error bodies are fixed strings (`Unit/Services/TokenErrorResponseServiceTest`) |
+| S79 | Token material never in logs, exceptions, events, audit | covered | `Isolated/SecretsStayOutOfLogsTest` (every log line and package event across exchange, rotation, reuse, replay and revocation); `Unit/Events/McpEventsCarryUuidsOnlyTest`; token error bodies are fixed strings (`Unit/Services/TokenErrorResponseServiceTest`) |
 | S80 | No bigint in contracts, events, route keys, props | covered | `Unit/Data/GrantRecordTest`; `Unit/Events/McpEventsCarryUuidsOnlyTest`; admin and settings routes use UUIDs and `public_id` |
 | S81 | Without Inertia boots; enabled without a `ConsentView` fails clearly | covered | `Feature/AdapterBootTest` |
 
 ## Open items
 
-- **Known race (from the review of #45):** a user's first approval can lose to `mcp-oauth:prune-unused-clients`. If the prune locks the metadata row and deletes the client after the approval read it, the approval's `first_authorized_at` write updates nothing and the user ends with a grant (or a failed callback) for a deleted client. Closing it means taking the same metadata row lock in the approval before the grant is written.
+- **First approval against the unused-client prune (from the review of #45): closed by #54.** The approval now holds the client's metadata row lock, the one the prune takes before deleting: a prune that commits first leaves the approval refused, and an approval that commits first keeps the client. `Isolated/FirstApprovalPruneRaceTest` covers both orders with two database sessions on PostgreSQL, MySQL and MariaDB.

@@ -54,3 +54,16 @@ it('lets an app publish migrations under mcp-oauth-migrations', function (): voi
         unlink($migrationFile);
     }
 });
+
+it('pins laravel/mcp\'s authorization server to the issuer, unless the product set one (S13)', function (?string $configured, string $expected): void {
+    config()->set('app.url', 'https://mcp-oauth.test/');
+    config()->set('mcp.authorization_server', $configured);
+
+    (new McpOAuthServiceProvider($this->app))->boot();
+
+    // Mcp::oauthRoutes() would otherwise fall back to url('/'), the request Host.
+    expect(config('mcp.authorization_server'))->toBe($expected);
+})->with([
+    'unset' => [null, 'https://mcp-oauth.test'],
+    'set by the product' => ['https://auth.example', 'https://auth.example'],
+]);

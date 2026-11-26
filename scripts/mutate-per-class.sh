@@ -38,6 +38,7 @@ CLASSES=(
   'Qiick\McpOAuth\Actions\RevokeConnectedAppAction'
   'Qiick\McpOAuth\Actions\RevokeGrantTokensAction'
   'Qiick\McpOAuth\Actions\RevokeTokenAction'
+  'Qiick\McpOAuth\Actions\SwitchMcpOAuthAction'
   'Qiick\McpOAuth\Actions\UnblockRedirectHostAction'
   'Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository'
   'Qiick\McpOAuth\Bridge\OneShotAuthCodeRepository'

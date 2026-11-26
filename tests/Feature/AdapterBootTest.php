@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Route;
+use Laravel\Mcp\Server\Http\Controllers\OAuthRegisterController;
 use Qiick\McpOAuth\Contracts\ApiKeyDoor;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\ConsentView;
@@ -9,6 +11,8 @@ use Qiick\McpOAuth\Contracts\GrantAuthorizer;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Contracts\McpCredentialBinder;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
+use Qiick\McpOAuth\Http\Controllers\RegisterClientController;
+use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\McpOAuthServiceProvider;
 use Qiick\McpOAuth\Testing\FakeApiKeyDoor;
 use Qiick\McpOAuth\Testing\FakeConsentProvider;
@@ -70,4 +74,33 @@ it('tells a product without Inertia how to get a consent page', function (): voi
 
     expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
         ->toThrow(InvalidMcpOAuthConfigException::class, 'inertiajs/inertia-laravel');
+});
+
+it('fails boot with OAuth on beside laravel/mcp\'s own OAuth routes, whose documents follow the request Host (S13)', function (Closure $mountLaravelMcpRoute, string $routeName): void {
+    config()->set('mcp-oauth.enabled', true);
+    bindEveryAdapter();
+    $mountLaravelMcpRoute();
+    Route::getRoutes()->refreshNameLookups();
+
+    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
+        ->toThrow(InvalidMcpOAuthConfigException::class, $routeName);
+})->with([
+    'nested protected resource' => [static fn () => Route::get('.well-known/oauth-protected-resource/{path}', static fn (): string => '')->where('path', '.*')->name('mcp.oauth.protected-resource.nested'), 'mcp.oauth.protected-resource.nested'],
+    'nested authorization server' => [static fn () => Route::get('.well-known/oauth-authorization-server/{path}', static fn (): string => '')->where('path', '.*')->name('mcp.oauth.authorization-server.nested'), 'mcp.oauth.authorization-server.nested'],
+    'its unguarded registration' => [static fn () => Route::post('oauth/register', OAuthRegisterController::class)->name('mcp.oauth.register'), 'mcp.oauth.register'],
+]);
+
+it('boots beside laravel/mcp\'s OAuth routes while OAuth is off', function (): void {
+    Route::get('.well-known/oauth-protected-resource/{path}', static fn (): string => '')->where('path', '.*')->name('mcp.oauth.protected-resource.nested');
+    Route::getRoutes()->refreshNameLookups();
+    config()->set('mcp-oauth.enabled', false);
+
+    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())->not->toThrow(Exception::class);
+});
+
+it('does not mistake the package\'s own registration route for laravel/mcp\'s', function (): void {
+    Route::post('oauth/register', RegisterClientController::class)->name('mcp.oauth.register');
+    Route::getRoutes()->refreshNameLookups();
+
+    expect(McpOAuthRoutes::laravelMcpOAuthRouteNames())->toBe([]);
 });

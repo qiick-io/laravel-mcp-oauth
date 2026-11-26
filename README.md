@@ -54,6 +54,9 @@ until keys exist and the admin switch is flipped.
 and the RFC 8414 / RFC 9728 discovery documents. Do not also call
 `Mcp::oauthRoutes()`: its documents are built from the request `Host` and sit
 outside the off-gate, and its `oauth/register` would replace the package's.
+With OAuth on, boot (or, with `route:cache`, the first request) fails while
+any of its routes is mounted, and
+`mcp-oauth:check` lists them.
 
 Browser-based MCP clients (the MCP inspector, for example) call these endpoints
 cross-origin. The package sets no CORS headers itself: add the paths to the
@@ -86,6 +89,21 @@ that failed `mcp_auth_failures_per_minute` times. With OAuth off it behaves as
 before the package: every Bearer is an API key, and a 401 says
 `Bearer realm="mcp", error="invalid_token"`. With OAuth on, every 401 and 403
 points at the protected resource metadata built from `APP_URL`.
+
+The product's settings page switches OAuth on and off through
+`SwitchMcpOAuthAction`, which refuses to switch on (with a reason to show)
+while OAuth could not serve, and dispatches `McpOAuthEnabled` or
+`McpOAuthDisabled`. The product keeps its own store behind `AdminSwitch`, and
+every write to that store must go through the action (behind the product's
+admin permission and CSRF), or the rule can be bypassed:
+
+```php
+try {
+    $switchMcpOAuth->execute($request->boolean('enabled'), $request->user(), fn (bool $isEnabled) => $settings->setMcpOAuth($isEnabled));
+} catch (McpOAuthCannotBeEnabledException $exception) {
+    return back()->withErrors(['enabled' => $exception->getMessage()]);
+}
+```
 
 Mount the admin backend for MCP clients and blocked hosts inside the
 product's own admin group, naming the permission middleware every route

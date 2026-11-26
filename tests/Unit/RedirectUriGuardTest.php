@@ -177,3 +177,15 @@ it('tells a native app redirect from a web one (RFC 8252 §7.1, §7.3)', functio
     'http on a public host' => ['http://app.example/callback', false],
     'unparseable' => ['cursor://callback#fragment', false],
 ]);
+
+it('tells a loopback http redirect from any other', function (string $redirectUri, bool $isLoopback): void {
+    expect((new RedirectUriGuard)->isLoopbackRedirectUri($redirectUri))->toBe($isLoopback);
+})->with([
+    'IPv4' => ['http://127.0.0.1:33418/callback', true],
+    'name' => ['http://LOCALHOST/callback', true],
+    'IPv6' => ['http://[::1]/callback', true],
+    'https on loopback' => ['https://127.0.0.1/callback', false],
+    'http on a public host' => ['http://app.example/callback', false],
+    'a private-use scheme' => ['cursor://callback', false],
+    'unparseable' => ['http://127.0.0.1/callback#fragment', false],
+]);
