@@ -67,13 +67,15 @@ it('erases both orphaned and legacy code exchanges while leaving unrelated Passp
     $mcpClientId = (string) Str::uuid();
     $externalClientId = (string) Str::uuid();
     $grantId = (string) Str::uuid();
+    $mcpCodeId = Str::random(80);
+    $externalCodeId = Str::random(80);
     OAuthClientMetadata::query()->create(['client_id' => $mcpClientId, 'registration_source' => 'admin']);
 
     DB::table('oauth_auth_codes')->insert([
-        ['id' => 'legacy-mcp-code', 'user_id' => $userId, 'client_id' => $mcpClientId, 'revoked' => true],
-        ['id' => 'external-code', 'user_id' => $userId, 'client_id' => $externalClientId, 'revoked' => false],
+        ['id' => $mcpCodeId, 'user_id' => $userId, 'client_id' => $mcpClientId, 'revoked' => true],
+        ['id' => $externalCodeId, 'user_id' => $userId, 'client_id' => $externalClientId, 'revoked' => false],
     ]);
-    OAuthAuthCodeExchange::query()->create(['auth_code_id' => 'legacy-mcp-code', 'grant_id' => (string) Str::uuid()]);
+    OAuthAuthCodeExchange::query()->create(['auth_code_id' => $mcpCodeId, 'grant_id' => (string) Str::uuid()]);
     OAuthAuthCodeExchange::query()->create(['auth_code_id' => 'legacy-orphan', 'grant_id' => $grantId]);
     OAuthAuthCodeExchange::query()->create([
         'auth_code_id' => 'attributed-orphan', 'grant_id' => (string) Str::uuid(), 'user_identifier' => $userId,
@@ -83,5 +85,5 @@ it('erases both orphaned and legacy code exchanges while leaving unrelated Passp
 
     expect($report->stores['oauth_auth_code_exchanges']['deleted'])->toBe(3)
         ->and(OAuthAuthCodeExchange::query()->count())->toBe(0)
-        ->and(DB::table('oauth_auth_codes')->pluck('id')->map(trim(...))->all())->toBe(['external-code']);
+        ->and(DB::table('oauth_auth_codes')->pluck('id')->all())->toBe([$externalCodeId]);
 });
