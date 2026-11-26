@@ -11,6 +11,9 @@ Products must adopt with an exact `0.x` version constraint until `1.0.0`.
 
 ## Unreleased
 
+- `GrantRecord` has three optional fields, `revokedAt`, `revocationReason` and
+  `metadata`: a `GrantStore` should fill the first two for revoked grants.
+  `RevocationReason` gained `Security`: a `match` over it needs a default arm.
 - `McpOAuthServer::SUPPORTED_GRANT_TYPES` and `SUPPORTED_CODE_CHALLENGE_METHODS`
   are now the static methods `supportedGrantTypes()` and
   `supportedCodeChallengeMethods()`, and `RegisterClientController::MAX_BODY_BYTES`

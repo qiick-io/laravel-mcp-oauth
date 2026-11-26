@@ -15,6 +15,7 @@ use Laravel\Passport\Passport;
 use Qiick\McpOAuth\ClientMetadataUriGuard;
 use Qiick\McpOAuth\Events\McpClientRegistered;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
+use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
 
@@ -194,6 +195,7 @@ final class RegisterClientController extends OAuthRegisterController
             'client_id' => $client->getKey(),
             'registration_source' => 'dcr',
             'token_endpoint_auth_method' => 'none',
+            'spec_revision' => app(McpOAuthServer::class)->specRevision(),
             'client_id_issued_at' => $issuedAt,
             ...$registeredFields,
         ]);

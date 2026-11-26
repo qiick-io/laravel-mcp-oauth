@@ -19,6 +19,7 @@ final readonly class ConsentOptions
      * @param  list<ConsentOption>  $organisations  tenants the grant may belong
      *                                              to; with more than one the
      *                                              user must pick one (instituta)
+     * @param  string|null  $consentVersion  the version of the consent text, recorded with the decision
      */
     public function __construct(
         public array $scopes,
@@ -28,5 +29,6 @@ final readonly class ConsentOptions
         public bool $canGrant,
         public array $notices = [],
         public array $organisations = [],
+        public ?string $consentVersion = null,
     ) {}
 }
