@@ -19,7 +19,7 @@ use Symfony\Component\HttpFoundation\Response;
  * What `POST oauth/token` requires before league sees the request (design
  * §5.2 item 6, S16, S19, S37, S38):
  *
- * - `grant_type` is one of {@see McpOAuthServer::SUPPORTED_GRANT_TYPES}
+ * - `grant_type` is one of {@see McpOAuthServer::supportedGrantTypes()}
  *   (`client_credentials`, `password`, the device grant and anything else are
  *   `unsupported_grant_type`, even if Passport would enable one later);
  * - the RFC 8707 `resource` names this server's MCP endpoint, on the code
@@ -48,7 +48,7 @@ final class ValidateTokenRequestMiddleware
     {
         $bodyParameters = $request->request->all();
 
-        if (! in_array($bodyParameters['grant_type'] ?? null, McpOAuthServer::SUPPORTED_GRANT_TYPES, true)) {
+        if (! in_array($bodyParameters['grant_type'] ?? null, McpOAuthServer::supportedGrantTypes(), true)) {
             // Second guard: the provider also strips every other grant from the server,
             // and league then answers with this same body.
             return $this->tokenErrorResponses->refusal('unsupported_grant_type');

@@ -197,7 +197,7 @@ it('refuses an oversized body via Content-Length', function (): void {
         'client_name' => 'Huge',
         'redirect_uris' => ['https://app.example/callback'],
     ]);
-    $request->headers->set('Content-Length', (string) (RegisterClientController::MAX_BODY_BYTES + 1));
+    $request->headers->set('Content-Length', (string) (65_536 + 1));
 
     $response = $controller($request);
 
@@ -215,14 +215,14 @@ it('treats a Content-Length equal to the limit as within bounds', function (): v
         $controller,
         'bodyExceedsLimit',
         [Request::create('/oauth/register', 'POST', server: [
-            'CONTENT_LENGTH' => (string) RegisterClientController::MAX_BODY_BYTES,
+            'CONTENT_LENGTH' => (string) 65_536,
         ])],
     ))->toBeFalse()
         ->and(invokeRegisterClientControllerMethod(
             $controller,
             'bodyExceedsLimit',
             [Request::create('/oauth/register', 'POST', server: [
-                'CONTENT_LENGTH' => (string) (RegisterClientController::MAX_BODY_BYTES + 1),
+                'CONTENT_LENGTH' => (string) (65_536 + 1),
             ])],
         ))->toBeTrue();
 });
