@@ -295,18 +295,23 @@ jobs:
             "illuminate/support:^13.0"
           composer update --no-interaction --prefer-dist --with-all-dependencies
 
+      # Check the migrated package schema before the real HTTP tests add the
+      # test product's grant table to this database.
+      - run: node tests/Erasure/run.mjs
+
       # The whole suite, not only the schema tests: token, refresh, revocation
       # and consent queries differ by dialect (MySQL refuses an UPDATE whose
       # subquery reads the same table, error 1093).
       - name: Pest on ${{ matrix.engine }}
-        env:
-          DB_CONNECTION: ${{ matrix.db_connection }}
-          DB_HOST: 127.0.0.1
-          DB_PORT: ${{ matrix.db_port }}
-          DB_DATABASE: ${{ matrix.db_database }}
-          DB_USERNAME: ${{ matrix.db_username }}
-          DB_PASSWORD: ${{ matrix.db_password }}
         run: vendor/bin/pest
+
+    env:
+      DB_CONNECTION: ${{ matrix.db_connection }}
+      DB_HOST: 127.0.0.1
+      DB_PORT: ${{ matrix.db_port }}
+      DB_DATABASE: ${{ matrix.db_database }}
+      DB_USERNAME: ${{ matrix.db_username }}
+      DB_PASSWORD: ${{ matrix.db_password }}
 
   # S81: installing without Inertia (suggest) boots; --no-dev proves that.
   no-dev-boot:
@@ -333,13 +338,13 @@ jobs:
           php -r 'require "vendor/autoload.php"; echo class_exists("Qiick\\McpOAuth\\McpOAuthServiceProvider") ? "ok\n" : exit(1);'
 
   standards:
-    # qiick-io/app-ui@v0.12.0
-    uses: qiick-io/app-ui/.github/workflows/drift-check.yml@f613af9febfce3b6d7f7f41785e9845a610080c7 # v0.12.0
+    # qiick-io/app-ui@v0.15.0
+    uses: qiick-io/app-ui/.github/workflows/drift-check.yml@0d97ae1429a856411c76e6de1ec258cae0eabab6 # v0.15.0
     with:
       standards: true
       registry: false
 
   pr-title:
     if: github.event_name == 'pull_request'
-    # qiick-io/app-ui@v0.12.0
-    uses: qiick-io/app-ui/.github/workflows/pr-title.yml@f613af9febfce3b6d7f7f41785e9845a610080c7 # v0.12.0
+    # qiick-io/app-ui@v0.15.0
+    uses: qiick-io/app-ui/.github/workflows/pr-title.yml@0d97ae1429a856411c76e6de1ec258cae0eabab6 # v0.15.0

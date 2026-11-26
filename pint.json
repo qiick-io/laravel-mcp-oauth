@@ -1,6 +1,8 @@
 {
     "preset": "laravel",
     "exclude": [
-        "tests/Conformance"
+        "tests/Conformance",
+        "tests/Erasure/ErasureConformanceTest.php",
+        "tests/Erasure/Support"
     ]
 }

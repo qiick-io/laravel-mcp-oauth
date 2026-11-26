@@ -33,6 +33,8 @@ return new class extends Migration
         Schema::create('oauth_auth_code_exchanges', function (Blueprint $table): void {
             $table->string('auth_code_id', 100)->primary();
             $table->uuid('grant_id')->index();
+            // Keep the exchange erasable after Passport prunes the original code.
+            $table->string('user_identifier', 64)->nullable()->index();
             $table->json('metadata')->nullable();
             $table->unsignedSmallInteger('schema_version')->default(1);
             $table->timestamp('created_at')->useCurrent()->index();

@@ -10,8 +10,8 @@ use LogicException;
 
 /**
  * Append-only consent evidence row (S4). No updated_at; the model refuses
- * update and delete so the audit trail stays immutable. Retention purge uses
- * the query builder, not Eloquent delete.
+ * update and delete to protect the audit trail. The retention and erasure
+ * operations use the query builder for their limited writes.
  *
  * @internal
  */

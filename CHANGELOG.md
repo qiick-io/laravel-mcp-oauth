@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `oauth_blocked_redirect_hosts.created_by` is indexed so deleting a user can
+  find that user's blocked redirect hosts without scanning the table on
+  PostgreSQL and SQLite.
 - laravel/mcp's own OAuth routes (`Mcp::oauthRoutes()`) build their discovery
   endpoints and resource from the request Host. With OAuth on, boot now fails
   (or, with `route:cache`, the first routed request, once the cached routes are
@@ -92,6 +95,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `McpConsentApproved` carries `resource`; `RevocationReason::Security`; and
   the `ClientMetadataDocumentFetcher` contract for CIMD (not bound while CIMD
   is off). DCR writes the MCP `spec_revision` on each client row (M8).
+- `McpOAuthEraser` implements fleet personal data erasure. It removes MCP
+  credentials, unlinks blocked-host attribution, and anonymises consent
+  evidence until its retention deadline. Dry runs and post-commit events share
+  the counts-only report.
 - `SwitchMcpOAuthAction` (design §4.3): the product's settings page switches
   OAuth on or off through it. Switching on is refused with
   `McpOAuthCannotBeEnabledException` (the reason to show) while the Passport
