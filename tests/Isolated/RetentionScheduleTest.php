@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Illuminate\Console\Scheduling\Event as ScheduledEvent;
 use Illuminate\Console\Scheduling\Schedule;
+use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
+use Qiick\McpOAuth\McpOAuthServiceProvider;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 
 uses(AuthorizeFlowTestCase::class);
@@ -65,4 +67,42 @@ it('schedules nothing while OAuth is off in config (F3) or the product schedules
 })->with([
     'OAuth off' => [false, true],
     'schedule switched off' => [true, false],
+]);
+
+it('hands the raw switch to boot validation instead of casting it (F1, Codex review of #65)', function (): void {
+    putenv('MCP_OAUTH_RETENTION_SCHEDULE=flase');
+    $_ENV['MCP_OAUTH_RETENTION_SCHEDULE'] = 'flase';
+    $_SERVER['MCP_OAUTH_RETENTION_SCHEDULE'] = 'flase';
+
+    try {
+        $packageConfig = require __DIR__.'/../../config/mcp-oauth.php';
+
+        expect($packageConfig['retention']['schedule'])->toBe('flase');
+    } finally {
+        putenv('MCP_OAUTH_RETENTION_SCHEDULE');
+        unset($_ENV['MCP_OAUTH_RETENTION_SCHEDULE'], $_SERVER['MCP_OAUTH_RETENTION_SCHEDULE']);
+    }
+});
+
+it('refuses to boot with a retention switch that is not a boolean (F1, Codex review of #65)', function (mixed $invalidValue): void {
+    config(['mcp-oauth.retention.schedule' => $invalidValue]);
+
+    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
+        ->toThrow(InvalidMcpOAuthConfigException::class, 'mcp-oauth config [retention.schedule] must be true or false.');
+})->with(['flase', 'sometimes', '', 2, [[]]]);
+
+it('boots with every spelling of the switch Laravel reads as a boolean', function (mixed $validValue, bool $shouldSchedule): void {
+    $this->enableOAuth();
+    config(['mcp-oauth.retention.schedule' => $validValue]);
+
+    (new McpOAuthServiceProvider($this->app))->boot();
+
+    expect(scheduledRetentionCommands())->toHaveCount($shouldSchedule ? 3 : 0);
+})->with([
+    'true' => [true, true],
+    'false' => [false, false],
+    '"on"' => ['on', true],
+    '"off"' => ['off', false],
+    '"1"' => ['1', true],
+    '"0"' => ['0', false],
 ]);

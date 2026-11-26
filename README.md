@@ -144,12 +144,23 @@ redirecting back otherwise. A grant that is not the user's own active one is a
 404.
 
 The package schedules its retention jobs itself while `mcp-oauth.enabled` is on,
-on one server and never overlapping. `mcp-oauth:purge-revoked` deletes what was revoked
-more than `revoked_retention_days` (90) ago: clients the package registered,
-the product's grants (through `GrantStore::purgeRevokedBefore()`, which may keep
-rows under a legal hold) and consent records. `mcp-oauth:prune-unused-clients`
-deletes DCR clients nobody authorised within `unused_client_retention_hours`
-(24). Both delete in chunks of 100. Every command takes `--dry-run`.
+on one server and never overlapping. On more than one server, the single-server
+lock needs a cache store every server shares (database, Redis, Memcached,
+DynamoDB); with a local store each server runs the jobs.
+
+- `mcp-oauth:purge-revoked` deletes the clients the package registered and
+  revoked more than `revoked_retention_days` (90) ago, reading them 100 at a
+  time and deleting each with its tokens and codes; the consent records whose
+  own `retention_until` has passed, 100 at a time, each delete checking the
+  deadline again; and the product's grants through
+  `GrantStore::purgeRevokedBefore()`, which batches as the product chooses and
+  may keep rows under a legal hold.
+- `mcp-oauth:prune-unused-clients` deletes the DCR clients nobody authorised
+  within `unused_client_retention_hours` (24), reading 100 at a time and
+  deleting one client at a time.
+- `mcp-oauth:prune-auth-code-exchanges` walks the exchange rows one at a time.
+
+Every command takes `--dry-run`.
 `mcp-oauth:check` reports whether OAuth is on and ready and exits 1 when it is
 on but not ready. The schedule the package registers:
 
@@ -159,8 +170,9 @@ Schedule::command('mcp-oauth:purge-revoked')->daily()->onOneServer()->withoutOve
 Schedule::command('mcp-oauth:prune-auth-code-exchanges')->daily()->onOneServer()->withoutOverlapping();
 ```
 
-To schedule them differently, set `MCP_OAUTH_RETENTION_SCHEDULE=false` and add
-your own lines.
+To schedule them differently, set `MCP_OAUTH_RETENTION_SCHEDULE=false` (then
+`php artisan config:cache` if you cache config) and add your own lines; a value
+that is not a boolean stops the boot.
 
 ## Personal data erasure
 

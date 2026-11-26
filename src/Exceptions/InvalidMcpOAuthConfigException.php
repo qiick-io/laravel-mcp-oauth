@@ -20,6 +20,11 @@ final class InvalidMcpOAuthConfigException extends InvalidArgumentException
         );
     }
 
+    public static function invalidBoolean(string $configKey): self
+    {
+        return new self("mcp-oauth config [{$configKey}] must be true or false.");
+    }
+
     public static function outOfRange(string $configKey, int $configuredValue, int $maximum): self
     {
         return new self(

@@ -73,35 +73,47 @@ final class PurgeRevokedRecordsAction
     private function purgeClients(CarbonImmutable $cutoff, bool $isDryRun): int
     {
         $expiredClients = OAuthClientMetadata::query()->where('revoked_at', '<', $cutoff);
-        $expiredCount = (clone $expiredClients)->count();
 
-        if (! $isDryRun) {
-            // A page at a time (F9): deleting behind the key cursor is safe.
-            $expiredClients->select(['id', 'client_id'])->chunkById(100, function (Collection $metadataRows): void {
-                foreach ($metadataRows as $metadataRow) {
-                    /** @var string $clientId client ids are UUID strings */
-                    $clientId = $metadataRow->getAttribute('client_id');
-                    $this->deleteClient->execute($clientId);
-                }
-            });
+        if ($isDryRun) {
+            return $expiredClients->count();
         }
 
-        return $expiredCount;
+        $deletedCount = 0;
+
+        // A page at a time (F9): deleting behind the key cursor is safe. The
+        // count is of the clients deleted, not of those counted beforehand.
+        $expiredClients->select(['id', 'client_id'])->chunkById(100, function (Collection $metadataRows) use (&$deletedCount): void {
+            foreach ($metadataRows as $metadataRow) {
+                /** @var string $clientId client ids are UUID strings */
+                $clientId = $metadataRow->getAttribute('client_id');
+                $this->deleteClient->execute($clientId);
+                $deletedCount++;
+            }
+        });
+
+        return $deletedCount;
     }
 
     private function purgeConsentRecords(CarbonImmutable $now, int $retentionDays, bool $isDryRun): int
     {
         // Mass queries: the model refuses update and delete, which guard the evidence from app code.
         $expiredRecords = OAuthConsentRecord::query()->where('retention_until', '<', $now);
-        $expiredCount = $expiredRecords->count();
 
         if ($isDryRun) {
-            return $expiredCount;
+            return $expiredRecords->count();
         }
 
+        $expiredCount = 0;
+
         // A page of keys at a time (F9), so a backlog never locks the table.
-        $expiredRecords->select('id')->chunkById(100, static function (Collection $expiredPage): void {
-            OAuthConsentRecord::query()->whereKey($expiredPage->modelKeys())->delete();
+        // Each delete checks the deadline again: one extended since the page
+        // was read keeps its evidence.
+        $expiredRecords->select('id')->chunkById(100, static function (Collection $expiredPage) use ($now, &$expiredCount): void {
+            $expiredCount += OAuthConsentRecord::query()
+                ->whereKey($expiredPage->modelKeys())
+                ->where('retention_until', '<', $now)
+                ->toBase()
+                ->delete();
         });
 
         $openApprovals = OAuthConsentRecord::query()

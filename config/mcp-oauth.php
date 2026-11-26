@@ -136,7 +136,9 @@ return [
      * daily. Set false to schedule them differently in the product.
      */
     'retention' => [
-        'schedule' => (bool) env('MCP_OAUTH_RETENTION_SCHEDULE', true),
+        // Raw value: boot refuses anything that is not a boolean (F1), so a
+        // typo never switches the purges on by being cast to true.
+        'schedule' => env('MCP_OAUTH_RETENTION_SCHEDULE', true),
     ],
 
     'migrations' => [

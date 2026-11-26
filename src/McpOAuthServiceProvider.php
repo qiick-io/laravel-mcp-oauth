@@ -177,18 +177,21 @@ final class McpOAuthServiceProvider extends ServiceProvider
     /**
      * The retention commands on the product's scheduler (fleet convention
      * F9): on one server and never overlapping, so a fleet of workers runs
-     * each once. Read when the scheduler is resolved, and only while
+     * each once (with a cache store every server shares). Only while
      * `mcp-oauth.enabled` and `mcp-oauth.retention.schedule` are on: off
      * schedules nothing (F3).
+     *
+     * @throws InvalidMcpOAuthConfigException at boot when the switch is not a boolean (F1)
      */
     private function scheduleRetentionCommands(): void
     {
-        $this->callAfterResolving(Schedule::class, function (Schedule $schedule): void {
-            $config = $this->app->make('config');
-            $isEnabled = filter_var($config->get('mcp-oauth.enabled'), FILTER_VALIDATE_BOOLEAN);
-            $shouldSchedule = filter_var($config->get('mcp-oauth.retention.schedule', true), FILTER_VALIDATE_BOOLEAN);
+        // Validated at boot; read again when the scheduler is resolved, from the final config.
+        $this->shouldScheduleRetention();
 
-            if (! $isEnabled || ! $shouldSchedule) {
+        $this->callAfterResolving(Schedule::class, function (Schedule $schedule): void {
+            $isEnabled = filter_var($this->app->make('config')->get('mcp-oauth.enabled'), FILTER_VALIDATE_BOOLEAN);
+
+            if (! $isEnabled || ! $this->shouldScheduleRetention()) {
                 return;
             }
 
@@ -196,6 +199,37 @@ final class McpOAuthServiceProvider extends ServiceProvider
             $schedule->command(PurgeRevokedRecordsCommand::class)->daily()->onOneServer()->withoutOverlapping();
             $schedule->command(PruneAuthCodeExchangesCommand::class)->daily()->onOneServer()->withoutOverlapping();
         });
+    }
+
+    /**
+     * `mcp-oauth.retention.schedule`, on when a config published before the
+     * key existed lacks it (F1).
+     *
+     * @throws InvalidMcpOAuthConfigException
+     */
+    private function shouldScheduleRetention(): bool
+    {
+        return self::booleanConfig($this->app->make('config')->get('mcp-oauth.retention.schedule', true), 'retention.schedule');
+    }
+
+    /**
+     * A boolean config value as Laravel reads one from the environment (true,
+     * false, "on", "off", "1", "0", "yes", "no"), or a boot error naming the
+     * key: never a cast that turns a typo into true.
+     *
+     * @throws InvalidMcpOAuthConfigException
+     */
+    private static function booleanConfig(mixed $configuredValue, string $configKey): bool
+    {
+        $booleanValue = is_bool($configuredValue) || is_int($configuredValue) || (is_string($configuredValue) && $configuredValue !== '')
+            ? filter_var($configuredValue, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE)
+            : null;
+
+        if ($booleanValue === null) {
+            throw InvalidMcpOAuthConfigException::invalidBoolean($configKey);
+        }
+
+        return $booleanValue;
     }
 
     public function boot(): void

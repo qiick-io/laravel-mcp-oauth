@@ -14,9 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while `mcp-oauth.enabled` is on: `mcp-oauth:prune-unused-clients` hourly,
   `mcp-oauth:purge-revoked` and `mcp-oauth:prune-auth-code-exchanges` daily, each
   on one server and never overlapping. `mcp-oauth.retention.schedule`
-  (`MCP_OAUTH_RETENTION_SCHEDULE`, default true) turns that off.
-  `mcp-oauth:purge-revoked` deletes expired consent records and revoked clients
-  in chunks of 100.
+  (`MCP_OAUTH_RETENTION_SCHEDULE`, default true) turns that off; a value that
+  is not a boolean stops the boot. On more than one server the single-server
+  lock needs a shared cache store. `mcp-oauth:purge-revoked` reads expired
+  consent records and revoked clients in pages of 100; each consent delete
+  checks the deadline again, and the output and event count the rows actually
+  deleted.
 
 ### Fixed
 
