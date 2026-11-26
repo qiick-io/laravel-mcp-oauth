@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Laravel\Passport\Passport;
@@ -9,6 +10,7 @@ use Qiick\McpOAuth\Actions\SwitchMcpOAuthAction;
 use Qiick\McpOAuth\Events\McpOAuthDisabled;
 use Qiick\McpOAuth\Events\McpOAuthEnabled;
 use Qiick\McpOAuth\Exceptions\McpOAuthCannotBeEnabledException;
+use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 
 uses(AuthorizeFlowTestCase::class);
@@ -41,6 +43,17 @@ function switchStore(): object
 beforeEach(function (): void {
     Event::fake([McpOAuthEnabled::class, McpOAuthDisabled::class]);
     $this->enableOAuth();
+    McpOAuthRoutes::register();
+});
+
+it('refuses to switch on while the package\'s routes are not mounted', function (): void {
+    Route::setRoutes(new RouteCollection);
+    $store = switchStore();
+
+    expect(fn () => app(SwitchMcpOAuthAction::class)->execute(true, null, $store->persist))
+        ->toThrow(static fn (McpOAuthCannotBeEnabledException $exception) => expect($exception->getMessage())->toBe('OAuth cannot be switched on until McpOAuthRoutes::register() mounts its routes.'));
+
+    expect($store->writes)->toBe([]);
 });
 
 it('switches on when OAuth can serve, writing the store and telling the product', function (): void {

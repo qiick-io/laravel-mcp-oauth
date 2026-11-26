@@ -6,8 +6,8 @@ namespace Qiick\Standards\Erasure\Support;
 
 use Illuminate\Cache\Events\KeyWritten;
 use Illuminate\Database\Connection;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Log\Events\MessageLogged;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Records, while one erasure or one seeding runs, the package's own events

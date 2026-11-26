@@ -219,6 +219,24 @@ function adminUser(AuthorizeFlowTestCase $testCase): TestUser
     return $admin;
 }
 
+it('prunes unused clients from the admin route, for an admin only (design §5.2)', function (): void {
+    registerAdminRoutes();
+    $unusedClient = $this->createClient();
+    $unusedClient->forceFill(['created_at' => now()->subHours(25)])->save();
+    $freshClient = $this->createClient();
+
+    $this->actingAs($this->createUser())->postJson('/mcp-oauth-clients/prune-unused')->assertForbidden();
+
+    $this->actingAs(adminUser($this))->postJson('/mcp-oauth-clients/prune-unused')
+        ->assertOk()
+        ->assertExactJson(['prunedClientCount' => 1]);
+
+    expect(Client::query()->whereKey($unusedClient->getKey())->exists())->toBeFalse()
+        ->and(Client::query()->whereKey($freshClient->getKey())->exists())->toBeTrue();
+
+    $this->actingAs(adminUser($this))->from('/admin/clients')->post('/mcp-oauth-clients/prune-unused')->assertRedirect('/admin/clients');
+});
+
 it('lists package clients and blocked hosts for an admin only', function (): void {
     registerAdminRoutes();
     ['client' => $client] = clientWithCredentials($this);
