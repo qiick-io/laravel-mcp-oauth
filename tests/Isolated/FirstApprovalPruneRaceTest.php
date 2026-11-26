@@ -49,12 +49,28 @@ function approveAfter(AuthorizeFlowTestCase $testCase, Client $client, TestUser 
  * The second session: the real prune, in its own process on the same server
  * database.
  */
-function pruneInAnotherSession(string $signalFile = '', int $holdSeconds = 0): Process
+function pruneInAnotherSession(string $signalFile = '', int $holdSeconds = 0, string $selectionFile = ''): Process
 {
-    $process = new Process([PHP_BINARY, 'tests/Support/prune-unused-clients.php', $signalFile, (string) $holdSeconds], dirname(__DIR__, 2));
+    $process = new Process([PHP_BINARY, 'tests/Support/prune-unused-clients.php', $signalFile, (string) $holdSeconds, $selectionFile], dirname(__DIR__, 2));
     $process->start();
 
     return $process;
+}
+
+/**
+ * Waits until the other session has written `$file`, or fails the test.
+ */
+function waitForSignal(Process $process, string $file): void
+{
+    $deadline = microtime(true) + 20;
+
+    while (! is_file($file)) {
+        if (microtime(true) > $deadline || ! $process->isRunning()) {
+            throw new RuntimeException('The prune never got there: '.$process->getErrorOutput());
+        }
+
+        usleep(50_000);
+    }
 }
 
 function isServerDatabase(): bool
@@ -98,16 +114,7 @@ it('makes an approval wait for a prune holding the client, then refuses it (two 
     $signalFile = sys_get_temp_dir().'/mcp-oauth-prune-race-'.bin2hex(random_bytes(6));
 
     $response = approveAfter($this, $client, $this->createUser(), static function () use ($signalFile): void {
-        $prune = pruneInAnotherSession($signalFile, 3);
-        $deadline = microtime(true) + 20;
-
-        while (! is_file($signalFile)) {
-            if (microtime(true) > $deadline || ! $prune->isRunning()) {
-                throw new RuntimeException('The prune never locked the client: '.$prune->getErrorOutput());
-            }
-
-            usleep(50_000);
-        }
+        waitForSignal(pruneInAnotherSession($signalFile, 3), $signalFile);
     });
     @unlink($signalFile);
 
@@ -123,15 +130,22 @@ it('makes a prune wait for an approval holding the client, then keeps it (two se
     $hookedGrantStore = new HookedGrantStore($this->grantStore());
     app()->instance(GrantStore::class, $hookedGrantStore);
     $prune = null;
-    // Inside the approval's transaction: the prune starts, selects the
-    // client as unused, and must then wait for this transaction.
-    $hookedGrantStore->beforeNextReplace = static function () use (&$prune): void {
-        $prune = pruneInAnotherSession();
-        sleep(2);
+    $selectionFile = sys_get_temp_dir().'/mcp-oauth-prune-race-'.bin2hex(random_bytes(6));
+    // Inside the approval's transaction, holding the client's row: the prune
+    // starts and reads the client as unused (first_authorized_at is not
+    // committed yet) before the approval may commit, then must wait for it.
+    // Waiting for its selection, not for a fixed time, keeps a slow start
+    // from letting the approval commit first and the test pass on nothing.
+    $hookedGrantStore->beforeNextReplace = static function () use (&$prune, $selectionFile): void {
+        $prune = pruneInAnotherSession(selectionFile: $selectionFile);
+        waitForSignal($prune, $selectionFile);
+        // Time for the prune to reach the row lock and block on it.
+        sleep(1);
     };
 
     approveAfter($this, $client, $this->createUser(), static fn () => null)->assertRedirect();
     $prune->wait();
+    @unlink($selectionFile);
 
     expect($prune->getOutput())->toBe('0')
         ->and(Client::query()->whereKey($client->getKey())->exists())->toBeTrue()

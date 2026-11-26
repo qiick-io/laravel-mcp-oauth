@@ -17,13 +17,15 @@ use Qiick\McpOAuth\Tests\Support\TestDatabaseConnection;
  * PruneUnusedClientsAction on the engine named by DB_CONNECTION. With a
  * signal file and a hold time, it writes the file right after deleting a
  * client's metadata row and keeps its transaction (and the row lock) open for
- * that many seconds. Prints how many clients it pruned.
+ * that many seconds. With a selection file, it writes that file once it has
+ * read the clients registered before the cutoff, before it locks any of them.
+ * Prints how many clients it pruned.
  *
- * Usage: php tests/Support/prune-unused-clients.php [signal-file hold-seconds]
+ * Usage: php tests/Support/prune-unused-clients.php [signal-file hold-seconds [selection-file]]
  */
 require __DIR__.'/../../vendor/autoload.php';
 
-[, $signalFile, $holdSeconds] = $argv + [null, null, '0'];
+[, $signalFile, $holdSeconds, $selectionFile] = $argv + [null, null, '0', null];
 
 $app = Application::create(options: ['extra' => [
     'providers' => [PassportServiceProvider::class, McpOAuthServiceProvider::class],
@@ -38,6 +40,14 @@ if (is_string($signalFile) && $signalFile !== '') {
         if (str_starts_with(strtolower($query->sql), 'delete from') && str_contains($query->sql, 'oauth_client_metadata')) {
             file_put_contents($signalFile, 'locked');
             sleep((int) $holdSeconds);
+        }
+    });
+}
+
+if (is_string($selectionFile) && $selectionFile !== '') {
+    DB::listen(static function (QueryExecuted $query) use ($selectionFile): void {
+        if (str_starts_with(strtolower($query->sql), 'select') && str_contains($query->sql, 'oauth_clients') && str_contains($query->sql, 'created_at')) {
+            file_put_contents($selectionFile, 'selected');
         }
     });
 }
