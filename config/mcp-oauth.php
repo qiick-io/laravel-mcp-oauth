@@ -129,6 +129,18 @@ return [
      * When true (default), the provider loadMigrationsFrom the core side
      * tables. Set false when the app publishes and owns the migration files.
      */
+    /*
+     * The package schedules its retention commands itself (fleet convention
+     * F9), on one server and never overlapping, while `enabled` is on:
+     * prune-unused-clients hourly, purge-revoked and prune-auth-code-exchanges
+     * daily. Set false to schedule them differently in the product.
+     */
+    'retention' => [
+        // Raw value: boot refuses anything that is not a boolean (F1), so a
+        // typo never switches the purges on by being cast to true.
+        'schedule' => env('MCP_OAUTH_RETENTION_SCHEDULE', true),
+    ],
+
     'migrations' => [
         'load' => (bool) env('MCP_OAUTH_LOAD_MIGRATIONS', true),
     ],
