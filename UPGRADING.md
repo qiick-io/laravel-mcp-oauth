@@ -11,6 +11,28 @@ Products must adopt with an exact `0.x` version constraint until `1.0.0`.
 
 ## Unreleased
 
+- Every event class now ends with `Event` (fleet convention F5); update each
+  listener, `Event::fake()` and `Event::assert*()` call:
+
+  | Before | After |
+  | --- | --- |
+  | `McpClientBlocked` | `McpClientBlockedEvent` |
+  | `McpClientRegistered` | `McpClientRegisteredEvent` |
+  | `McpConsentApproved` | `McpConsentApprovedEvent` |
+  | `McpConsentDenied` | `McpConsentDeniedEvent` |
+  | `McpGrantRevoked` | `McpGrantRevokedEvent` |
+  | `McpOAuthDisabled` | `McpOAuthDisabledEvent` |
+  | `McpOAuthEnabled` | `McpOAuthEnabledEvent` |
+  | `McpPassportKeysMissing` | `McpPassportKeysFoundMissingEvent` |
+  | `McpRedirectHostBlocked` | `McpRedirectHostBlockedEvent` |
+  | `McpRedirectHostUnblocked` | `McpRedirectHostUnblockedEvent` |
+  | `McpRefreshTokenReused` | `McpRefreshTokenReusedEvent` |
+  | `McpRevokedRecordsPurged` | `McpRevokedRecordsPurgedEvent` |
+  | `McpTokenRevoked` | `McpTokenRevokedEvent` |
+  | `McpUnusedClientsPruned` | `McpUnusedClientsPrunedEvent` |
+
+  The namespace (`Qiick\McpOAuth\Events`), the constructor arguments and the
+  audit entry names (`oauth_consent_approved`, …) do not change.
 - `GrantRecord` has three optional fields, `revokedAt`, `revocationReason` and
   `metadata`: a `GrantStore` should fill the first two for revoked grants.
   `RevocationReason` gained `Security`: a `match` over it needs a default arm.

@@ -13,7 +13,7 @@ use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
-use Qiick\McpOAuth\Events\McpGrantRevoked;
+use Qiick\McpOAuth\Events\McpGrantRevokedEvent;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
@@ -35,7 +35,7 @@ use Throwable;
  * the second the revoke began is kept: if it was the older grant's, its
  * exchange still fails (S54: a token for a revoked grant is revoked at once).
  *
- * Dispatches {@see McpGrantRevoked}.
+ * Dispatches {@see McpGrantRevokedEvent}.
  */
 final class RevokeConnectedAppAction
 {
@@ -96,7 +96,7 @@ final class RevokeConnectedAppAction
         }
 
         if ($isRevoked) {
-            event(new McpGrantRevoked($grant->id, $grant->clientId, $grant->userIdentifier, $userIdentifier, RevocationReason::User));
+            event(new McpGrantRevokedEvent($grant->id, $grant->clientId, $grant->userIdentifier, $userIdentifier, RevocationReason::User));
         }
     }
 

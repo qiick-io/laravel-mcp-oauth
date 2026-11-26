@@ -10,7 +10,7 @@ namespace Qiick\McpOAuth\Events;
  *
  * @api
  */
-final readonly class McpTokenRevoked
+final readonly class McpTokenRevokedEvent
 {
     /**
      * @param  'access_token'|'refresh_token'  $tokenType

@@ -8,7 +8,7 @@ use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Data\ConsentDecision;
 use Qiick\McpOAuth\Data\ConsentOptions;
 use Qiick\McpOAuth\Data\RevocationReason;
-use Qiick\McpOAuth\Events\McpConsentApproved;
+use Qiick\McpOAuth\Events\McpConsentApprovedEvent;
 use Qiick\McpOAuth\Internal\ClientMetadataDocumentFetcher;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
@@ -29,7 +29,7 @@ beforeEach(function (): void {
 });
 
 it('carries the resource, the consent text version and the locale on the decision, the record and the event', function (): void {
-    Event::fake([McpConsentApproved::class]);
+    Event::fake([McpConsentApprovedEvent::class]);
     $defaults = AuthorizeFlowTestCase::defaultConsentOptions();
     $this->enableOAuth(new ConsentOptions(
         scopes: $defaults->scopes,
@@ -50,7 +50,7 @@ it('carries the resource, the consent text version and the locale on the decisio
         ->and($decision->locale)->toBe('it')
         ->and(OAuthConsentRecord::query()->sole()->getAttribute('consent_version'))->toBe('2026-11');
 
-    Event::assertDispatched(McpConsentApproved::class, static fn (McpConsentApproved $event): bool => $event->resource === AuthorizeFlowTestCase::RESOURCE);
+    Event::assertDispatched(McpConsentApprovedEvent::class, static fn (McpConsentApprovedEvent $event): bool => $event->resource === AuthorizeFlowTestCase::RESOURCE);
 });
 
 it('gives the product every registered client field, and the page an advanced section', function (): void {

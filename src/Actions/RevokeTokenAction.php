@@ -20,7 +20,7 @@ use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
-use Qiick\McpOAuth\Events\McpTokenRevoked;
+use Qiick\McpOAuth\Events\McpTokenRevokedEvent;
 use Qiick\McpOAuth\Internal\GrantBindingColumn;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
 use Throwable;
@@ -100,7 +100,7 @@ final class RevokeTokenAction
         }
 
         // A rotated token coming back is reuse here too, as at the token endpoint:
-        // the theft signal (RevocationReason::Reuse, McpRefreshTokenReused) is kept.
+        // the theft signal (RevocationReason::Reuse, McpRefreshTokenReusedEvent) is kept.
         if ($refreshToken->getAttribute('revoked') === true) {
             $this->familyRevokingRefreshTokens->revokeFamilyForRefreshToken($refreshTokenPayload['refresh_token_id']);
 
@@ -263,7 +263,7 @@ final class RevokeTokenAction
     {
         ['client_id' => $clientId, 'user_id' => $userIdentifier] = self::ownerOf($accessToken);
 
-        $this->events->dispatch(new McpTokenRevoked(
+        $this->events->dispatch(new McpTokenRevokedEvent(
             clientId: $clientId,
             userIdentifier: $userIdentifier,
             grantId: $grant?->id,

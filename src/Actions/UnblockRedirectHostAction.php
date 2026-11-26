@@ -6,7 +6,7 @@ namespace Qiick\McpOAuth\Actions;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Qiick\McpOAuth\Contracts\AuditLogger;
-use Qiick\McpOAuth\Events\McpRedirectHostUnblocked;
+use Qiick\McpOAuth\Events\McpRedirectHostUnblockedEvent;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
 
@@ -14,7 +14,7 @@ use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
  * An admin lifts a host block. Clients the block revoked stay revoked: they
  * register again, and the user consents again.
  *
- * Dispatches {@see McpRedirectHostUnblocked}.
+ * Dispatches {@see McpRedirectHostUnblockedEvent}.
  */
 final class UnblockRedirectHostAction
 {
@@ -30,6 +30,6 @@ final class UnblockRedirectHostAction
             $this->auditLogger->record('oauth_redirect_host_unblocked', $actor, null, ['host' => $blockedHost->host]);
         });
 
-        event(new McpRedirectHostUnblocked($blockedHost->host, $actor === null ? null : PassportUserIdentifier::of($actor)));
+        event(new McpRedirectHostUnblockedEvent($blockedHost->host, $actor === null ? null : PassportUserIdentifier::of($actor)));
     }
 }

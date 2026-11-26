@@ -140,5 +140,5 @@ text before it is recorded as accepted.
 Every decision writes one row in `oauth_consent_records`, with the consent
 version, locale and resource of the page the user saw (stored in the session
 when it was rendered): `approved` with the new grant id, or `denied` with `retention_until` set 90 days ahead
-(`revoked_retention_days`). Approve also dispatches `McpConsentApproved`, deny
-`McpConsentDenied`.
+(`revoked_retention_days`). Approve also dispatches `McpConsentApprovedEvent`, deny
+`McpConsentDeniedEvent`.

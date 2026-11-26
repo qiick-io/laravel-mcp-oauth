@@ -10,8 +10,8 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\ConnectionInterface;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Contracts\AuditLogger;
-use Qiick\McpOAuth\Events\McpOAuthDisabled;
-use Qiick\McpOAuth\Events\McpOAuthEnabled;
+use Qiick\McpOAuth\Events\McpOAuthDisabledEvent;
+use Qiick\McpOAuth\Events\McpOAuthEnabledEvent;
 use Qiick\McpOAuth\Exceptions\McpOAuthCannotBeEnabledException;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
 use Qiick\McpOAuth\McpOAuthRoutes;
@@ -30,7 +30,7 @@ use Qiick\McpOAuth\McpOAuthServer;
  *   hosts in place;
  * - either way the audit entry is recorded first, then the store written,
  *   in one transaction ({@see AuditLogger}: a failing sink leaves the store
- *   untouched), and {@see McpOAuthEnabled} or {@see McpOAuthDisabled} is
+ *   untouched), and {@see McpOAuthEnabledEvent} or {@see McpOAuthDisabledEvent} is
  *   dispatched, with the actor, after the commit.
  */
 final class SwitchMcpOAuthAction
@@ -59,7 +59,7 @@ final class SwitchMcpOAuthAction
         });
 
         $actorIdentifier = $actor === null ? null : PassportUserIdentifier::of($actor);
-        $this->events->dispatch($isEnabled ? new McpOAuthEnabled($actorIdentifier) : new McpOAuthDisabled($actorIdentifier));
+        $this->events->dispatch($isEnabled ? new McpOAuthEnabledEvent($actorIdentifier) : new McpOAuthDisabledEvent($actorIdentifier));
     }
 
     /**

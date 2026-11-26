@@ -18,14 +18,14 @@ use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
-use Qiick\McpOAuth\Events\McpClientBlocked;
-use Qiick\McpOAuth\Events\McpConsentApproved;
-use Qiick\McpOAuth\Events\McpConsentDenied;
-use Qiick\McpOAuth\Events\McpGrantRevoked;
-use Qiick\McpOAuth\Events\McpOAuthEnabled;
-use Qiick\McpOAuth\Events\McpRedirectHostBlocked;
-use Qiick\McpOAuth\Events\McpRedirectHostUnblocked;
-use Qiick\McpOAuth\Events\McpTokenRevoked;
+use Qiick\McpOAuth\Events\McpClientBlockedEvent;
+use Qiick\McpOAuth\Events\McpConsentApprovedEvent;
+use Qiick\McpOAuth\Events\McpConsentDeniedEvent;
+use Qiick\McpOAuth\Events\McpGrantRevokedEvent;
+use Qiick\McpOAuth\Events\McpOAuthEnabledEvent;
+use Qiick\McpOAuth\Events\McpRedirectHostBlockedEvent;
+use Qiick\McpOAuth\Events\McpRedirectHostUnblockedEvent;
+use Qiick\McpOAuth\Events\McpTokenRevokedEvent;
 use Qiick\McpOAuth\Internal\NullAuditLogger;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
@@ -163,7 +163,7 @@ function auditedTokensFor(AuthorizeFlowTestCase $testCase, Client $client): arra
 }
 
 it('leaves the switch unwritten and silent when the audit sink fails', function (): void {
-    Event::fake([McpOAuthEnabled::class]);
+    Event::fake([McpOAuthEnabledEvent::class]);
     app()->instance(AuditLogger::class, throwingAuditLogger());
     $writes = new ArrayObject;
 
@@ -172,11 +172,11 @@ it('leaves the switch unwritten and silent when the audit sink fails', function 
     }))->toThrow(RuntimeException::class, 'The audit sink is down.');
 
     expect($writes->getArrayCopy())->toBe([]);
-    Event::assertNotDispatched(McpOAuthEnabled::class);
+    Event::assertNotDispatched(McpOAuthEnabledEvent::class);
 });
 
 it('keeps a host blocked when the audit of its unblock fails, so the unblock can be retried', function (): void {
-    Event::fake([McpRedirectHostUnblocked::class]);
+    Event::fake([McpRedirectHostUnblockedEvent::class]);
     $admin = $this->createUser();
     $blockedHost = app(BlockRedirectHostAction::class)->execute('evil.example', $admin, isSubdomainMatched: false);
     $auditLogger = throwingAuditLogger($this->auditLogger);
@@ -185,7 +185,7 @@ it('keeps a host blocked when the audit of its unblock fails, so the unblock can
     expect(fn () => app(UnblockRedirectHostAction::class)->execute($blockedHost, $admin))->toThrow(RuntimeException::class);
 
     expect(OAuthBlockedRedirectHost::query()->whereKey($blockedHost->getKey())->exists())->toBeTrue();
-    Event::assertNotDispatched(McpRedirectHostUnblocked::class);
+    Event::assertNotDispatched(McpRedirectHostUnblockedEvent::class);
 
     $auditLogger->isDown = false;
     app(UnblockRedirectHostAction::class)->execute(OAuthBlockedRedirectHost::query()->findOrFail($blockedHost->getKey()), $admin);
@@ -195,7 +195,7 @@ it('keeps a host blocked when the audit of its unblock fails, so the unblock can
 });
 
 it('writes no denial evidence when its audit fails, and exactly one on the retry', function (): void {
-    Event::fake([McpConsentDenied::class]);
+    Event::fake([McpConsentDeniedEvent::class]);
     $client = $this->createClient();
     $page = $this->actingAs($this->createUser())->get($this->authorizeUrl($client), ['X-Inertia' => 'true'])->assertOk();
     $auditLogger = throwingAuditLogger();
@@ -204,7 +204,7 @@ it('writes no denial evidence when its audit fails, and exactly one on the retry
     $this->delete('/oauth/authorize', ['auth_token' => $page->json('props.authToken')])->assertServerError();
 
     expect(OAuthConsentRecord::query()->count())->toBe(0);
-    Event::assertNotDispatched(McpConsentDenied::class);
+    Event::assertNotDispatched(McpConsentDeniedEvent::class);
 
     $auditLogger->isDown = false;
     $this->delete('/oauth/authorize', ['auth_token' => $page->json('props.authToken')])->assertRedirect();
@@ -213,7 +213,7 @@ it('writes no denial evidence when its audit fails, and exactly one on the retry
 });
 
 it('records no approval when its audit fails', function (): void {
-    Event::fake([McpConsentApproved::class]);
+    Event::fake([McpConsentApprovedEvent::class]);
     $client = $this->createClient();
     $page = $this->actingAs($this->createUser())->get($this->authorizeUrl($client), ['X-Inertia' => 'true'])->assertOk();
     app()->instance(AuditLogger::class, throwingAuditLogger());
@@ -223,11 +223,11 @@ it('records no approval when its audit fails', function (): void {
 
     expect(OAuthConsentRecord::query()->count())->toBe(0)
         ->and(OAuthClientMetadata::query()->where('client_id', $client->getKey())->value('first_authorized_at'))->toBeNull();
-    Event::assertNotDispatched(McpConsentApproved::class);
+    Event::assertNotDispatched(McpConsentApprovedEvent::class);
 });
 
 it('blocks nothing when the audit of a client or host block fails', function (): void {
-    Event::fake([McpClientBlocked::class, McpRedirectHostBlocked::class]);
+    Event::fake([McpClientBlockedEvent::class, McpRedirectHostBlockedEvent::class]);
     $admin = $this->createUser();
     $client = $this->createClient();
     app()->instance(AuditLogger::class, throwingAuditLogger());
@@ -237,12 +237,12 @@ it('blocks nothing when the audit of a client or host block fails', function ():
 
     expect($client->fresh()?->getAttribute('revoked'))->toBeFalse()
         ->and(OAuthBlockedRedirectHost::query()->count())->toBe(0);
-    Event::assertNotDispatched(McpClientBlocked::class);
-    Event::assertNotDispatched(McpRedirectHostBlocked::class);
+    Event::assertNotDispatched(McpClientBlockedEvent::class);
+    Event::assertNotDispatched(McpRedirectHostBlockedEvent::class);
 });
 
 it('leaves the grant active and the tokens in place when a revoke cannot be audited, even with a store that commits on its own (Codex review of #60)', function (): void {
-    Event::fake([McpGrantRevoked::class, McpTokenRevoked::class]);
+    Event::fake([McpGrantRevokedEvent::class, McpTokenRevokedEvent::class]);
     $client = $this->createClient();
     ['refresh_token' => $refreshToken, 'user_id' => $userIdentifier] = auditedTokensFor($this, $client);
     $grant = $this->grantStore()->activeFor((string) $client->getKey(), $userIdentifier);
@@ -258,8 +258,8 @@ it('leaves the grant active and the tokens in place when a revoke cannot be audi
     expect($this->grantStore()->activeFor((string) $client->getKey(), $userIdentifier)?->id)->toBe($grant?->id)
         ->and(Passport::token()->newQuery()->where('revoked', true)->count())->toBe(0)
         ->and(Passport::refreshToken()->newQuery()->count())->toBe(1);
-    Event::assertNotDispatched(McpGrantRevoked::class);
-    Event::assertNotDispatched(McpTokenRevoked::class);
+    Event::assertNotDispatched(McpGrantRevokedEvent::class);
+    Event::assertNotDispatched(McpTokenRevokedEvent::class);
 
     // The retry finds the grant and records the revoke once.
     $auditLogger->isDown = false;
@@ -269,11 +269,11 @@ it('leaves the grant active and the tokens in place when a revoke cannot be audi
 
     expect($this->grantStore()->activeFor((string) $client->getKey(), $userIdentifier))->toBeNull()
         ->and(array_column($this->auditLogger->entries, 'event'))->toBe(['oauth_consent_approved', 'oauth_grant_revoked']);
-    Event::assertDispatched(McpTokenRevoked::class);
+    Event::assertDispatched(McpTokenRevokedEvent::class);
 });
 
 it('records a grant revoke once when two Connected apps requests revoke the same grant (Codex review of #60)', function (): void {
-    Event::fake([McpGrantRevoked::class]);
+    Event::fake([McpGrantRevokedEvent::class]);
     $client = $this->createClient();
     ['user' => $user] = $this->obtainAuthorizationCode($client);
     // Both requests resolved the grant while it was active.
@@ -283,7 +283,7 @@ it('records a grant revoke once when two Connected apps requests revoke the same
     app(RevokeConnectedAppAction::class)->execute($grant, $user);
 
     expect(array_column($this->auditLogger->entries, 'event'))->toBe(['oauth_consent_approved', 'oauth_grant_revoked']);
-    Event::assertDispatchedTimes(McpGrantRevoked::class, 1);
+    Event::assertDispatchedTimes(McpGrantRevokedEvent::class, 1);
 });
 
 it('takes the client row lock inside the revoke transaction, before any write (Codex review of #60)', function (string $path): void {
@@ -328,7 +328,7 @@ function transactionalAuditLogger(FakeAuditLogger $recorded): AuditLogger
 }
 
 it('completes a revoke forward when the grant committed on its own connection and the Passport transaction then failed (Codex review of #60)', function (string $path): void {
-    Event::fake([McpGrantRevoked::class, McpTokenRevoked::class]);
+    Event::fake([McpGrantRevokedEvent::class, McpTokenRevokedEvent::class]);
     $client = $this->createClient();
     ['refresh_token' => $refreshToken, 'user_id' => $userIdentifier] = auditedTokensFor($this, $client);
     $grant = $this->grantStore()->activeFor((string) $client->getKey(), $userIdentifier);
@@ -354,8 +354,8 @@ it('completes a revoke forward when the grant committed on its own connection an
         ->and(Passport::refreshToken()->newQuery()->where('revoked', false)->count())->toBe(0)
         ->and(array_column($this->auditLogger->entries, 'event'))->toBe(['oauth_consent_approved', 'oauth_grant_revoked']);
     $path === 'Connected apps'
-        ? Event::assertDispatchedTimes(McpGrantRevoked::class, 1)
-        : Event::assertDispatchedTimes(McpTokenRevoked::class, 1);
+        ? Event::assertDispatchedTimes(McpGrantRevokedEvent::class, 1)
+        : Event::assertDispatchedTimes(McpTokenRevokedEvent::class, 1);
     Exceptions::assertReported(static fn (RuntimeException $exception): bool => $exception->getMessage() === 'The Passport commit failed.');
 })->with(['Connected apps', 'RFC 7009']);
 

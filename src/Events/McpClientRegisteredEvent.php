@@ -9,7 +9,7 @@ namespace Qiick\McpOAuth\Events;
  *
  * @api
  */
-final readonly class McpClientRegistered
+final readonly class McpClientRegisteredEvent
 {
     /**
      * @param  list<string>  $displayHosts
