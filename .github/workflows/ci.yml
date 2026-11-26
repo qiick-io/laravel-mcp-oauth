@@ -43,7 +43,7 @@ jobs:
       - name: Checkout
         if: ${{ !matrix.skip }}
         # actions/checkout@v4.2.2
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup PHP
         if: ${{ !matrix.skip }}
@@ -129,7 +129,7 @@ jobs:
       - name: Checkout
         if: github.event_name == 'pull_request'
         # actions/checkout@v4.2.2
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -163,7 +163,7 @@ jobs:
       - name: Checkout
         if: needs.mutation-plan.outputs.scope == 'all' || needs.mutation-plan.outputs.classes != '[]'
         # actions/checkout@v4.2.2
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup PHP
         if: needs.mutation-plan.outputs.scope == 'all' || needs.mutation-plan.outputs.classes != '[]'
@@ -221,7 +221,7 @@ jobs:
       - name: Checkout
         if: needs.package-matrix.outputs.docs-only != 'true'
         # actions/checkout@v4.2.2
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup PHP
         if: needs.package-matrix.outputs.docs-only != 'true'
@@ -301,7 +301,7 @@ jobs:
       - name: Checkout
         if: (needs.package-matrix.outputs.run-databases == 'true' || needs.package-matrix.outputs.docs-only != 'true')
         # actions/checkout@v4.2.2
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup PHP
         if: (needs.package-matrix.outputs.run-databases == 'true' || needs.package-matrix.outputs.docs-only != 'true')
@@ -348,7 +348,7 @@ jobs:
     steps:
       - name: Checkout
         # actions/checkout@v4.2.2
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup PHP
         # shivammathur/setup-php@2.40.0
@@ -375,7 +375,7 @@ jobs:
       - name: Checkout
         if: needs.package-matrix.outputs.docs-only != 'true'
         # actions/checkout@v4.2.2
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup PHP
         if: needs.package-matrix.outputs.docs-only != 'true'
