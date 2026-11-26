@@ -91,7 +91,7 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 | S75 | Connected apps lists only the user's own active grants | covered | `Isolated/ConnectedAppsTest` (API keys are the product's) |
 | S76 | A user revoke refuses the next call and refresh, and revokes unexchanged codes | covered | `Isolated/ConnectedAppsTest`: the grant, its access and refresh tokens, and the codes it issued (codes issued before the revoke, while no newer grant is active); a newer consent's code and a code issued during the revoke survive |
 | S77 | Revoke after losing AI access, and while OAuth is off | covered | `Isolated/ConnectedAppsTest` "lists … with OAuth off too" (losing access is the product's) |
-| S78 | Audit entries name client and redirect host | product | `AuditLogger`; the events carry the ids and hosts (`Unit/Events/McpEventsCarryUuidsOnlyTest`) |
+| S78 | Audit entries name client and redirect host | covered | `Isolated/AuditTrailTest` (every entry, its host and its failure semantics; mapping in `docs/audit.md`); the events carry the ids and hosts (`Unit/Events/McpEventsCarryUuidsOnlyTest`) |
 | S79 | Token material never in logs, exceptions, events, audit | covered | `Isolated/SecretsStayOutOfLogsTest` (every log line and package event across exchange, rotation, reuse, replay and revocation); `Unit/Events/McpEventsCarryUuidsOnlyTest`; token error bodies are fixed strings (`Unit/Services/TokenErrorResponseServiceTest`) |
 | S80 | No bigint in contracts, events, route keys, props | covered | `Unit/Data/GrantRecordTest`; `Unit/Events/McpEventsCarryUuidsOnlyTest`; admin and settings routes use UUIDs and `public_id` |
 | S81 | Without Inertia boots; enabled without a `ConsentView` fails clearly | covered | `Feature/AdapterBootTest` |

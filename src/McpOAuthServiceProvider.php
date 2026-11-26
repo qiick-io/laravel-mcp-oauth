@@ -139,6 +139,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
                 $app->make(ResourceServer::class),
                 $app->make(ConfigRepository::class),
                 $app->make(Dispatcher::class),
+                $app->make(AuditLogger::class),
                 Passport::tokenEncryptionKey($app->make(Encrypter::class)),
             );
         });

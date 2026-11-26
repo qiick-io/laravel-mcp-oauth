@@ -24,8 +24,11 @@ final class UnblockRedirectHostAction
 
     public function execute(OAuthBlockedRedirectHost $blockedHost, ?Authenticatable $actor): void
     {
-        $blockedHost->delete();
-        $this->auditLogger->record('oauth_redirect_host_unblocked', $actor, null, ['host' => $blockedHost->host]);
+        // With its audit entry or not at all, so a failed unblock can be retried.
+        $blockedHost->getConnection()->transaction(function () use ($blockedHost, $actor): void {
+            $blockedHost->delete();
+            $this->auditLogger->record('oauth_redirect_host_unblocked', $actor, null, ['host' => $blockedHost->host]);
+        });
 
         event(new McpRedirectHostUnblocked($blockedHost->host, $actor === null ? null : PassportUserIdentifier::of($actor)));
     }

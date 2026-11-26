@@ -89,8 +89,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `oauth_consent_denied` (client and redirect host), `mcp_oauth_enabled` and
   `mcp_oauth_disabled`, `oauth_client_blocked`, `oauth_redirect_host_blocked`
   (in the short transaction with the block row), `oauth_redirect_host_unblocked`
-  and `oauth_grant_revoked` (Connected apps). Until the product binds its sink
-  a no-op logger takes them; `FakeAuditLogger` records them in tests.
+  and `oauth_grant_revoked` (Connected apps, and an RFC 7009 refresh-token
+  revoke, with the approval's redirect host). Each entry is recorded inside
+  the transaction of its change, before the change's event: a throwing sink
+  rolls the change back and leaves a clean retry. `docs/audit.md` maps the
+  entries onto the 1.5 activity log (`oauth_authorized`, `oauth_revoked`).
+  Until the product binds its sink a no-op logger takes them;
+  `FakeAuditLogger` records them in tests.
 - `McpOAuthEraser` implements fleet personal data erasure. It removes MCP
   credentials, unlinks blocked-host attribution, and anonymises consent
   evidence until its retention deadline. Dry runs and post-commit events share

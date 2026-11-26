@@ -14,6 +14,7 @@ use Qiick\McpOAuth\Data\RevocationReason;
 use Qiick\McpOAuth\Events\McpGrantRevoked;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
+use Qiick\McpOAuth\Models\OAuthConsentRecord;
 
 /**
  * A user revokes an app from Connected apps (design §5.2): the grant is
@@ -69,7 +70,11 @@ final class RevokeConnectedAppAction
                     ->update(['revoked' => true]);
             }
 
-            $this->auditLogger->record('oauth_grant_revoked', $user, $grant->id, ['client_id' => $grant->clientId, 'reason' => RevocationReason::User->value]);
+            $this->auditLogger->record('oauth_grant_revoked', $user, $grant->id, [
+                'client_id' => $grant->clientId,
+                'redirect_host' => OAuthConsentRecord::redirectHostOfGrant($grant->id),
+                'reason' => RevocationReason::User->value,
+            ]);
         });
 
         event(new McpGrantRevoked($grant->id, $grant->clientId, $grant->userIdentifier, $userIdentifier, RevocationReason::User));
