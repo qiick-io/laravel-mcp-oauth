@@ -6,6 +6,8 @@ namespace Qiick\McpOAuth\Tests\Support;
 
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Application;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase;
 use Qiick\McpOAuth\McpOAuthServiceProvider;
@@ -17,6 +19,20 @@ use Qiick\McpOAuth\McpOAuthServiceProvider;
  */
 abstract class PackageTestCase extends TestCase
 {
+    /**
+     * No test reaches the network or spawns a process through Laravel's
+     * clients unfaked (fleet convention F25). The real-HTTP and race tests
+     * drive `php -S` and helper scripts with Guzzle and Symfony Process
+     * directly, on purpose.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Http::preventStrayRequests();
+        Process::preventStrayProcesses();
+    }
+
     /**
      * @param  Application  $app
      * @return list<class-string>

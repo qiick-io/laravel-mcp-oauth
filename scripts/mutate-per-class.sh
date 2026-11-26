@@ -1,12 +1,23 @@
 #!/usr/bin/env bash
 # Enforce pest --mutate --min=95 on design §11.4 security-critical classes.
 # One pest --mutate invocation per class (pcov). Never --covered-only, never
-# || true, never method-level @pest-mutate-ignore. Empty list = scaffold no-op
-# until feature classes land.
+# || true, never method-level @pest-mutate-ignore.
+#
+# MUTATE_SCOPE (from the shared package matrix, app-ui docs/package-matrix.md):
+# - `all` (push, nightly, manual, and locally by default): every class below;
+# - `changed` (a pull request): only those of MUTATE_CLASSES, the JSON array
+#   of src/ paths the PR changed, that are in the lists below. A changed class
+#   outside them is reported and skipped: the gate is this curated list.
 #
 # CI splits the work into parallel shards with MUTATE_SHARD=i MUTATE_SHARDS=n
-# (see the selection below). Without them, every class runs, as locally.
+# (see the selection below). Without them, every selected class runs.
 set -euo pipefail
+
+# mapfile and empty arrays under set -u need Bash 4.4 or later (macOS ships 3.2).
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
+  echo "scripts/mutate-per-class.sh needs Bash 4.4 or later (found ${BASH_VERSION})." >&2
+  exit 1
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -83,6 +94,15 @@ MIN="${MUTATE_MIN:-95}"
 SHARD="${MUTATE_SHARD:-1}"
 SHARDS="${MUTATE_SHARDS:-1}"
 
+# Positive decimals only: inside (( )) a malformed value (09, 1/0) is an
+# arithmetic error that reads as false and would skip every class green.
+for shard_input in "${SHARD}" "${SHARDS}"; do
+  if [[ ! "${shard_input}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "MUTATE_SHARD and MUTATE_SHARDS must be positive integers (got ${shard_input})." >&2
+    exit 1
+  fi
+done
+
 DEDICATED_COUNT="${#DEDICATED_CLASSES[@]}"
 
 # Locally (one shard) every class runs; in CI, shards 1..DEDICATED_COUNT take
@@ -92,7 +112,64 @@ if (( SHARD < 1 || SHARD > SHARDS )); then
   exit 1
 fi
 
-if (( SHARDS == 1 )); then
+SCOPE="${MUTATE_SCOPE:-all}"
+
+if [[ "${SCOPE}" == changed ]]; then
+  # The list comes from the matrix: unset is a wiring error, not "nothing changed".
+  if [[ -z "${MUTATE_CLASSES+set}" ]]; then
+    echo "MUTATE_SCOPE=changed needs MUTATE_CLASSES (a JSON array of src/ paths)." >&2
+    exit 1
+  fi
+
+  # The PR's changed paths as class names (src/Foo/Bar.php -> Qiick\McpOAuth\Foo\Bar);
+  # a deleted path is not mutated.
+  # Captured first: a failing node (a malformed list) stops the script under set -e.
+  changed_class_names="$(node -e '
+    const fs = require("node:fs");
+    const files = JSON.parse(process.env.MUTATE_CLASSES);
+    if (!Array.isArray(files) || files.some((file) => typeof file !== "string" || !/^src\/(?!Testing\/)[\w/]+\.php$/.test(file))) {
+      throw new Error("MUTATE_CLASSES must be an array of package source paths");
+    }
+    for (const file of files) {
+      if (fs.existsSync(file)) {
+        console.log("Qiick\\McpOAuth\\" + file.slice(4, -4).replaceAll("/", "\\"));
+      }
+    }
+  ')"
+  CHANGED_CLASSES=()
+
+  if [[ -n "${changed_class_names}" ]]; then
+    mapfile -t CHANGED_CLASSES <<< "${changed_class_names}"
+  fi
+
+  CURATED_CLASSES=("${DEDICATED_CLASSES[@]}" "${CLASSES[@]}")
+  GATED_CLASSES=()
+
+  for changed_class in "${CHANGED_CLASSES[@]}"; do
+    if [[ " ${CURATED_CLASSES[*]} " == *" ${changed_class} "* ]]; then
+      GATED_CLASSES+=("${changed_class}")
+    elif (( SHARD == 1 )); then
+      echo "Not in the mutation gate, skipped: ${changed_class}"
+    fi
+  done
+
+  SELECTED_CLASSES=()
+
+  for index in "${!GATED_CLASSES[@]}"; do
+    if (( index % SHARDS == SHARD - 1 )); then
+      SELECTED_CLASSES+=("${GATED_CLASSES[$index]}")
+    fi
+  done
+
+  # A pull request may change no gated class, or fewer than there are shards.
+  if (( ${#SELECTED_CLASSES[@]} == 0 )); then
+    echo "Shard ${SHARD}/${SHARDS}: no changed class to mutate."
+    exit 0
+  fi
+elif [[ "${SCOPE}" != all ]]; then
+  echo "MUTATE_SCOPE must be all or changed." >&2
+  exit 1
+elif (( SHARDS == 1 )); then
   SELECTED_CLASSES=("${DEDICATED_CLASSES[@]}" "${CLASSES[@]}")
 elif (( SHARDS <= DEDICATED_COUNT )); then
   echo "MUTATE_SHARDS must exceed the ${DEDICATED_COUNT} dedicated classes." >&2
