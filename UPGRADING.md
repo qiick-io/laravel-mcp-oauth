@@ -11,6 +11,15 @@ Products must adopt with an exact `0.x` version constraint until `1.0.0`.
 
 ## Unreleased
 
+- If you already ran the blocked redirect hosts migration on PostgreSQL or
+  SQLite, add the index in place:
+
+  ```sql
+  CREATE INDEX IF NOT EXISTS oauth_blocked_redirect_hosts_created_by_index
+      ON oauth_blocked_redirect_hosts (created_by);
+  ```
+
+  MySQL and MariaDB already index the foreign key.
 - `GrantStore` has a new method, `purgeRevokedBefore(\DateTimeImmutable $cutoff): int`:
   delete the grants revoked before the cutoff and return how many went. Then
   schedule `mcp-oauth:purge-revoked` daily and `mcp-oauth:prune-unused-clients`

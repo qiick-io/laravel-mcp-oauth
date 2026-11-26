@@ -31,7 +31,7 @@ return new class extends Migration
             $table->dateTime('expires_at')->nullable()->index();
             $table->json('metadata')->nullable();
             $table->unsignedSmallInteger('schema_version')->default(1);
-            $table->foreignId('created_by')->nullable()->constrained($userTable)->nullOnDelete();
+            $table->foreignId('created_by')->nullable()->index()->constrained($userTable)->nullOnDelete();
             $table->timestamps();
         });
     }
