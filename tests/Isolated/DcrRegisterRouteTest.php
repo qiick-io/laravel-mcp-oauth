@@ -706,3 +706,16 @@ it('refuses the punycode of an IDN an admin blocked in Unicode, composed or not 
     'composed (NFC)' => ["B\u{00FC}cher.example"],
     'decomposed (NFD)' => ["Bu\u{0308}cher.example"],
 ]);
+
+it('records the MCP spec revision the client registered under (M8)', function (): void {
+    enableMcpOAuthWithKeys();
+    McpOAuthRoutes::register();
+    config()->set('mcp-oauth.spec_revision', '2026-07-28');
+
+    $response = $this->postJson('/oauth/register', [
+        'client_name' => 'Cursor',
+        'redirect_uris' => ['https://app.example/callback'],
+    ])->assertCreated();
+
+    expect(OAuthClientMetadata::query()->where('client_id', $response->json('client_id'))->sole()->getAttribute('spec_revision'))->toBe('2026-07-28');
+});
