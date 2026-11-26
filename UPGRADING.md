@@ -1,15 +1,40 @@
 # Upgrading
 
-This package is **pre-release** (`0.x`). Breaking changes are allowed between
-minor versions while the major is `0`, and each break is recorded here before a
-tagged release.
+The package is in its **`1.0.0` beta** line (`1.0.0-beta.N`). A beta may still
+break the public API (`docs/public-api.md`) and change the migrations: until the
+first stable release the `create_…` migrations are edited in place, so an
+upgrade from one beta to the next may need a fresh database for the package's
+tables (`php artisan migrate:fresh` on a development database). Every break is
+recorded here before its tag. From `1.0.0` on, the API and the migrations follow
+Semantic Versioning and the deprecation policy.
 
-There are no published versions yet. When `0.1.0` ships, first-install steps and
-any follow-on breaks will land in this file.
-
-Products must adopt with an exact `0.x` version constraint until `1.0.0`.
+Products pin an exact beta (`qiick/laravel-mcp-oauth:1.0.0-beta.1`) until `1.0.0`.
 
 ## Unreleased
+
+Nothing yet.
+
+## 1.0.0-beta.1
+
+The first release. A first install follows the README (*Install*):
+
+```bash
+composer require qiick/laravel-mcp-oauth:1.0.0-beta.1
+php artisan vendor:publish --tag=mcp-oauth-config
+php artisan vendor:publish --tag=passport-migrations
+php artisan vendor:publish --tag=mcp-oauth-migrations
+php artisan vendor:publish --tag=mcp-oauth-binding-stub
+php artisan passport:keys
+php artisan migrate
+```
+
+then bind the product adapters (`AdminSwitch`, `GrantStore`, `ConsentProvider`,
+`GrantAuthorizer`, `ApiKeyDoor`, `McpCredentialBinder`, `AuditLogger`), call
+`McpOAuthRoutes::register()`, and keep OAuth off until `mcp-oauth:check` is green.
+
+### From the develop branch before the beta
+
+A product that ran the package from `develop` before this tag takes these steps:
 
 - The package now schedules `mcp-oauth:prune-unused-clients`,
   `mcp-oauth:purge-revoked` and `mcp-oauth:prune-auth-code-exchanges` itself.

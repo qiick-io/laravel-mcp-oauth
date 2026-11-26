@@ -21,10 +21,10 @@ Part of the qiick fleet. Binding design:
 
 ## Status
 
-Pre-`0.1.0`. Public APIs may change in any 0.x release; see [UPGRADING.md](./UPGRADING.md).
-Do not require this package from production apps until a tagged release lands on
-Packagist (Packagist publish only after Luca’s go). `1.0.0` needs a non-externa
-adopter and Luca’s go.
+`1.0.0-beta.1`, the first beta. A beta may still change the public API and the
+migrations; see [UPGRADING.md](./UPGRADING.md) and pin an exact version. Packagist
+publishing and `1.0.0` (which also needs an adopter besides externa) wait for
+the maintainer's go.
 
 ## Requirements
 
@@ -34,10 +34,10 @@ adopter and Luca’s go.
 - `laravel/passport ^13.12`, `laravel/mcp ^1.2`, `league/uri ^7.8`
 - Optional: `inertiajs/inertia-laravel ^3.0` (default `ConsentView`)
 
-## Install (when published)
+## Install
 
 ```bash
-composer require qiick/laravel-mcp-oauth:^0.1
+composer require qiick/laravel-mcp-oauth:1.0.0-beta.1
 php artisan vendor:publish --tag=mcp-oauth-config
 php artisan vendor:publish --tag=passport-migrations
 php artisan vendor:publish --tag=mcp-oauth-migrations
