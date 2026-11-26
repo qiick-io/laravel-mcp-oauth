@@ -7,11 +7,14 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
+use Qiick\McpOAuth\Actions\RevokeConnectedAppAction;
+use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
 use Qiick\McpOAuth\Events\McpGrantRevoked;
 use Qiick\McpOAuth\McpOAuthSettingsRoutes;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
+use Qiick\McpOAuth\Tests\Support\HookedGrantStore;
 use Qiick\McpOAuth\Tests\Support\TestUser;
 
 uses(AuthorizeFlowTestCase::class);
@@ -142,4 +145,80 @@ it('lists a grant whose client is gone, or that has no dates, so it can still be
     expect($connectedApps[$grant->id]['client']['redirectHosts'])->toBe(['app.example', 'other.example'])
         ->and($connectedApps[$grant->id]['authorizedAt'])->toBeNull()
         ->and($connectedApps[$orphanGrant->id]['client'])->toBe(['id' => $orphanGrant->clientId, 'name' => null, 'redirectHosts' => []]);
+});
+
+it('revokes the user\'s unexchanged codes for that client too (S76)', function (): void {
+    $user = $this->createUser();
+    ['grant' => $grant, 'client' => $client] = connectedApp($this, $user);
+    $authCode = static fn (string $userIdentifier): string => tap(Str::random(80), static fn (string $codeId) => DB::table('oauth_auth_codes')->insert([
+        'id' => $codeId, 'user_id' => $userIdentifier, 'client_id' => $client->getKey(), 'scopes' => '["mcp:use"]', 'revoked' => false, 'expires_at' => now()->addMinutes(5),
+    ]));
+    $userCode = $authCode((string) $user->getKey());
+    $otherUserCode = $authCode((string) $this->createUser()->getKey());
+
+    $this->actingAs($user)->deleteJson("/settings/connected-apps/{$grant->id}")->assertNoContent();
+
+    expect(DB::table('oauth_auth_codes')->where('id', $userCode)->value('revoked'))->toBeTruthy()
+        ->and(DB::table('oauth_auth_codes')->where('id', $otherUserCode)->value('revoked'))->toBeFalsy();
+});
+
+/**
+ * An auth code of `$userIdentifier` for `$client`, expiring `$expiresInMinutes`
+ * from now (Passport writes the issue time plus the code TTL).
+ */
+function unexchangedCode(Client $client, string $userIdentifier, int $expiresInMinutes = 5): string
+{
+    return tap(Str::random(80), static fn (string $codeId) => DB::table('oauth_auth_codes')->insert([
+        'id' => $codeId, 'user_id' => $userIdentifier, 'client_id' => $client->getKey(), 'scopes' => '["mcp:use"]',
+        'revoked' => false, 'expires_at' => now()->addMinutes($expiresInMinutes),
+    ]));
+}
+
+it('leaves the code of a newer consent alone when an older grant is revoked (#49 review)', function (): void {
+    $user = $this->createUser();
+    ['grant' => $olderGrant, 'client' => $client] = connectedApp($this, $user);
+    // The user approved again meanwhile: a newer active grant, and its fresh code.
+    $this->grantStore()->seed(new GrantRecord((string) Str::uuid7(), (string) $client->getKey(), (string) $user->getKey(), false, ['mcp:read'], new DateTimeImmutable, null));
+    $newerCode = unexchangedCode($client, (string) $user->getKey(), 10);
+
+    app(RevokeConnectedAppAction::class)->execute($olderGrant, $user);
+
+    expect(DB::table('oauth_auth_codes')->where('id', $newerCode)->value('revoked'))->toBeFalsy();
+});
+
+it('leaves a code issued while the revoke runs alone (#49 review)', function (): void {
+    $user = $this->createUser();
+    ['grant' => $grant, 'client' => $client] = connectedApp($this, $user);
+    $olderCode = unexchangedCode($client, (string) $user->getKey());
+    $hookedGrantStore = new HookedGrantStore($this->grantStore());
+    app()->instance(GrantStore::class, $hookedGrantStore);
+    $codeIssuedDuringTheRevoke = null;
+    // Two seconds into the revoke, a new approval's code lands with the full TTL.
+    $hookedGrantStore->beforeRevoke = function () use ($client, $user, &$codeIssuedDuringTheRevoke): void {
+        $this->travel(2)->seconds();
+        $codeIssuedDuringTheRevoke = unexchangedCode($client, (string) $user->getKey(), 10);
+    };
+
+    app(RevokeConnectedAppAction::class)->execute($grant, $user);
+
+    expect(DB::table('oauth_auth_codes')->where('id', $olderCode)->value('revoked'))->toBeTruthy()
+        ->and(DB::table('oauth_auth_codes')->where('id', $codeIssuedDuringTheRevoke)->value('revoked'))->toBeFalsy();
+});
+
+it('rolls the whole revoke back, and tells no one, when a step fails (Devin review of #49)', function (): void {
+    Event::fake([McpGrantRevoked::class]);
+    $user = $this->createUser();
+    ['grant' => $grant, 'accessTokenId' => $accessTokenId] = connectedApp($this, $user);
+    $hookedGrantStore = new HookedGrantStore($this->grantStore());
+    app()->instance(GrantStore::class, $hookedGrantStore);
+    // The step after the token revocation fails (a deadlock, a dropped connection).
+    $hookedGrantStore->afterNextActiveFor = static function (): never {
+        throw new RuntimeException('The database went away.');
+    };
+
+    expect(fn () => app(RevokeConnectedAppAction::class)->execute($grant, $user))->toThrow(RuntimeException::class);
+
+    expect(DB::table('oauth_access_tokens')->where('id', $accessTokenId)->value('revoked'))->toBeFalsy()
+        ->and(DB::table('oauth_refresh_tokens')->where('access_token_id', $accessTokenId)->value('revoked'))->toBeFalsy();
+    Event::assertNotDispatched(McpGrantRevoked::class);
 });
