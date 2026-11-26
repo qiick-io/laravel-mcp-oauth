@@ -45,22 +45,28 @@ final class RevokeConnectedAppAction
         $userIdentifier = PassportUserIdentifier::of($user);
         $revokeStartedAt = now()->startOfSecond();
 
-        $this->grantStore->revoke($grant->id, $userIdentifier, RevocationReason::User);
-        $this->revokeGrantTokens->execute($grant);
+        $authCodeTtlMinutes = BoundedPositiveInt::require(
+            $this->config->get('mcp-oauth.auth_code_ttl_minutes'),
+            'auth_code_ttl_minutes',
+            BoundedPositiveInt::AUTH_CODE_TTL_MINUTES_MAX,
+        );
 
-        if ($this->grantStore->activeFor($grant->clientId, $grant->userIdentifier) === null) {
-            $authCodeTtlMinutes = BoundedPositiveInt::require(
-                $this->config->get('mcp-oauth.auth_code_ttl_minutes'),
-                'auth_code_ttl_minutes',
-                BoundedPositiveInt::AUTH_CODE_TTL_MINUTES_MAX,
-            );
+        // One transaction on Passport's connection: the tokens and codes are
+        // revoked together or not at all, and with them the product's grant
+        // when its GrantStore writes on that connection. The event follows
+        // the commit, so listeners never hear of a revoke that rolled back.
+        Passport::token()->getConnection()->transaction(function () use ($grant, $userIdentifier, $revokeStartedAt, $authCodeTtlMinutes): void {
+            $this->grantStore->revoke($grant->id, $userIdentifier, RevocationReason::User);
+            $this->revokeGrantTokens->execute($grant);
 
-            Passport::authCode()->newQuery()
-                ->where('client_id', $grant->clientId)
-                ->where('user_id', $grant->userIdentifier)
-                ->where('expires_at', '<', $revokeStartedAt->copy()->addMinutes($authCodeTtlMinutes))
-                ->update(['revoked' => true]);
-        }
+            if ($this->grantStore->activeFor($grant->clientId, $grant->userIdentifier) === null) {
+                Passport::authCode()->newQuery()
+                    ->where('client_id', $grant->clientId)
+                    ->where('user_id', $grant->userIdentifier)
+                    ->where('expires_at', '<', $revokeStartedAt->copy()->addMinutes($authCodeTtlMinutes))
+                    ->update(['revoked' => true]);
+            }
+        });
 
         event(new McpGrantRevoked($grant->id, $grant->clientId, $grant->userIdentifier, $userIdentifier, RevocationReason::User));
     }
