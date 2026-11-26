@@ -36,6 +36,8 @@ use Qiick\McpOAuth\Models\OAuthClientMetadata;
  * GrantStore, so no lock can be held on it; the order (bind, then read the
  * grant again) is what closes the race with a replay, because the replay
  * revokes the grant before it selects the grant's tokens.
+ *
+ * @internal
  */
 final class BindAccessTokenAction
 {

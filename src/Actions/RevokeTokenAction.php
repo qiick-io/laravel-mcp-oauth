@@ -51,6 +51,8 @@ use Throwable;
  * token that is unknown, dead, forged or another client's changes nothing,
  * and the endpoint answers 200 either way. The `token_type_hint` is not
  * needed: a refresh token is the one that decrypts.
+ *
+ * @internal
  */
 final class RevokeTokenAction
 {

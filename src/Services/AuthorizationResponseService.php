@@ -25,6 +25,8 @@ use Symfony\Component\HttpFoundation\Response;
  * - an Inertia visit gets a 409 `X-Inertia-Location` so the browser leaves
  *   for the client's origin with a full page load (S51), without the package
  *   depending on Inertia.
+ *
+ * @internal
  */
 final class AuthorizationResponseService
 {

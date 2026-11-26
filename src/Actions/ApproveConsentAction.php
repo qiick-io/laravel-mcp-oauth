@@ -41,6 +41,8 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
  * 5. McpConsentApprovedEvent is dispatched after the commit;
  * 6. the request is marked approved, ready for
  *    AuthorizationResponseService::complete().
+ *
+ * @internal
  */
 final class ApproveConsentAction
 {

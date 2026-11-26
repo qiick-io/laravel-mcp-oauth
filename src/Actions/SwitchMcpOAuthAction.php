@@ -32,6 +32,8 @@ use Qiick\McpOAuth\McpOAuthServer;
  *   in one transaction ({@see AuditLogger}: a failing sink leaves the store
  *   untouched), and {@see McpOAuthEnabledEvent} or {@see McpOAuthDisabledEvent} is
  *   dispatched, with the actor, after the commit.
+ *
+ * @api
  */
 final class SwitchMcpOAuthAction
 {

@@ -11,6 +11,8 @@ use RuntimeException;
  * Test double for {@see AdminSwitch}. Set `$storeIsUnreadable` to simulate a
  * store that cannot be read: {@see enabled()} returns false and does not throw.
  * Set `$throwsOnRead` for design §4.2 / S11 (a throwing switch must count as OFF).
+ *
+ * @api
  */
 final class FakeAdminSwitch implements AdminSwitch
 {

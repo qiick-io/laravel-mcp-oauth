@@ -15,6 +15,8 @@ use Qiick\McpOAuth\Internal\GrantBindingColumn;
  * GrantStore::bindingKey()) and the refresh tokens issued with them. The
  * grant itself is the caller's to revoke, first, so a token still being
  * bound finds it revoked (BindAccessTokenAction).
+ *
+ * @internal
  */
 final class RevokeGrantTokensAction
 {

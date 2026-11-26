@@ -15,6 +15,8 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
  * `POST oauth/authorize` (web, auth, verified; CSRF from the web group): the
  * user approved. The pending request is consumed only after the approval is
  * recorded, so a validation error leaves the form usable.
+ *
+ * @internal
  */
 final class ApproveClientController
 {

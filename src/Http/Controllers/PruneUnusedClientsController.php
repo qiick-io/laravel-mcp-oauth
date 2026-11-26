@@ -14,6 +14,8 @@ use Symfony\Component\HttpFoundation\Response;
  * unused-client prune now instead of waiting for the hourly schedule. Same
  * rules as `mcp-oauth:prune-unused-clients`. Answers the count to a JSON
  * call and redirects back for a form or Inertia post.
+ *
+ * @internal
  */
 final class PruneUnusedClientsController
 {

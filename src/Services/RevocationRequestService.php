@@ -25,6 +25,8 @@ use Qiick\McpOAuth\Models\OAuthClientMetadata;
  * Refusals use the token endpoint's bodies: a missing or repeated parameter
  * is `invalid_request`, any client that does not authenticate is the same
  * 401 `invalid_client`.
+ *
+ * @internal
  */
 final class RevocationRequestService
 {

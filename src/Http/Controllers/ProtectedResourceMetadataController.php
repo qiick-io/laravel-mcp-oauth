@@ -12,6 +12,8 @@ use Qiick\McpOAuth\McpOAuthServer;
  * S13, S14; standards review S6), served at the root well-known path and at
  * the one nested path of the MCP endpoint. The document is built by
  * {@see McpOAuthServer::protectedResourceMetadata()}.
+ *
+ * @internal
  */
 final class ProtectedResourceMetadataController
 {

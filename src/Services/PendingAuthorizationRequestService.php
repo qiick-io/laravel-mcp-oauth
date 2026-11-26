@@ -29,6 +29,8 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  * session one and the page's record, the request belongs to the signed-in user, and its client is
  * still active and unblocked. Anything else is a 403 that never redirects,
  * so a stale or forged form cannot send the browser to the client.
+ *
+ * @internal
  */
 final class PendingAuthorizationRequestService
 {

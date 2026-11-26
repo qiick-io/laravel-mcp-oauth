@@ -219,7 +219,7 @@ composer analyse
 bash scripts/mutate-per-class.sh   # per-class MSI ≥ 95 once targets land
 ```
 
-[docs/traceability.md](./docs/traceability.md) maps every design scenario
+[docs/security-checklist.md](./docs/security-checklist.md) maps every design scenario
 (S1–S81) to the tests that prove it, and lists what is still open.
 
 CI runs the PHP 8.3/8.4/8.5 × Laravel 12/13 × lowest/stable matrix, Pint,

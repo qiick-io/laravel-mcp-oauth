@@ -14,6 +14,8 @@ use Qiick\McpOAuth\RedirectUriGuard;
  * {@see OAuthBlockedRedirectHost}. Only `exact` narrows a block to the host
  * itself: any other `match_mode` value, a typo included, also blocks the
  * subdomains, so a bad row errs towards refusing.
+ *
+ * @internal
  */
 final class BlockedHostCatalog
 {
