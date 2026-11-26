@@ -13,7 +13,7 @@ use Laravel\Mcp\Server\Http\Controllers\OAuthRegisterController;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\ClientMetadataUriGuard;
-use Qiick\McpOAuth\Events\McpClientRegistered;
+use Qiick\McpOAuth\Events\McpClientRegisteredEvent;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
@@ -349,7 +349,7 @@ final class RegisterClientController extends OAuthRegisterController
             return;
         }
 
-        event(new McpClientRegistered(
+        event(new McpClientRegisteredEvent(
             $clientId,
             $this->displayHostsFromRedirectUris($registeredRedirectUris),
         ));

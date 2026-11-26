@@ -23,7 +23,7 @@ use Qiick\McpOAuth\Actions\RevokeAuthCodeTokensAction;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
-use Qiick\McpOAuth\Events\McpRefreshTokenReused;
+use Qiick\McpOAuth\Events\McpRefreshTokenReusedEvent;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
@@ -457,7 +457,7 @@ it('rotates a refresh token into a new bound pair', function (): void {
 });
 
 it('revokes the family and the grant when a used refresh token comes back', function (): void {
-    Event::fake([McpRefreshTokenReused::class]);
+    Event::fake([McpRefreshTokenReusedEvent::class]);
     $this->enableOAuth();
     McpOAuthRoutes::register();
     $client = $this->createClient();
@@ -477,7 +477,7 @@ it('revokes the family and the grant when a used refresh token comes back', func
         ->assertStatus(400)
         ->assertExactJson(INVALID_GRANT_BODY);
 
-    Event::assertDispatched(McpRefreshTokenReused::class);
+    Event::assertDispatched(McpRefreshTokenReusedEvent::class);
 });
 
 it('answers every refused refresh with the same invalid_grant body', function (Closure $tamper): void {

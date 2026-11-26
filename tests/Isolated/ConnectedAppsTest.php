@@ -11,7 +11,7 @@ use Qiick\McpOAuth\Actions\RevokeConnectedAppAction;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
-use Qiick\McpOAuth\Events\McpGrantRevoked;
+use Qiick\McpOAuth\Events\McpGrantRevokedEvent;
 use Qiick\McpOAuth\McpOAuthSettingsRoutes;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 use Qiick\McpOAuth\Tests\Support\HookedGrantStore;
@@ -83,7 +83,7 @@ it('needs a signed-in user', function (): void {
 });
 
 it('revokes a grant and every token bound to it, then tells the product', function (): void {
-    Event::fake([McpGrantRevoked::class]);
+    Event::fake([McpGrantRevokedEvent::class]);
     $user = $this->createUser();
     ['grant' => $grant, 'client' => $client, 'accessTokenId' => $accessTokenId] = connectedApp($this, $user);
     ['accessTokenId' => $otherAccessTokenId] = connectedApp($this, $user, 'Another app');
@@ -100,7 +100,7 @@ it('revokes a grant and every token bound to it, then tells the product', functi
         ->and(DB::table('oauth_refresh_tokens')->where('access_token_id', $accessTokenId)->value('revoked'))->toBeTruthy()
         ->and(DB::table('oauth_access_tokens')->where('id', $otherAccessTokenId)->value('revoked'))->toBeFalsy();
 
-    Event::assertDispatched(McpGrantRevoked::class, static fn (McpGrantRevoked $event): bool => $event->grantId === $grant->id
+    Event::assertDispatched(McpGrantRevokedEvent::class, static fn (McpGrantRevokedEvent $event): bool => $event->grantId === $grant->id
         && $event->clientId === (string) $client->getKey()
         && $event->userIdentifier === (string) $user->getKey()
         && $event->actorIdentifier === (string) $user->getKey()
@@ -108,7 +108,7 @@ it('revokes a grant and every token bound to it, then tells the product', functi
 });
 
 it('answers 404 for a grant that is not the user\'s own active one', function (string $whose): void {
-    Event::fake([McpGrantRevoked::class]);
+    Event::fake([McpGrantRevokedEvent::class]);
     $user = $this->createUser();
     ['grant' => $grant] = connectedApp($this, $whose === 'another user' ? $this->createUser() : $user);
 
@@ -120,7 +120,7 @@ it('answers 404 for a grant that is not the user\'s own active one', function (s
 
     $this->actingAs($user)->deleteJson("/settings/connected-apps/{$grantId}")->assertNotFound();
 
-    Event::assertNotDispatched(McpGrantRevoked::class);
+    Event::assertNotDispatched(McpGrantRevokedEvent::class);
 })->with(['another user', 'already revoked', 'unknown']);
 
 it('redirects back after a form or Inertia post', function (): void {
@@ -206,7 +206,7 @@ it('leaves a code issued while the revoke runs alone (#49 review)', function ():
 });
 
 it('rolls the whole revoke back, and tells no one, when a step fails (Devin review of #49)', function (): void {
-    Event::fake([McpGrantRevoked::class]);
+    Event::fake([McpGrantRevokedEvent::class]);
     $user = $this->createUser();
     ['grant' => $grant, 'accessTokenId' => $accessTokenId] = connectedApp($this, $user);
     $hookedGrantStore = new HookedGrantStore($this->grantStore());
@@ -220,5 +220,5 @@ it('rolls the whole revoke back, and tells no one, when a step fails (Devin revi
 
     expect(DB::table('oauth_access_tokens')->where('id', $accessTokenId)->value('revoked'))->toBeFalsy()
         ->and(DB::table('oauth_refresh_tokens')->where('access_token_id', $accessTokenId)->value('revoked'))->toBeFalsy();
-    Event::assertNotDispatched(McpGrantRevoked::class);
+    Event::assertNotDispatched(McpGrantRevokedEvent::class);
 });

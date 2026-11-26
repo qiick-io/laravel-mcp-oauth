@@ -7,8 +7,8 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Actions\SwitchMcpOAuthAction;
-use Qiick\McpOAuth\Events\McpOAuthDisabled;
-use Qiick\McpOAuth\Events\McpOAuthEnabled;
+use Qiick\McpOAuth\Events\McpOAuthDisabledEvent;
+use Qiick\McpOAuth\Events\McpOAuthEnabledEvent;
 use Qiick\McpOAuth\Exceptions\McpOAuthCannotBeEnabledException;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
@@ -41,7 +41,7 @@ function switchStore(): object
 }
 
 beforeEach(function (): void {
-    Event::fake([McpOAuthEnabled::class, McpOAuthDisabled::class]);
+    Event::fake([McpOAuthEnabledEvent::class, McpOAuthDisabledEvent::class]);
     $this->enableOAuth();
     McpOAuthRoutes::register();
 });
@@ -126,8 +126,8 @@ it('switches on when OAuth can serve, writing the store and telling the product'
     app(SwitchMcpOAuthAction::class)->execute(true, $admin, $store->persist);
 
     expect($store->writes)->toBe([true]);
-    Event::assertDispatched(McpOAuthEnabled::class, static fn (McpOAuthEnabled $event): bool => $event->actorIdentifier === (string) $admin->getKey());
-    Event::assertNotDispatched(McpOAuthDisabled::class);
+    Event::assertDispatched(McpOAuthEnabledEvent::class, static fn (McpOAuthEnabledEvent $event): bool => $event->actorIdentifier === (string) $admin->getKey());
+    Event::assertNotDispatched(McpOAuthDisabledEvent::class);
 });
 
 it('switches off whatever the state, with or without an actor', function (): void {
@@ -139,8 +139,8 @@ it('switches off whatever the state, with or without an actor', function (): voi
     app(SwitchMcpOAuthAction::class)->execute(false, null, $store->persist);
 
     expect($store->writes)->toBe([false]);
-    Event::assertDispatched(McpOAuthDisabled::class, static fn (McpOAuthDisabled $event): bool => $event->actorIdentifier === null);
-    Event::assertNotDispatched(McpOAuthEnabled::class);
+    Event::assertDispatched(McpOAuthDisabledEvent::class, static fn (McpOAuthDisabledEvent $event): bool => $event->actorIdentifier === null);
+    Event::assertNotDispatched(McpOAuthEnabledEvent::class);
 });
 
 it('refuses to switch on, with the reason, while OAuth could not serve', function (string $state, string $reason): void {
@@ -162,7 +162,7 @@ it('refuses to switch on, with the reason, while OAuth could not serve', functio
         ->toThrow(static fn (McpOAuthCannotBeEnabledException $exception) => expect($exception->getMessage())->toBe($reason));
 
     expect($store->writes)->toBe([]);
-    Event::assertNotDispatched(McpOAuthEnabled::class);
+    Event::assertNotDispatched(McpOAuthEnabledEvent::class);
 })->with([
     'keys missing' => ['keys missing', 'OAuth cannot be switched on while the Passport keys are missing: run passport:keys.'],
     'APP_URL not absolute' => ['APP_URL not absolute', 'OAuth cannot be switched on until APP_URL is an absolute http(s) URL.'],

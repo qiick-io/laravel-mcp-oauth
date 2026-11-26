@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consent records and revoked clients in pages of 100; each consent delete
   checks the deadline again, and the output and event count the rows actually
   deleted.
+- Every event class ends with `Event` (fleet convention F5): `McpConsentApproved`
+  is now `McpConsentApprovedEvent`, and so on; `McpPassportKeysMissing` is
+  `McpPassportKeysFoundMissingEvent`. `UPGRADING.md` lists them all.
 
 ### Fixed
 
@@ -124,7 +127,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ConsentOptions::$consentVersion`) and `locale`, all written to the consent
   record; `GrantRecord` carries `revokedAt`, `revocationReason` and
   `metadata`; `ConsentPage` and the Inertia props carry an `advanced` section;
-  `McpConsentApproved` carries `resource`; and `RevocationReason::Security`.
+  `McpConsentApprovedEvent` carries `resource`; and `RevocationReason::Security`.
   The consent version, locale and resource recorded for an approval or a
   denial are those of the rendered page; an approval after the consent
   version changed answers 409. The Advanced section shows the resource and
@@ -142,7 +145,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the RS256 signer needs), APP_URL is not a valid issuer (http(s), a host, a
   port from 1 to 65535 if any, no userinfo, query or fragment) or a foreign
   `passport.*` route exists; either way the product's store is written through
-  a callback and `McpOAuthEnabled` / `McpOAuthDisabled` is dispatched with the
+  a callback and `McpOAuthEnabledEvent` / `McpOAuthDisabledEvent` is dispatched with the
   actor. Every write of the switch store must go through it.
 - The consent page's `client` carries `isRedirectLoopback` (S3): the callback
   this request returns to is loopback http, so the page can warn that the code
@@ -153,7 +156,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Connected apps (design §5.2): `McpOAuthSettingsRoutes::register()` serves
   the signed-in user's active grants and revokes one with
   `RevokeConnectedAppAction` (grant with `RevocationReason::User`, then its
-  tokens; `McpGrantRevoked`). Up while OAuth is off.
+  tokens; `McpGrantRevokedEvent`). Up while OAuth is off.
 - `McpOAuthServer` exposes the discovery contract (standards review M9):
   `specRevision()` (the `spec_revision` config, a `YYYY-MM-DD` date, failing
   closed otherwise), `authorizationServerMetadata()` and
@@ -191,7 +194,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   posted scopes, role, resources and organisation against
   `ConsentProvider::options()`, then `validate()`, replaces the grant, revokes
   the earlier codes and tokens of that client and user, and dispatches
-  `McpConsentApproved`; deny dispatches `McpConsentDenied`. Every redirect to
+  `McpConsentApprovedEvent`; deny dispatches `McpConsentDeniedEvent`. Every redirect to
   the client carries `state` and `iss` (RFC 9207); an Inertia visit leaves
   with `X-Inertia-Location`. `ConsentOptions::$organisations` (instituta: the
   user picks one when they have several). Default `InertiaConsentView` renders
@@ -253,7 +256,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it: expired or unknown changes nothing; a rotated one is reuse (family and
   grant revoked under `RevocationReason::Reuse`). The body must be
   form-encoded. Always 200 for unknown, forged, dead or foreign tokens.
-  New event `McpTokenRevoked`.
+  New event `McpTokenRevokedEvent`.
 - Discovery (RFC 8414, RFC 9728): `/.well-known/oauth-authorization-server`
   and `/.well-known/oauth-protected-resource`, each at the root and the MCP
   path only, built from `APP_URL`, 404 with OAuth off. The `/mcp` 401 challenge
@@ -265,10 +268,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sooner, the clients the package registered (with their codes and tokens),
   the product's grants through the new `GrantStore::purgeRevokedBefore()`,
   and consent records past `retention_until` (an approval whose grant is no
-  longer active gets its clock started); event `McpRevokedRecordsPurged`.
+  longer active gets its clock started); event `McpRevokedRecordsPurgedEvent`.
   `mcp-oauth:prune-unused-clients {--dry-run}` deletes DCR clients nobody
   authorised within 24 hours, in chunks, never a client in retention or a
-  product's own Passport client; event `McpUnusedClientsPruned`. A client a
+  product's own Passport client; event `McpUnusedClientsPrunedEvent`. A client a
   user once approved is never pruned: `oauth_client_metadata` gains
   `first_authorized_at`, set at the first approval and kept after the grant is
   purged (the `create_` migration changed: run `migrate:fresh` locally).

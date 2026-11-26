@@ -9,7 +9,7 @@ namespace Qiick\McpOAuth\Events;
  *
  * @api
  */
-final readonly class McpRedirectHostBlocked
+final readonly class McpRedirectHostBlockedEvent
 {
     public function __construct(
         public string $host,

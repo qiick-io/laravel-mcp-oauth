@@ -11,7 +11,7 @@ use Qiick\McpOAuth\Data\RevocationReason;
  *
  * @api
  */
-final readonly class McpGrantRevoked
+final readonly class McpGrantRevokedEvent
 {
     public function __construct(
         public string $grantId,

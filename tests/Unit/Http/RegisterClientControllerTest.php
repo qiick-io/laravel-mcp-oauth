@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
 use Qiick\McpOAuth\ClientMetadataUriGuard;
-use Qiick\McpOAuth\Events\McpClientRegistered;
+use Qiick\McpOAuth\Events\McpClientRegisteredEvent;
 use Qiick\McpOAuth\Http\Controllers\RegisterClientController;
 use Qiick\McpOAuth\Internal\BlockedHostCatalog;
 use Qiick\McpOAuth\RedirectUriGuard;
@@ -308,29 +308,29 @@ it('collects unique display hosts and skips non-strings', function (): void {
     ]]))->toBe(['app.example', 'other.example']);
 });
 
-it('dispatches McpClientRegistered only for a complete 201 payload', function (): void {
-    Event::fake([McpClientRegistered::class]);
+it('dispatches McpClientRegisteredEvent only for a complete 201 payload', function (): void {
+    Event::fake([McpClientRegisteredEvent::class]);
     [$controller] = makeRegisterClientController();
 
     invokeRegisterClientControllerMethod($controller, 'dispatchRegisteredEvent', [
         response()->json(['client_id' => 'abc', 'redirect_uris' => ['https://app.example/cb']], 201),
     ]);
 
-    Event::assertDispatched(McpClientRegistered::class, function (McpClientRegistered $event): bool {
+    Event::assertDispatched(McpClientRegisteredEvent::class, function (McpClientRegisteredEvent $event): bool {
         return $event->clientId === 'abc' && $event->displayHosts === ['app.example'];
     });
 
-    Event::fake([McpClientRegistered::class]);
+    Event::fake([McpClientRegisteredEvent::class]);
 
     invokeRegisterClientControllerMethod($controller, 'dispatchRegisteredEvent', [
         response()->json(['client_id' => '', 'redirect_uris' => ['https://app.example/cb']], 201),
     ]);
-    Event::assertNotDispatched(McpClientRegistered::class);
+    Event::assertNotDispatched(McpClientRegisteredEvent::class);
 
     invokeRegisterClientControllerMethod($controller, 'dispatchRegisteredEvent', [
         response()->json(['client_id' => 'abc', 'redirect_uris' => 'nope'], 201),
     ]);
-    Event::assertNotDispatched(McpClientRegistered::class);
+    Event::assertNotDispatched(McpClientRegisteredEvent::class);
 });
 
 it('stringRedirectUris keeps only strings', function (): void {

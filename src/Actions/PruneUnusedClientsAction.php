@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Date;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\UnusedClientsPruneData;
-use Qiick\McpOAuth\Events\McpUnusedClientsPruned;
+use Qiick\McpOAuth\Events\McpUnusedClientsPrunedEvent;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 
@@ -71,7 +71,7 @@ final class PruneUnusedClientsAction
             $prunedClientCount += $this->deleteIfStillUnused($clientId) ? 1 : 0;
         }
 
-        $this->events->dispatch(new McpUnusedClientsPruned($prunedClientCount, $cutoff->toIso8601String()));
+        $this->events->dispatch(new McpUnusedClientsPrunedEvent($prunedClientCount, $cutoff->toIso8601String()));
 
         return new UnusedClientsPruneData($prunedClientCount, $cutoff->toDateTimeImmutable());
     }

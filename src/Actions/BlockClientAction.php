@@ -9,7 +9,7 @@ use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Contracts\GrantStore;
-use Qiick\McpOAuth\Events\McpClientBlocked;
+use Qiick\McpOAuth\Events\McpClientBlockedEvent;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 
@@ -20,7 +20,7 @@ use Qiick\McpOAuth\Models\OAuthClientMetadata;
  * product's GrantStore, and every access token, refresh token and auth code
  * it holds revoked. The next consent, token request and `/mcp` call fail.
  *
- * Dispatches {@see McpClientBlocked} after the commit.
+ * Dispatches {@see McpClientBlockedEvent} after the commit.
  */
 final class BlockClientAction
 {
@@ -53,6 +53,6 @@ final class BlockClientAction
             $this->auditLogger->record('oauth_client_blocked', $actor, null, ['client_id' => $clientId]);
         });
 
-        event(new McpClientBlocked($clientId, $actorIdentifier));
+        event(new McpClientBlockedEvent($clientId, $actorIdentifier));
     }
 }
