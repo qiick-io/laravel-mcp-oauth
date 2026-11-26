@@ -8,6 +8,7 @@ use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Events\Dispatcher;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
+use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Events\McpOAuthDisabled;
 use Qiick\McpOAuth\Events\McpOAuthEnabled;
 use Qiick\McpOAuth\Exceptions\McpOAuthCannotBeEnabledException;
@@ -33,6 +34,7 @@ final class SwitchMcpOAuthAction
     public function __construct(
         private readonly McpOAuthServer $mcpOAuthServer,
         private readonly Dispatcher $events,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     /**
@@ -47,6 +49,7 @@ final class SwitchMcpOAuthAction
         }
 
         $persist($isEnabled);
+        $this->auditLogger->record($isEnabled ? 'mcp_oauth_enabled' : 'mcp_oauth_disabled', $actor, null, []);
 
         $actorIdentifier = $actor === null ? null : PassportUserIdentifier::of($actor);
         $this->events->dispatch($isEnabled ? new McpOAuthEnabled($actorIdentifier) : new McpOAuthDisabled($actorIdentifier));

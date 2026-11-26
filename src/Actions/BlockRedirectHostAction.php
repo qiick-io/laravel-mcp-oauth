@@ -10,6 +10,7 @@ use Illuminate\Support\Collection;
 use InvalidArgumentException;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
+use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Events\McpRedirectHostBlocked;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
@@ -37,6 +38,7 @@ final class BlockRedirectHostAction
         private readonly RedirectUriGuard $redirectUriGuard,
         private readonly BlockClientAction $blockClientAction,
         private readonly ConfigRepository $config,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     /**
@@ -46,12 +48,19 @@ final class BlockRedirectHostAction
     {
         $normalizedHost = $this->redirectUriGuard->normalizeHost($host);
 
-        $blockedHost = OAuthBlockedRedirectHost::query()->firstOrCreate(['host' => $normalizedHost], [
-            'host_original' => $host,
-            'match_mode' => $isSubdomainMatched ? 'host_and_subdomains' : OAuthBlockedRedirectHost::MATCH_MODE_EXACT,
-            'reason' => $reason,
-            'created_by' => $actor?->getAuthIdentifier(),
-        ]);
+        // One short transaction for the row and its audit entry (design §8.2).
+        /** @var OAuthBlockedRedirectHost $blockedHost Laravel 12 types transaction() as mixed */
+        $blockedHost = OAuthBlockedRedirectHost::query()->getConnection()->transaction(function () use ($normalizedHost, $host, $actor, $isSubdomainMatched, $reason): OAuthBlockedRedirectHost {
+            $blockedHost = OAuthBlockedRedirectHost::query()->firstOrCreate(['host' => $normalizedHost], [
+                'host_original' => $host,
+                'match_mode' => $isSubdomainMatched ? 'host_and_subdomains' : OAuthBlockedRedirectHost::MATCH_MODE_EXACT,
+                'reason' => $reason,
+                'created_by' => $actor?->getAuthIdentifier(),
+            ]);
+            $this->auditLogger->record('oauth_redirect_host_blocked', $actor, null, ['host' => $normalizedHost, 'match_mode' => $blockedHost->match_mode]);
+
+            return $blockedHost;
+        });
 
         event(new McpRedirectHostBlocked($normalizedHost, $actor === null ? null : PassportUserIdentifier::of($actor)));
 

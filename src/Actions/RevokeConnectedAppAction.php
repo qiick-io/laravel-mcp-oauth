@@ -7,6 +7,7 @@ namespace Qiick\McpOAuth\Actions;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Laravel\Passport\Passport;
+use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
@@ -38,6 +39,7 @@ final class RevokeConnectedAppAction
         private readonly GrantStore $grantStore,
         private readonly RevokeGrantTokensAction $revokeGrantTokens,
         private readonly ConfigRepository $config,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     public function execute(GrantRecord $grant, Authenticatable $user): void
@@ -55,7 +57,7 @@ final class RevokeConnectedAppAction
         // revoked together or not at all, and with them the product's grant
         // when its GrantStore writes on that connection. The event follows
         // the commit, so listeners never hear of a revoke that rolled back.
-        Passport::token()->getConnection()->transaction(function () use ($grant, $userIdentifier, $revokeStartedAt, $authCodeTtlMinutes): void {
+        Passport::token()->getConnection()->transaction(function () use ($grant, $user, $userIdentifier, $revokeStartedAt, $authCodeTtlMinutes): void {
             $this->grantStore->revoke($grant->id, $userIdentifier, RevocationReason::User);
             $this->revokeGrantTokens->execute($grant);
 
@@ -66,6 +68,8 @@ final class RevokeConnectedAppAction
                     ->where('expires_at', '<', $revokeStartedAt->copy()->addMinutes($authCodeTtlMinutes))
                     ->update(['revoked' => true]);
             }
+
+            $this->auditLogger->record('oauth_grant_revoked', $user, $grant->id, ['client_id' => $grant->clientId, 'reason' => RevocationReason::User->value]);
         });
 
         event(new McpGrantRevoked($grant->id, $grant->clientId, $grant->userIdentifier, $userIdentifier, RevocationReason::User));

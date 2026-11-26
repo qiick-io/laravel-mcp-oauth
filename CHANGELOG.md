@@ -84,6 +84,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The package writes its audit entries through `AuditLogger` (design §3.1,
+  §4.3, §8.2, S78), ids and hosts only: `oauth_consent_approved` and
+  `oauth_consent_denied` (client and redirect host), `mcp_oauth_enabled` and
+  `mcp_oauth_disabled`, `oauth_client_blocked`, `oauth_redirect_host_blocked`
+  (in the short transaction with the block row), `oauth_redirect_host_unblocked`
+  and `oauth_grant_revoked` (Connected apps). Until the product binds its sink
+  a no-op logger takes them; `FakeAuditLogger` records them in tests.
 - `SwitchMcpOAuthAction` (design §4.3): the product's settings page switches
   OAuth on or off through it. Switching on is refused with
   `McpOAuthCannotBeEnabledException` (the reason to show) while the Passport

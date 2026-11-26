@@ -6,6 +6,7 @@ namespace Qiick\McpOAuth\Actions;
 
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Http\Request;
+use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Data\PendingAuthorizationRequestData;
 use Qiick\McpOAuth\Events\McpConsentDenied;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
@@ -24,6 +25,7 @@ final class DenyConsentAction
         private readonly ConsentPageService $consentPages,
         private readonly RecordConsentDecisionAction $recordConsentDecision,
         private readonly Dispatcher $events,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     public function execute(Request $request, PendingAuthorizationRequestData $pendingAuthorizationRequest): void
@@ -33,6 +35,10 @@ final class DenyConsentAction
         $redirectUri = $authorizationRequest->getRedirectUri() ?? $clientInfo->redirectUris[0];
 
         $this->recordConsentDecision->execute($request, $pendingAuthorizationRequest, $redirectUri, null, null);
+        $this->auditLogger->record('oauth_consent_denied', $pendingAuthorizationRequest->user, null, [
+            'client_id' => $clientInfo->id,
+            'redirect_host' => $clientInfo->redirectHost,
+        ]);
 
         $this->events->dispatch(new McpConsentDenied(
             clientId: $clientInfo->id,
