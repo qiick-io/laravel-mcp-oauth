@@ -7,6 +7,7 @@ namespace Qiick\McpOAuth\Actions;
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Support\Facades\Route;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Events\McpOAuthDisabled;
 use Qiick\McpOAuth\Events\McpOAuthEnabled;
@@ -67,6 +68,10 @@ final class SwitchMcpOAuthAction
 
         if (! $this->mcpOAuthServer->hasAbsoluteIssuer()) {
             throw new McpOAuthCannotBeEnabledException('OAuth cannot be switched on until APP_URL is an absolute http(s) URL.');
+        }
+
+        if (! Route::has('passport.token')) {
+            throw new McpOAuthCannotBeEnabledException('OAuth cannot be switched on until McpOAuthRoutes::register() mounts its routes.');
         }
 
         $foreignRouteNames = McpOAuthRoutes::foreignPassportRouteNames();

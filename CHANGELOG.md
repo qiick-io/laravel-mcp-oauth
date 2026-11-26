@@ -84,6 +84,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `POST mcp-oauth-clients/prune-unused` (design §5.2): an admin runs the
+  unused-client prune now. Switching OAuth on is now also refused until
+  `McpOAuthRoutes::register()` has mounted the package's routes, and while
+  APP_URL has a path: the package serves its endpoints at the origin.
 - `McpOAuthEraser` implements fleet personal data erasure. It removes MCP
   credentials, unlinks blocked-host attribution, and anonymises consent
   evidence until its retention deadline. Dry runs and post-commit events share
