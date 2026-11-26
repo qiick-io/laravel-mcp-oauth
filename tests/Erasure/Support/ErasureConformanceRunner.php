@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Qiick\Standards\Erasure\Support;
 
 use Illuminate\Database\Connection;
-use Illuminate\Database\Schema\Builder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -1329,7 +1328,7 @@ final class ErasureConformanceRunner
      * @param  array<string, array<string, string>>  $classifiedTables
      * @param  list<string>  $schemaTableNames
      */
-    private function assertTablesClassified(string $prefix, Builder $schema, array $classifiedTables, array $schemaTableNames): void
+    private function assertTablesClassified(string $prefix, \Illuminate\Database\Schema\Builder $schema, array $classifiedTables, array $schemaTableNames): void
     {
         $unclassifiedTables = array_diff($schemaTableNames, array_keys($classifiedTables));
 
@@ -1532,7 +1531,7 @@ final class ErasureConformanceRunner
         return DB::connection($this->fixture->connectionName());
     }
 
-    private function schema(): Builder
+    private function schema(): \Illuminate\Database\Schema\Builder
     {
         return Schema::connection($this->fixture->connectionName());
     }
