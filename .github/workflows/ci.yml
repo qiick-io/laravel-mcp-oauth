@@ -113,9 +113,46 @@ jobs:
   # shards (scripts/mutate-per-class.sh): on a full run the four slowest
   # classes get a shard each and the rest share five; on a pull request only
   # the curated classes it changed run, dealt over all nine.
+  # The matrix's mutation plan, widened to the whole curated gate when a pull
+  # request changes what judges the mutants: the tests, the runner, the Pest
+  # configuration or the locked dependencies. A test edit that still passes
+  # can leave a mutant alive, and the runner must run to prove itself.
+  mutation-plan:
+    name: Mutation plan
+    needs: package-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      scope: ${{ steps.plan.outputs.scope }}
+      classes: ${{ steps.plan.outputs.classes }}
+    steps:
+      - name: Checkout
+        if: github.event_name == 'pull_request'
+        # actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Plan
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MATRIX_SCOPE: ${{ needs.package-matrix.outputs.mutate-scope }}
+          MATRIX_CLASSES: ${{ needs.package-matrix.outputs.mutate-classes }}
+        run: |
+          scope="${MATRIX_SCOPE}"
+          if [ "${EVENT_NAME}" = pull_request ] && git diff --name-only "${BASE_SHA}...${HEAD_SHA}" | grep -qE '^(tests/|scripts/mutate-per-class\.sh$|phpunit\.xml(\.dist)?$|composer\.(json|lock)$)'; then
+            scope=all
+          fi
+          echo "scope=${scope}" >> "${GITHUB_OUTPUT}"
+          echo "classes=${MATRIX_CLASSES}" >> "${GITHUB_OUTPUT}"
+          echo "Mutation scope: ${scope}"
+
   mutation-shards:
     name: Mutation (shard ${{ matrix.shard }}/9)
-    needs: package-matrix
+    needs: [package-matrix, mutation-plan]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -124,12 +161,12 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     steps:
       - name: Checkout
-        if: needs.package-matrix.outputs.mutate-scope == 'all' || needs.package-matrix.outputs.mutate-classes != '[]'
+        if: needs.mutation-plan.outputs.scope == 'all' || needs.mutation-plan.outputs.classes != '[]'
         # actions/checkout@v4.2.2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup PHP
-        if: needs.package-matrix.outputs.mutate-scope == 'all' || needs.package-matrix.outputs.mutate-classes != '[]'
+        if: needs.mutation-plan.outputs.scope == 'all' || needs.mutation-plan.outputs.classes != '[]'
         # shivammathur/setup-php@2.40.0
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
@@ -140,14 +177,14 @@ jobs:
           tools: composer:v2
 
       - name: Install dependencies
-        if: needs.package-matrix.outputs.mutate-scope == 'all' || needs.package-matrix.outputs.mutate-classes != '[]'
+        if: needs.mutation-plan.outputs.scope == 'all' || needs.mutation-plan.outputs.classes != '[]'
         run: composer install --no-interaction --prefer-dist
 
       - name: Pest mutate per class
-        if: needs.package-matrix.outputs.mutate-scope == 'all' || needs.package-matrix.outputs.mutate-classes != '[]'
+        if: needs.mutation-plan.outputs.scope == 'all' || needs.mutation-plan.outputs.classes != '[]'
         env:
-          MUTATE_SCOPE: ${{ needs.package-matrix.outputs.mutate-scope }}
-          MUTATE_CLASSES: ${{ needs.package-matrix.outputs.mutate-classes }}
+          MUTATE_SCOPE: ${{ needs.mutation-plan.outputs.scope }}
+          MUTATE_CLASSES: ${{ needs.mutation-plan.outputs.classes }}
           MUTATE_SHARD: ${{ matrix.shard }}
           MUTATE_SHARDS: 9
         run: bash scripts/mutate-per-class.sh
@@ -231,6 +268,10 @@ jobs:
   # of the shared matrix (design §11.3): token, refresh, revocation and consent
   # queries differ by dialect (MySQL refuses an UPDATE whose subquery reads the
   # same table, error 1093). SQLite runs in the test matrix and the erasure job.
+  # On every pull request that is not docs only, not on the matrix's
+  # `run-databases`: this package's transactions, row locks and deletes live in
+  # src/Actions, src/Bridge and src/Erasure, which the shared path rules do not
+  # count as database code.
   databases:
     name: Pest on ${{ matrix.database.name }}
     needs: package-matrix
@@ -244,7 +285,7 @@ jobs:
     services:
       database:
         # An empty image starts no container on a pull request that does not need it.
-        image: ${{ needs.package-matrix.outputs.run-databases == 'true' && matrix.database.image || '' }}
+        image: ${{ needs.package-matrix.outputs.docs-only != 'true' && matrix.database.image || '' }}
         env: ${{ matrix.database.environment }}
         ports:
           - ${{ matrix.database.port }}:${{ matrix.database.port }}
@@ -258,12 +299,12 @@ jobs:
       DB_PASSWORD: ${{ matrix.database.password }}
     steps:
       - name: Checkout
-        if: needs.package-matrix.outputs.run-databases == 'true'
+        if: needs.package-matrix.outputs.docs-only != 'true'
         # actions/checkout@v4.2.2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup PHP
-        if: needs.package-matrix.outputs.run-databases == 'true'
+        if: needs.package-matrix.outputs.docs-only != 'true'
         # shivammathur/setup-php@2.40.0
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
@@ -273,7 +314,7 @@ jobs:
           tools: composer:v2
 
       - name: Install dependencies
-        if: needs.package-matrix.outputs.run-databases == 'true'
+        if: needs.package-matrix.outputs.docs-only != 'true'
         run: |
           composer require --dev --no-interaction --no-update "orchestra/testbench:^11.0"
           composer require --no-interaction --no-update \
@@ -289,10 +330,10 @@ jobs:
       # test product's grant table to this database.
       - run: node tests/Erasure/run.mjs
         name: Erasure conformance
-        if: needs.package-matrix.outputs.run-databases == 'true'
+        if: needs.package-matrix.outputs.docs-only != 'true'
 
       - name: Pest
-        if: needs.package-matrix.outputs.run-databases == 'true'
+        if: needs.package-matrix.outputs.docs-only != 'true'
         run: vendor/bin/pest
 
   # Always in full, also on a docs-only pull request: the standards check
@@ -366,7 +407,7 @@ jobs:
 
   # A failed nightly run opens an issue, so nobody has to watch it.
   nightly-failure:
-    needs: [package-matrix, tests, mutation, http-server, databases, erasure, no-dev-boot, standards]
+    needs: [package-matrix, mutation-plan, tests, mutation, http-server, databases, erasure, no-dev-boot, standards]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5

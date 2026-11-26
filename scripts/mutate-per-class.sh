@@ -13,6 +13,12 @@
 # (see the selection below). Without them, every selected class runs.
 set -euo pipefail
 
+# mapfile and empty arrays under set -u need Bash 4.4 or later (macOS ships 3.2).
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
+  echo "scripts/mutate-per-class.sh needs Bash 4.4 or later (found ${BASH_VERSION})." >&2
+  exit 1
+fi
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
@@ -88,6 +94,15 @@ MIN="${MUTATE_MIN:-95}"
 SHARD="${MUTATE_SHARD:-1}"
 SHARDS="${MUTATE_SHARDS:-1}"
 
+# Positive decimals only: inside (( )) a malformed value (09, 1/0) is an
+# arithmetic error that reads as false and would skip every class green.
+for shard_input in "${SHARD}" "${SHARDS}"; do
+  if [[ ! "${shard_input}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "MUTATE_SHARD and MUTATE_SHARDS must be positive integers (got ${shard_input})." >&2
+    exit 1
+  fi
+done
+
 DEDICATED_COUNT="${#DEDICATED_CLASSES[@]}"
 
 # Locally (one shard) every class runs; in CI, shards 1..DEDICATED_COUNT take
@@ -100,12 +115,18 @@ fi
 SCOPE="${MUTATE_SCOPE:-all}"
 
 if [[ "${SCOPE}" == changed ]]; then
+  # The list comes from the matrix: unset is a wiring error, not "nothing changed".
+  if [[ -z "${MUTATE_CLASSES+set}" ]]; then
+    echo "MUTATE_SCOPE=changed needs MUTATE_CLASSES (a JSON array of src/ paths)." >&2
+    exit 1
+  fi
+
   # The PR's changed paths as class names (src/Foo/Bar.php -> Qiick\McpOAuth\Foo\Bar);
   # a deleted path is not mutated.
   # Captured first: a failing node (a malformed list) stops the script under set -e.
   changed_class_names="$(node -e '
     const fs = require("node:fs");
-    const files = JSON.parse(process.env.MUTATE_CLASSES ?? "[]");
+    const files = JSON.parse(process.env.MUTATE_CLASSES);
     if (!Array.isArray(files) || files.some((file) => typeof file !== "string" || !/^src\/(?!Testing\/)[\w/]+\.php$/.test(file))) {
       throw new Error("MUTATE_CLASSES must be an array of package source paths");
     }
