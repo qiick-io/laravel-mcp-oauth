@@ -7,6 +7,7 @@ namespace Qiick\McpOAuth\Actions;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Date;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\RevokedRecordsPurgeData;
@@ -71,16 +72,21 @@ final class PurgeRevokedRecordsAction
 
     private function purgeClients(CarbonImmutable $cutoff, bool $isDryRun): int
     {
-        /** @var list<string> $expiredClientIds client ids are UUID strings */
-        $expiredClientIds = OAuthClientMetadata::query()->where('revoked_at', '<', $cutoff)->pluck('client_id')->all();
+        $expiredClients = OAuthClientMetadata::query()->where('revoked_at', '<', $cutoff);
+        $expiredCount = (clone $expiredClients)->count();
 
         if (! $isDryRun) {
-            foreach ($expiredClientIds as $clientId) {
-                $this->deleteClient->execute($clientId);
-            }
+            // A page at a time (F9): deleting behind the key cursor is safe.
+            $expiredClients->select(['id', 'client_id'])->chunkById(100, function (Collection $metadataRows): void {
+                foreach ($metadataRows as $metadataRow) {
+                    /** @var string $clientId client ids are UUID strings */
+                    $clientId = $metadataRow->getAttribute('client_id');
+                    $this->deleteClient->execute($clientId);
+                }
+            });
         }
 
-        return count($expiredClientIds);
+        return $expiredCount;
     }
 
     private function purgeConsentRecords(CarbonImmutable $now, int $retentionDays, bool $isDryRun): int
@@ -93,7 +99,10 @@ final class PurgeRevokedRecordsAction
             return $expiredCount;
         }
 
-        $expiredRecords->delete();
+        // A page of keys at a time (F9), so a backlog never locks the table.
+        $expiredRecords->select('id')->chunkById(100, static function (Collection $expiredPage): void {
+            OAuthConsentRecord::query()->whereKey($expiredPage->modelKeys())->delete();
+        });
 
         $openApprovals = OAuthConsentRecord::query()
             ->where('decision', 'approved')

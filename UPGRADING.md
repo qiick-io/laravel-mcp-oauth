@@ -11,6 +11,12 @@ Products must adopt with an exact `0.x` version constraint until `1.0.0`.
 
 ## Unreleased
 
+- The package now schedules `mcp-oauth:prune-unused-clients`,
+  `mcp-oauth:purge-revoked` and `mcp-oauth:prune-auth-code-exchanges` itself.
+  Remove your own `Schedule::command('mcp-oauth:…')` lines, or keep them and set
+  `MCP_OAUTH_RETENTION_SCHEDULE=false`; with both, each job runs twice.
+  Republish the config (`--tag=mcp-oauth-config`) to see the new
+  `retention.schedule` key; without it the default (on) applies.
 - `GrantRecord` has three optional fields, `revokedAt`, `revocationReason` and
   `metadata`: a `GrantStore` should fill the first two for revoked grants.
   `RevocationReason` gained `Security`: a `match` over it needs a default arm.

@@ -143,19 +143,24 @@ grant and every token bound to it, answering 204 to a JSON call and
 redirecting back otherwise. A grant that is not the user's own active one is a
 404.
 
-Schedule the retention jobs. `mcp-oauth:purge-revoked` deletes what was revoked
+The package schedules its retention jobs itself while `mcp-oauth.enabled` is on,
+on one server and never overlapping. `mcp-oauth:purge-revoked` deletes what was revoked
 more than `revoked_retention_days` (90) ago: clients the package registered,
 the product's grants (through `GrantStore::purgeRevokedBefore()`, which may keep
 rows under a legal hold) and consent records. `mcp-oauth:prune-unused-clients`
 deletes DCR clients nobody authorised within `unused_client_retention_hours`
-(24). Every command takes `--dry-run`. `mcp-oauth:check` reports whether OAuth
-is on and ready and exits 1 when it is on but not ready:
+(24). Both delete in chunks of 100. Every command takes `--dry-run`.
+`mcp-oauth:check` reports whether OAuth is on and ready and exits 1 when it is
+on but not ready. The schedule the package registers:
 
 ```php
-Schedule::command('mcp-oauth:prune-auth-code-exchanges')->daily()->onOneServer();
-Schedule::command('mcp-oauth:purge-revoked')->daily()->onOneServer();
-Schedule::command('mcp-oauth:prune-unused-clients')->hourly()->onOneServer();
+Schedule::command('mcp-oauth:prune-unused-clients')->hourly()->onOneServer()->withoutOverlapping();
+Schedule::command('mcp-oauth:purge-revoked')->daily()->onOneServer()->withoutOverlapping();
+Schedule::command('mcp-oauth:prune-auth-code-exchanges')->daily()->onOneServer()->withoutOverlapping();
 ```
+
+To schedule them differently, set `MCP_OAUTH_RETENTION_SCHEDULE=false` and add
+your own lines.
 
 ## Personal data erasure
 

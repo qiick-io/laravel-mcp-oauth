@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The package schedules its retention commands itself (fleet convention F9)
+  while `mcp-oauth.enabled` is on: `mcp-oauth:prune-unused-clients` hourly,
+  `mcp-oauth:purge-revoked` and `mcp-oauth:prune-auth-code-exchanges` daily, each
+  on one server and never overlapping. `mcp-oauth.retention.schedule`
+  (`MCP_OAUTH_RETENTION_SCHEDULE`, default true) turns that off.
+  `mcp-oauth:purge-revoked` deletes expired consent records and revoked clients
+  in chunks of 100.
+
 ### Fixed
 
 - `oauth_blocked_redirect_hosts.created_by` is indexed so deleting a user can

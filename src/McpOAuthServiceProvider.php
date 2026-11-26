@@ -6,6 +6,7 @@ namespace Qiick\McpOAuth;
 
 use Carbon\CarbonInterval;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Auth\StatefulGuard;
@@ -173,6 +174,30 @@ final class McpOAuthServiceProvider extends ServiceProvider
         });
     }
 
+    /**
+     * The retention commands on the product's scheduler (fleet convention
+     * F9): on one server and never overlapping, so a fleet of workers runs
+     * each once. Read when the scheduler is resolved, and only while
+     * `mcp-oauth.enabled` and `mcp-oauth.retention.schedule` are on: off
+     * schedules nothing (F3).
+     */
+    private function scheduleRetentionCommands(): void
+    {
+        $this->callAfterResolving(Schedule::class, function (Schedule $schedule): void {
+            $config = $this->app->make('config');
+            $isEnabled = filter_var($config->get('mcp-oauth.enabled'), FILTER_VALIDATE_BOOLEAN);
+            $shouldSchedule = filter_var($config->get('mcp-oauth.retention.schedule', true), FILTER_VALIDATE_BOOLEAN);
+
+            if (! $isEnabled || ! $shouldSchedule) {
+                return;
+            }
+
+            $schedule->command(PruneUnusedClientsCommand::class)->hourly()->onOneServer()->withoutOverlapping();
+            $schedule->command(PurgeRevokedRecordsCommand::class)->daily()->onOneServer()->withoutOverlapping();
+            $schedule->command(PruneAuthCodeExchangesCommand::class)->daily()->onOneServer()->withoutOverlapping();
+        });
+    }
+
     public function boot(): void
     {
         // Core side tables load with the package (same pattern as laravel-oidc).
@@ -204,6 +229,8 @@ final class McpOAuthServiceProvider extends ServiceProvider
                 $this->hasCheckedServedRoutes = true;
             }
         });
+
+        $this->scheduleRetentionCommands();
 
         if ($this->app->runningInConsole()) {
             $this->commands([
