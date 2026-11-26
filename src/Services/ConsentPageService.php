@@ -50,6 +50,7 @@ final class ConsentPageService
                 'name' => $clientInfo->name,
                 'redirectHost' => $clientInfo->redirectHost,
                 'nameIsSelfAsserted' => true,
+                'isRedirectLoopback' => $clientInfo->isRedirectLoopback,
             ],
             authToken: $parameters['authToken'],
             options: $consentOptions,
@@ -76,6 +77,9 @@ final class ConsentPageService
             name: $clientName,
             redirectHost: $this->redirectUriGuard->displayHostOf($redirectUri ?? $registeredRedirectUris[0]),
             redirectUris: $registeredRedirectUris,
+            // The callback this approval returns to, not the whole registration:
+            // a client with an https and a loopback callback still warns (S3).
+            isRedirectLoopback: $this->redirectUriGuard->isLoopbackRedirectUri($redirectUri ?? $registeredRedirectUris[0]),
         );
     }
 }

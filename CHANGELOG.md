@@ -75,6 +75,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `SwitchMcpOAuthAction` (design §4.3): the product's settings page switches
+  OAuth on or off through it. Switching on is refused with
+  `McpOAuthCannotBeEnabledException` (the reason to show) while the Passport
+  keys are missing or not one matching RSA pair of at least 2048 bits (what
+  the RS256 signer needs), APP_URL is not a valid issuer (http(s), a host, a
+  port from 1 to 65535 if any, no userinfo, query or fragment) or a foreign
+  `passport.*` route exists; either way the product's store is written through
+  a callback and `McpOAuthEnabled` / `McpOAuthDisabled` is dispatched with the
+  actor. Every write of the switch store must go through it.
+- The consent page's `client` carries `isRedirectLoopback` (S3): the callback
+  this request returns to is loopback http, so the page can warn that the code
+  goes to a program on the user's computer. `ClientInfo` gains the same flag,
+  and `RedirectUriGuard::isLoopbackRedirectUri()`,
+  `McpOAuthServer::hasAbsoluteIssuer()` (now a parsed check, which `isReady()`
+  also uses) and `McpOAuthServer::hasUsablePassportKeyPair()` are public.
 - Connected apps (design §5.2): `McpOAuthSettingsRoutes::register()` serves
   the signed-in user's active grants and revokes one with
   `RevokeConnectedAppAction` (grant with `RevocationReason::User`, then its

@@ -343,3 +343,89 @@ it('serves the revocation endpoint when revocation_enabled reads as true, or is 
     'yes' => ['yes'],
     'unset' => ['unset'],
 ]);
+
+it('accepts an issuer with a host, a port and a path', function (string $appUrl): void {
+    $server = makeServer(true, true);
+    config()->set('app.url', $appUrl);
+
+    expect($server->hasAbsoluteIssuer())->toBeTrue();
+})->with(['https://app.example', 'http://127.0.0.1:8000', 'https://app.example:65535', 'https://app.example:1', 'https://app.example/base', 'HTTPS://APP.EXAMPLE']);
+
+// --- A key pair Passport's signer can use (Codex review of #44) -----------------
+
+/**
+ * @param  array<string, int|string>  $keyOptions
+ * @return array{private: string, public: string}
+ */
+function generatedKeyPair(array $keyOptions = ['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]): array
+{
+    $privateKey = openssl_pkey_new($keyOptions);
+    assert($privateKey !== false);
+    openssl_pkey_export($privateKey, $privatePem);
+    $keyDetails = openssl_pkey_get_details($privateKey);
+    assert(is_array($keyDetails) && is_string($privatePem));
+
+    return ['private' => $privatePem, 'public' => (string) $keyDetails['key']];
+}
+
+it('accepts a matching RSA pair of at least 2048 bits, from env PEM with \n escapes or from files', function (string $source): void {
+    $server = makeServer(true, true);
+    $keyPair = generatedKeyPair();
+
+    if ($source === 'env') {
+        config()->set('passport.private_key', str_replace("\n", '\n', $keyPair['private']));
+        config()->set('passport.public_key', str_replace("\n", '\n', $keyPair['public']));
+    } else {
+        // Empty env keys count as unset: Passport falls back to the files.
+        config()->set(['passport.private_key' => '', 'passport.public_key' => '']);
+        $privatePath = Passport::keyPath('oauth-private.key');
+        $publicPath = Passport::keyPath('oauth-public.key');
+        @mkdir(dirname($privatePath), 0777, true);
+        file_put_contents($privatePath, $keyPair['private']);
+        file_put_contents($publicPath, $keyPair['public']);
+        chmod($privatePath, 0600);
+        chmod($publicPath, 0600);
+    }
+
+    try {
+        expect($server->hasUsablePassportKeyPair())->toBeTrue();
+    } finally {
+        if ($source === 'files') {
+            @unlink(Passport::keyPath('oauth-private.key'));
+            @unlink(Passport::keyPath('oauth-public.key'));
+        }
+    }
+})->with(['env', 'files']);
+
+it('refuses keys the signer cannot use', function (string $case): void {
+    $server = makeServer(true, true);
+    $keyPair = generatedKeyPair();
+    $keyPairs = [
+        'missing' => ['private' => '', 'public' => ''],
+        'the private key corrupt' => ['private' => 'not a key', 'public' => $keyPair['public']],
+        'the public key corrupt' => ['private' => $keyPair['private'], 'public' => 'not a key'],
+        'two different pairs' => ['private' => $keyPair['private'], 'public' => generatedKeyPair()['public']],
+        'an EC pair' => generatedKeyPair(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']),
+        'RSA under 2048 bits' => generatedKeyPair(['private_key_bits' => 1024, 'private_key_type' => OPENSSL_KEYTYPE_RSA]),
+    ];
+    config()->set('passport.private_key', $keyPairs[$case]['private']);
+    config()->set('passport.public_key', $keyPairs[$case]['public']);
+    Passport::loadKeysFrom(sys_get_temp_dir().'/mcp-oauth-no-keys-'.uniqid());
+
+    expect($server->hasUsablePassportKeyPair())->toBeFalse();
+})->with(['missing', 'the private key corrupt', 'the public key corrupt', 'two different pairs', 'an EC pair', 'RSA under 2048 bits']);
+
+it('refuses an issuer without an authority or with an unusable port', function (string $appUrl): void {
+    $server = makeServer(true, true);
+    config()->set('app.url', $appUrl);
+
+    expect($server->hasAbsoluteIssuer())->toBeFalse();
+})->with([
+    'no authority' => ['http:/path'],
+    'port 0' => ['https://app.example:0'],
+    'port above 65535' => ['https://app.example:65536'],
+    'a non-numeric port' => ['https://app.example:https'],
+    'a signed port' => ['https://app.example:+80'],
+    'a signed port, the digits in the path' => ['https://app.example:+80/base:80'],
+    'a port with a leading space' => ['https://app.example: 80'],
+]);

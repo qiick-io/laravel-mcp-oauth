@@ -87,6 +87,21 @@ before the package: every Bearer is an API key, and a 401 says
 `Bearer realm="mcp", error="invalid_token"`. With OAuth on, every 401 and 403
 points at the protected resource metadata built from `APP_URL`.
 
+The product's settings page switches OAuth on and off through
+`SwitchMcpOAuthAction`, which refuses to switch on (with a reason to show)
+while OAuth could not serve, and dispatches `McpOAuthEnabled` or
+`McpOAuthDisabled`. The product keeps its own store behind `AdminSwitch`, and
+every write to that store must go through the action (behind the product's
+admin permission and CSRF), or the rule can be bypassed:
+
+```php
+try {
+    $switchMcpOAuth->execute($request->boolean('enabled'), $request->user(), fn (bool $isEnabled) => $settings->setMcpOAuth($isEnabled));
+} catch (McpOAuthCannotBeEnabledException $exception) {
+    return back()->withErrors(['enabled' => $exception->getMessage()]);
+}
+```
+
 Mount the admin backend for MCP clients and blocked hosts inside the
 product's own admin group, naming the permission middleware every route
 needs. The routes stay up while OAuth is off, so an admin can still clean up:
