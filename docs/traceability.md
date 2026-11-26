@@ -24,9 +24,9 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 | S8 | Keys missing: non-key Bearer 503 on `/mcp`; API key still works | covered | `Isolated/McpDoorRouteTest` "answers 503 for an OAuth token while the keys are missing"; `Http/RealHttpFlowTest` step 7 |
 | S9 | Half-set env key pair counts as missing | covered | `Unit/McpOAuthServerTest` "treats a half-set env key pair as missing"; `Unit/McpOAuthServerMutationTest`; `Isolated/RetentionCommandsTest` "reports an incomplete env key pair" |
 | S10 | World-readable key file counts as missing (503) | covered | `Unit/McpOAuthServerTest` "treats world-readable key files as missing"; `Unit/McpOAuthServerMutationTest` mode tests |
-| S11 | Switch refuses to turn on without keys; unreadable store is off | covered (#44) | `Isolated/SwitchMcpOAuthTest`; `Unit/McpOAuthServerTest` "treats an unreadable admin switch store as off", "treats a throwing admin switch as off" |
+| S11 | Switch refuses to turn on without keys; unreadable store is off | covered | `Isolated/SwitchMcpOAuthTest`; `Unit/McpOAuthServerTest` "treats an unreadable admin switch store as off", "treats a throwing admin switch as off" |
 | S12 | Readiness reports `passport_keys` only while enabled | covered | `Unit/McpOAuthServerTest` "reports passport_keys only while OAuth is enabled" |
-| S13 | Issuer, resource and endpoints from `APP_URL`; `mcp.authorization_server` pinned | covered (#50) | `Isolated/DiscoveryRouteTest` "builds every URL from APP_URL, never from the Host header"; `Http/RealHttpFlowTest` step 1; `Feature/ServiceProviderTest` "pins laravel/mcp's authorization server to the issuer, unless the product set one" |
+| S13 | Issuer, resource and endpoints from `APP_URL`; `mcp.authorization_server` pinned | covered | `Isolated/DiscoveryRouteTest` "builds every URL from APP_URL, never from the Host header"; `Http/RealHttpFlowTest` step 1; `Feature/ServiceProviderTest` "pins laravel/mcp's authorization server to the issuer, unless the product set one" |
 | S14 | Root and nested discovery shadow laravel/mcp's | covered | `Isolated/DiscoveryRouteTest` "publishes … root and nested", "serves the nested authorization server document only for the MCP path" |
 | S15 | Metadata advertises only `mcp:use`, `code`, the two grants, `S256` | covered | `Isolated/DiscoveryRouteTest` (exact JSON); `Unit/McpOAuthServerTest` "builds the RFC 8414 and RFC 9728 documents" |
 | S16 | `resource` required and exact at authorize and token | covered | `Isolated/TokenEndpointRouteTest` "requires the resource to name this MCP endpoint on both grants"; `Unit/McpOAuthServerTest` "compares the resource path exactly" |
@@ -89,7 +89,7 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 | S73 | `/mcp` outside `web`: a session cookie never authenticates | covered | `Isolated/McpDoorRouteTest` "refuses a signed-in browser session without a Bearer, even on a route inside web" (a control route proves the session is live) |
 | S74 | Failure brake 429 before the per-key throttle | covered | `Isolated/McpDoorRouteTest` "answers 429 before reading the credential once an address has failed too often" |
 | S75 | Connected apps lists only the user's own active grants | covered | `Isolated/ConnectedAppsTest` (API keys are the product's) |
-| S76 | A user revoke refuses the next call and refresh, and revokes unexchanged codes | covered (#49) | `Isolated/ConnectedAppsTest`: the grant, its access and refresh tokens, and the codes it issued (codes issued before the revoke, while no newer grant is active); a newer consent's code and a code issued during the revoke survive |
+| S76 | A user revoke refuses the next call and refresh, and revokes unexchanged codes | covered | `Isolated/ConnectedAppsTest`: the grant, its access and refresh tokens, and the codes it issued (codes issued before the revoke, while no newer grant is active); a newer consent's code and a code issued during the revoke survive |
 | S77 | Revoke after losing AI access, and while OAuth is off | covered | `Isolated/ConnectedAppsTest` "lists … with OAuth off too" (losing access is the product's) |
 | S78 | Audit entries name client and redirect host | product | `AuditLogger`; the events carry the ids and hosts (`Unit/Events/McpEventsCarryUuidsOnlyTest`) |
 | S79 | Token material never in logs, exceptions, events, audit | covered | `Isolated/SecretsStayOutOfLogsTest` (every log line and package event across exchange, rotation, reuse, replay and revocation); `Unit/Events/McpEventsCarryUuidsOnlyTest`; token error bodies are fixed strings (`Unit/Services/TokenErrorResponseServiceTest`) |
@@ -98,4 +98,8 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 
 ## Open items
 
-- **First approval against the unused-client prune (from the review of #45): closed by #54.** The approval now holds the client's metadata row lock, the one the prune takes before deleting: a prune that commits first leaves the approval refused, and an approval that commits first keeps the client. `Isolated/FirstApprovalPruneRaceTest` covers both orders with two database sessions on PostgreSQL, MySQL and MariaDB.
+None.
+
+## Closed since the first pass
+
+- **First approval against the unused-client prune (from the review of #45): closed.** The approval now holds the client's metadata row lock, the one the prune takes before deleting: a prune that commits first leaves the approval refused, and an approval that commits first keeps the client. `Isolated/FirstApprovalPruneRaceTest` covers both orders with two database sessions on PostgreSQL, MySQL and MariaDB.
