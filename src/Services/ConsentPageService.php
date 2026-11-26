@@ -74,24 +74,27 @@ final class ConsentPageService
         /** @var string $clientName */
         $clientName = $client->getAttribute('name');
 
-        $metadata = OAuthClientMetadata::query()->where('client_id', $clientId)->first();
-        /** @var list<string> $contacts */
-        $contacts = $metadata?->getAttribute('contacts') ?? [];
+        // Only package clients reach consent (ValidateAuthorizationRequestMiddleware), so the row exists.
+        /** @var array{registration_source: string, client_uri: ?string, logo_uri: ?string, policy_uri: ?string, tos_uri: ?string, contacts: ?list<string>, software_id: ?string, software_version: ?string, metadata_document_url: ?string} $registered */
+        $registered = OAuthClientMetadata::query()->where('client_id', $clientId)->firstOrFail()->only([
+            'registration_source', 'client_uri', 'logo_uri', 'policy_uri', 'tos_uri',
+            'contacts', 'software_id', 'software_version', 'metadata_document_url',
+        ]);
 
         return new ClientInfo(
             id: $clientId,
             name: $clientName,
             redirectHost: $this->redirectUriGuard->displayHostOf($redirectUri ?? $registeredRedirectUris[0]),
             redirectUris: $registeredRedirectUris,
-            registrationSource: self::stringOrNull($metadata?->getAttribute('registration_source')) ?? 'dcr',
-            clientUri: self::stringOrNull($metadata?->getAttribute('client_uri')),
-            logoUri: self::stringOrNull($metadata?->getAttribute('logo_uri')),
-            policyUri: self::stringOrNull($metadata?->getAttribute('policy_uri')),
-            tosUri: self::stringOrNull($metadata?->getAttribute('tos_uri')),
-            contacts: $contacts,
-            softwareId: self::stringOrNull($metadata?->getAttribute('software_id')),
-            softwareVersion: self::stringOrNull($metadata?->getAttribute('software_version')),
-            metadataDocumentUrl: self::stringOrNull($metadata?->getAttribute('metadata_document_url')),
+            registrationSource: $registered['registration_source'],
+            clientUri: $registered['client_uri'],
+            logoUri: $registered['logo_uri'],
+            policyUri: $registered['policy_uri'],
+            tosUri: $registered['tos_uri'],
+            contacts: $registered['contacts'] ?? [],
+            softwareId: $registered['software_id'],
+            softwareVersion: $registered['software_version'],
+            metadataDocumentUrl: $registered['metadata_document_url'],
             // The callback this approval returns to, not the whole registration:
             // a client with an https and a loopback callback still warns (S3).
             isRedirectLoopback: $this->redirectUriGuard->isLoopbackRedirectUri($redirectUri ?? $registeredRedirectUris[0]),
@@ -127,10 +130,5 @@ final class ConsentPageService
         }
 
         return $advancedRows;
-    }
-
-    private static function stringOrNull(mixed $value): ?string
-    {
-        return is_string($value) && $value !== '' ? $value : null;
     }
 }
