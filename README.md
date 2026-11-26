@@ -124,7 +124,8 @@ Route::middleware(['web', 'auth'])->prefix('admin')->group(
 | `POST mcp-oauth-clients/blocked-hosts` | blocks a host (`match_mode` `exact` or, by default, with its subdomains) and every client that redirects there; a host already blocked keeps its first mode and reason |
 | `DELETE mcp-oauth-clients/blocked-hosts/{id}` | lifts a block; blocked clients stay revoked |
 
-Writes answer 204 to a JSON call and redirect back for a form or Inertia post.
+Writes answer 204 to a JSON call (the prune 200, with `prunedClientCount`) and
+redirect back for a form or Inertia post.
 Only clients the package registered are listed or blocked, never the product's
 own Passport clients.
 

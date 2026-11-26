@@ -118,7 +118,7 @@ it('refuses to switch on, with the reason, while OAuth could not serve', functio
     'APP_URL not absolute' => ['APP_URL not absolute', 'OAuth cannot be switched on until APP_URL is an absolute http(s) URL.'],
     'keys that are not keys' => ['keys that are not keys', 'OAuth cannot be switched on: the Passport keys are not a usable matching pair.'],
     'keys from two different pairs' => ['keys from two different pairs', 'OAuth cannot be switched on: the Passport keys are not a usable matching pair.'],
-    'a foreign Passport route' => ['a foreign Passport route', 'OAuth cannot be switched on beside another Passport server: passport.device.'],
+    'a foreign Passport route' => ['a foreign Passport route', 'OAuth cannot be switched on until McpOAuthRoutes::register() alone serves the OAuth routes at the origin: foreign Passport route passport.device.'],
 ]);
 
 it('refuses to switch on while APP_URL is not a usable issuer', function (string $appUrl): void {

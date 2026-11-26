@@ -351,7 +351,18 @@ it('reports a ready server with its issuer, resource and key source', function (
         ->expectsOutputToContain('Passport keys: env, usable')
         ->expectsOutputToContain('Foreign Passport routes: none')
         ->expectsOutputToContain('laravel/mcp OAuth routes: none')
+        ->expectsOutputToContain('Package routes: served at the origin')
         ->assertSuccessful();
+});
+
+it('fails when OAuth is on but the package routes are not served at the origin (Codex review of #62)', function (): void {
+    $this->enableOAuth();
+    Route::prefix('api')->group(static fn () => McpOAuthRoutes::register());
+    Route::getRoutes()->refreshNameLookups();
+
+    $this->artisan('mcp-oauth:check')
+        ->expectsOutputToContain("Package routes: passport.token is not the package's POST /oauth/token")
+        ->assertFailed();
 });
 
 it('fails when OAuth is on but the Passport keys are missing', function (): void {

@@ -168,6 +168,50 @@ final class McpOAuthRoutes
     }
 
     /**
+     * What stops the package from serving the endpoints its metadata
+     * advertises (design §4.3), for switch-on and `mcp-oauth:check`: each
+     * package route must be mounted, at its root URI, for its method, on the
+     * package's controller. A name alone proves nothing: a prefixed mount or
+     * a foreign handler under the same name would pass it. Also lists foreign
+     * `passport.*` routes and laravel/mcp's own OAuth routes.
+     *
+     * @return list<string>
+     */
+    public static function servingProblems(): array
+    {
+        $expectedRoutes = [
+            'passport.token' => ['POST', 'oauth/token', IssueTokenController::class],
+            'mcp.oauth.register' => ['POST', 'oauth/register', RegisterClientController::class],
+            'passport.authorizations.authorize' => ['GET', 'oauth/authorize', AuthorizeClientController::class],
+            'passport.authorizations.approve' => ['POST', 'oauth/authorize', ApproveClientController::class],
+            'passport.authorizations.deny' => ['DELETE', 'oauth/authorize', DenyClientController::class],
+            'mcp.oauth.authorization-server' => ['GET', '.well-known/oauth-authorization-server', AuthorizationServerMetadataController::class],
+            'mcp.oauth.protected-resource' => ['GET', '.well-known/oauth-protected-resource', ProtectedResourceMetadataController::class],
+        ];
+        $problems = [];
+
+        foreach ($expectedRoutes as $routeName => [$method, $uri, $controllerClass]) {
+            $route = Route::getRoutes()->getByName($routeName);
+
+            if ($route === null) {
+                $problems[] = "{$routeName} is not mounted";
+            } elseif ($route->uri() !== $uri || ! in_array($method, $route->methods(), true) || $route->getControllerClass() !== $controllerClass) {
+                $problems[] = "{$routeName} is not the package's {$method} /{$uri}";
+            }
+        }
+
+        foreach (self::foreignPassportRouteNames() as $routeName) {
+            $problems[] = "foreign Passport route {$routeName}";
+        }
+
+        foreach (self::laravelMcpOAuthRouteNames() as $routeName) {
+            $problems[] = "laravel/mcp OAuth route {$routeName}";
+        }
+
+        return $problems;
+    }
+
+    /**
      * laravel/mcp's own OAuth routes (`Mcp::oauthRoutes()`): its nested
      * discovery documents build every endpoint and the resource from the
      * request Host, and its registration has none of the package's guards.
