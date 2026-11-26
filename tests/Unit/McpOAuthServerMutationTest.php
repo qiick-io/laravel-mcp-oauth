@@ -22,13 +22,13 @@ function mutationServer(
 }
 
 it('freezes the wire grant and challenge constants', function (): void {
-    expect(McpOAuthServer::SUPPORTED_GRANT_TYPES)->toBe(['authorization_code', 'refresh_token'])
-        ->and(McpOAuthServer::SUPPORTED_GRANT_TYPES)->toHaveCount(2)
-        ->and(McpOAuthServer::SUPPORTED_CODE_CHALLENGE_METHODS)->toBe(['S256'])
-        ->and(McpOAuthServer::SUPPORTED_CODE_CHALLENGE_METHODS)->toHaveCount(1)
-        ->and(McpOAuthServer::SUPPORTED_GRANT_TYPES[0])->toBe('authorization_code')
-        ->and(McpOAuthServer::SUPPORTED_GRANT_TYPES[1])->toBe('refresh_token')
-        ->and(McpOAuthServer::SUPPORTED_CODE_CHALLENGE_METHODS[0])->toBe('S256')
+    expect(McpOAuthServer::supportedGrantTypes())->toBe(['authorization_code', 'refresh_token'])
+        ->and(McpOAuthServer::supportedGrantTypes())->toHaveCount(2)
+        ->and(McpOAuthServer::supportedCodeChallengeMethods())->toBe(['S256'])
+        ->and(McpOAuthServer::supportedCodeChallengeMethods())->toHaveCount(1)
+        ->and(McpOAuthServer::supportedGrantTypes()[0])->toBe('authorization_code')
+        ->and(McpOAuthServer::supportedGrantTypes()[1])->toBe('refresh_token')
+        ->and(McpOAuthServer::supportedCodeChallengeMethods()[0])->toBe('S256')
         ->and(array_keys(mutationServer()->scopeDescriptions()))->toBe(['mcp:use']);
 });
 
