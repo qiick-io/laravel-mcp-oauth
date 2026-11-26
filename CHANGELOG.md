@@ -92,9 +92,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ConsentOptions::$consentVersion`) and `locale`, all written to the consent
   record; `GrantRecord` carries `revokedAt`, `revocationReason` and
   `metadata`; `ConsentPage` and the Inertia props carry an `advanced` section;
-  `McpConsentApproved` carries `resource`; `RevocationReason::Security`; and
-  the `ClientMetadataDocumentFetcher` contract for CIMD (not bound while CIMD
-  is off). DCR writes the MCP `spec_revision` on each client row (M8).
+  `McpConsentApproved` carries `resource`; and `RevocationReason::Security`.
+  The consent version, locale and resource recorded for an approval or a
+  denial are those of the rendered page; an approval after the consent
+  version changed answers 409. The Advanced section shows the resource and
+  the callback the approval returns to. An internal
+  `ClientMetadataDocumentFetcher` prepares CIMD (not bound while CIMD is
+  off). DCR writes the MCP `spec_revision` on each client row (M8).
 - `McpOAuthEraser` implements fleet personal data erasure. It removes MCP
   credentials, unlinks blocked-host attribution, and anonymises consent
   evidence until its retention deadline. Dry runs and post-commit events share

@@ -4,14 +4,17 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
-use Qiick\McpOAuth\Contracts\ClientMetadataDocumentFetcher;
+use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Data\ConsentDecision;
 use Qiick\McpOAuth\Data\ConsentOptions;
 use Qiick\McpOAuth\Data\RevocationReason;
 use Qiick\McpOAuth\Events\McpConsentApproved;
+use Qiick\McpOAuth\Internal\ClientMetadataDocumentFetcher;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
+use Qiick\McpOAuth\Services\PendingAuthorizationRequestService;
+use Qiick\McpOAuth\Testing\FakeConsentProvider;
 use Qiick\McpOAuth\Testing\FakeGrantStore;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 
@@ -80,6 +83,8 @@ it('gives the product every registered client field, and the page an advanced se
         ->and($page->json('props.advanced'))->toBe([
             ['label' => 'Client ID', 'value' => (string) $client->getKey()],
             ['label' => 'Registered through', 'value' => 'dcr'],
+            ['label' => 'Resource', 'value' => AuthorizeFlowTestCase::RESOURCE],
+            ['label' => 'Returns to', 'value' => 'https://app.example/callback'],
             ['label' => 'Callbacks', 'value' => 'https://app.example/callback, https://app.example/second'],
             ['label' => 'Website', 'value' => 'https://app.example'],
             ['label' => 'Terms', 'value' => 'https://app.example/terms'],
@@ -95,7 +100,7 @@ it('leaves out the advanced rows a client did not register', function (): void {
 
     $page = $this->actingAs($this->createUser())->get($this->authorizeUrl($client), ['X-Inertia' => 'true'])->assertOk();
 
-    expect(array_column($page->json('props.advanced'), 'label'))->toBe(['Client ID', 'Registered through', 'Callbacks']);
+    expect(array_column($page->json('props.advanced'), 'label'))->toBe(['Client ID', 'Registered through', 'Resource', 'Returns to', 'Callbacks']);
 });
 
 it('tells when and why a grant was revoked', function (): void {
@@ -113,7 +118,127 @@ it('tells when and why a grant was revoked', function (): void {
         ->and($revokedGrant?->revocationReason)->toBe(RevocationReason::Security);
 });
 
-it('names security as a revocation reason and declares the CIMD fetcher contract', function (): void {
-    expect(RevocationReason::Security->value)->toBe('security')
-        ->and(interface_exists(ClientMetadataDocumentFetcher::class))->toBeTrue();
+it('names security as a revocation reason', function (): void {
+    expect(RevocationReason::Security->value)->toBe('security');
+});
+
+it('keeps the CIMD fetcher internal until its runtime proves the seam (Codex review of #59)', function (): void {
+    $fetcher = new ReflectionClass(ClientMetadataDocumentFetcher::class);
+
+    expect($fetcher->isInterface())->toBeTrue()
+        ->and((string) $fetcher->getDocComment())->toContain('@internal')->not->toContain('@api');
+});
+
+/**
+ * The default consent options with another consent text version.
+ */
+function consentOptionsWithVersion(?string $consentVersion): ConsentOptions
+{
+    $defaults = AuthorizeFlowTestCase::defaultConsentOptions();
+
+    return new ConsentOptions(
+        scopes: $defaults->scopes,
+        roles: $defaults->roles,
+        resources: $defaults->resources,
+        resourcesRequired: $defaults->resourcesRequired,
+        canGrant: true,
+        consentVersion: $consentVersion,
+    );
+}
+
+it('records the version and locale of the page the user saw, not those of the submission (Codex review of #59)', function (): void {
+    $this->enableOAuth(consentOptionsWithVersion('2026-11'));
+    app()->setLocale('it');
+    $client = $this->createClient();
+    $page = $this->actingAs($this->createUser())->get($this->authorizeUrl($client), ['X-Inertia' => 'true'])->assertOk();
+
+    app()->setLocale('de');
+    $this->post('/oauth/authorize', ['auth_token' => $page->json('props.authToken'), 'scopes' => ['mcp:read'], 'role' => 'editor', 'resources' => ['news']])->assertRedirect();
+
+    $decision = $this->grantStore()->replacedDecisions[0];
+    $consentRecord = OAuthConsentRecord::query()->sole();
+
+    expect($decision->locale)->toBe('it')
+        ->and($decision->consentVersion)->toBe('2026-11')
+        ->and($consentRecord->getAttribute('locale'))->toBe('it')
+        ->and($consentRecord->getAttribute('consent_version'))->toBe('2026-11');
+});
+
+it('refuses an approval once the consent text changed after the page was shown (Codex review of #59)', function (): void {
+    $this->enableOAuth(consentOptionsWithVersion('2026-11'));
+    $client = $this->createClient();
+    $page = $this->actingAs($this->createUser())->get($this->authorizeUrl($client), ['X-Inertia' => 'true'])->assertOk();
+
+    app()->instance(ConsentProvider::class, new FakeConsentProvider(consentOptionsWithVersion('2026-12')));
+    $this->post('/oauth/authorize', ['auth_token' => $page->json('props.authToken'), 'scopes' => ['mcp:read'], 'role' => 'editor', 'resources' => ['news']])
+        ->assertStatus(409);
+
+    expect($this->grantStore()->replacedDecisions)->toBe([])
+        ->and(OAuthConsentRecord::query()->count())->toBe(0)
+        ->and(session()->has('authRequest'))->toBeFalse();
+});
+
+it('records the version and locale of the page the user saw on a denial (Codex review of #59)', function (): void {
+    $this->enableOAuth(consentOptionsWithVersion('2026-11'));
+    app()->setLocale('it');
+    $client = $this->createClient();
+    $page = $this->actingAs($this->createUser())->get($this->authorizeUrl($client), ['X-Inertia' => 'true'])->assertOk();
+
+    app()->setLocale('de');
+    app()->instance(ConsentProvider::class, new FakeConsentProvider(consentOptionsWithVersion('2026-12')));
+    $this->delete('/oauth/authorize', ['auth_token' => $page->json('props.authToken')])->assertRedirect();
+
+    $consentRecord = OAuthConsentRecord::query()->sole();
+
+    expect($consentRecord->getAttribute('decision'))->toBe('denied')
+        ->and($consentRecord->getAttribute('consent_version'))->toBe('2026-11')
+        ->and($consentRecord->getAttribute('locale'))->toBe('it');
+});
+
+it('refuses a consent version or a locale longer than its column (Codex review of #59)', function (string $consentVersion, string $locale, string $message): void {
+    $this->enableOAuth(consentOptionsWithVersion($consentVersion));
+    app()->setLocale($locale);
+    $client = $this->createClient();
+    $this->withoutExceptionHandling();
+
+    expect(fn () => $this->actingAs($this->createUser())->get($this->authorizeUrl($client), ['X-Inertia' => 'true']))
+        ->toThrow(LogicException::class, $message);
+})->with([
+    'a version of 33 characters' => [str_repeat('v', 33), 'en', 'The consent version must be at most 32 characters.'],
+    'a locale of 17 characters' => ['2026-11', str_repeat('l', 17), 'The application locale must be at most 16 characters to be recorded with consent.'],
+]);
+
+it('records a consent version and a locale that fill their columns exactly', function (): void {
+    $this->enableOAuth(consentOptionsWithVersion(str_repeat('v', 32)));
+    app()->setLocale(str_repeat('l', 16));
+
+    $this->obtainAuthorizationCode($this->createClient());
+
+    expect(OAuthConsentRecord::query()->sole()->only(['consent_version', 'locale']))
+        ->toBe(['consent_version' => str_repeat('v', 32), 'locale' => str_repeat('l', 16)]);
+});
+
+it('refuses a decision without the record of the rendered page, or with one for another page (Codex review of #59)', function (Closure $tamper): void {
+    $this->enableOAuth();
+    $client = $this->createClient();
+    $page = $this->actingAs($this->createUser())->get($this->authorizeUrl($client), ['X-Inertia' => 'true'])->assertOk();
+    $tamper();
+
+    $this->delete('/oauth/authorize', ['auth_token' => $page->json('props.authToken')])->assertForbidden();
+
+    expect(OAuthConsentRecord::query()->count())->toBe(0)
+        ->and(session()->has('authRequest'))->toBeFalse();
+})->with([
+    'no record' => [static fn () => session()->forget(PendingAuthorizationRequestService::RENDERED_CONSENT_SESSION_KEY)],
+    'a record for another page' => [static fn () => session()->put(PendingAuthorizationRequestService::RENDERED_CONSENT_SESSION_KEY.'.authToken', 'another-page')],
+]);
+
+it('forgets the rendered page once the decision is recorded', function (): void {
+    $this->enableOAuth();
+    $client = $this->createClient();
+    $page = $this->actingAs($this->createUser())->get($this->authorizeUrl($client), ['X-Inertia' => 'true'])->assertOk();
+
+    $this->delete('/oauth/authorize', ['auth_token' => $page->json('props.authToken')])->assertRedirect();
+
+    expect(session()->has(PendingAuthorizationRequestService::RENDERED_CONSENT_SESSION_KEY))->toBeFalse();
 });

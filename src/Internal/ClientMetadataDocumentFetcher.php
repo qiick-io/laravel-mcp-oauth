@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Qiick\McpOAuth\Contracts;
+namespace Qiick\McpOAuth\Internal;
 
 /**
  * Fetches a Client ID Metadata Document (standards review S2): the JSON a
@@ -12,10 +12,12 @@ namespace Qiick\McpOAuth\Contracts;
  * `mcp-oauth.cimd.timeout_seconds`.
  *
  * Not bound and not called yet: CIMD stays off (`supportsClientIdMetadataDocuments()`
- * is false) until its handler lands. Declared now so the contract is frozen
- * before 1.0.
+ * is false) until its handler lands. Internal until that runtime proves the
+ * seam: the caller also needs the response's cache directives (ETag, expiry)
+ * and to tell a failed fetch from an invalid document (standards review S2,
+ * §2.2), which this shape cannot carry yet (Codex review of #59).
  *
- * @api
+ * @internal
  */
 interface ClientMetadataDocumentFetcher
 {

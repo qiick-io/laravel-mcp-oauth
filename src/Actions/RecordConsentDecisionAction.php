@@ -11,7 +11,6 @@ use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\PendingAuthorizationRequestData;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
-use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
 use Qiick\McpOAuth\RedirectUriGuard;
 
@@ -25,7 +24,6 @@ use Qiick\McpOAuth\RedirectUriGuard;
 final class RecordConsentDecisionAction
 {
     public function __construct(
-        private readonly McpOAuthServer $mcpOAuthServer,
         private readonly RedirectUriGuard $redirectUriGuard,
         private readonly ConfigRepository $config,
     ) {}
@@ -52,7 +50,7 @@ final class RecordConsentDecisionAction
             'decision' => $isDenied ? 'denied' : 'approved',
             'redirect_uri' => $redirectUri,
             'redirect_host' => $this->redirectUriGuard->displayHostOf($redirectUri),
-            'resource' => $this->mcpOAuthServer->resourceIdentifier(),
+            'resource' => $pendingAuthorizationRequest->renderedResource,
             // League scope entities JSON-serialise to their identifier.
             'requested_scopes' => $authorizationRequest->getScopes(),
             'granted_scopes' => $decision?->scopes,
@@ -60,8 +58,9 @@ final class RecordConsentDecisionAction
             'resources' => $decision?->resources,
             'all_resources' => $decision !== null && $decision->allResources,
             'attributes' => $decision?->attributes,
-            'consent_version' => $decision?->consentVersion,
-            'locale' => app()->getLocale(),
+            // What the rendered page showed, for an approval and a denial alike.
+            'consent_version' => $pendingAuthorizationRequest->renderedConsentVersion,
+            'locale' => $pendingAuthorizationRequest->renderedLocale,
             'ip_address' => $request->ip(),
             'user_agent' => $userAgent === null ? null : mb_strcut($userAgent, 0, 512),
             'retention_until' => $isDenied

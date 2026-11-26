@@ -9,6 +9,7 @@ use Qiick\McpOAuth\Actions\ApproveConsentAction;
 use Qiick\McpOAuth\Services\AuthorizationResponseService;
 use Qiick\McpOAuth\Services\PendingAuthorizationRequestService;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 /**
  * `POST oauth/authorize` (web, auth, verified; CSRF from the web group): the
@@ -26,7 +27,16 @@ final class ApproveClientController
     public function __invoke(Request $request): Response
     {
         $pendingAuthorizationRequest = $this->pendingAuthorizationRequests->peek($request);
-        $this->approveConsent->execute($request, $pendingAuthorizationRequest);
+
+        try {
+            $this->approveConsent->execute($request, $pendingAuthorizationRequest);
+        } catch (ConflictHttpException $consentTextChanged) {
+            // A stale page cannot be approved later either.
+            $this->pendingAuthorizationRequests->forget($request);
+
+            throw $consentTextChanged;
+        }
+
         $this->pendingAuthorizationRequests->forget($request);
 
         return $this->authorizationResponses->complete($request, $pendingAuthorizationRequest->authorizationRequest);
