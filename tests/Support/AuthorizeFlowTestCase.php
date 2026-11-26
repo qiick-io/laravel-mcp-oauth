@@ -207,7 +207,7 @@ class AuthorizeFlowTestCase extends PassportBootedTestCase
     /**
      * @param  array<string, mixed>  $overrides
      */
-    protected function authorizeUrl(Client $client, array $overrides = []): string
+    public function authorizeUrl(Client $client, array $overrides = []): string
     {
         return '/oauth/authorize?'.http_build_query($this->authorizeQuery($client, $overrides));
     }
