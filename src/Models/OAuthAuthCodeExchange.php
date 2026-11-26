@@ -38,7 +38,7 @@ final class OAuthAuthCodeExchange extends Model
     /**
      * @var list<string>
      */
-    protected $fillable = ['auth_code_id', 'grant_id', 'metadata'];
+    protected $fillable = ['auth_code_id', 'grant_id', 'user_identifier', 'metadata'];
 
     /**
      * `schema_version` is an int on every engine (PostgreSQL and MySQL drivers

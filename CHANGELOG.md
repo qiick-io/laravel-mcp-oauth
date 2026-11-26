@@ -75,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `McpOAuthEraser` implements fleet personal data erasure. It removes MCP
+  credentials, unlinks blocked-host attribution, and anonymises consent
+  evidence until its retention deadline. Dry runs and post-commit events share
+  the counts-only report.
 - Connected apps (design §5.2): `McpOAuthSettingsRoutes::register()` serves
   the signed-in user's active grants and revokes one with
   `RevokeConnectedAppAction` (grant with `RevocationReason::User`, then its

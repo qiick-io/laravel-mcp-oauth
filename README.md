@@ -137,6 +137,29 @@ Schedule::command('mcp-oauth:purge-revoked')->daily()->onOneServer();
 Schedule::command('mcp-oauth:prune-unused-clients')->hourly()->onOneServer();
 ```
 
+## Personal data erasure
+
+Resolve `Qiick\McpOAuth\Erasure\McpOAuthEraser` from the container and call
+`erase($userId, $userPublicId, $mode, $publicIds, $identifiers)` from the
+product's erasure orchestrator after it locks out the person and revokes their
+product-owned grants. Run this before deleting the user so credential rows
+and replay records can still be found. Pass `McpOAuthEraser::DELETE` or
+`McpOAuthEraser::ANONYMISE` for `$mode`.
+
+Both modes remove the person's MCP auth codes, code exchanges, access tokens
+and refresh tokens. They unlink the author of each affected redirect-host
+block and erase its notes while keeping the block active. Consent decisions
+remain as evidence with identifying fields scrubbed until `retention_until`.
+An open consent record starts its configured retention period at erasure.
+The scheduled `mcp-oauth:purge-revoked` job still removes expired evidence.
+
+The package requires its erasure stores to share a database connection so
+all writes can roll back together. Its stores are global, so supplying
+`organisationId` throws `OrganisationScopeUnsupportedException` before any
+writes. Use `dryRun: true` to preview the counts. A real run dispatches
+`Qiick\McpOAuth\Events\SubjectErasedEvent` after commit with the counts-only
+`ErasureReport`. The product owns the user row, grants and sessions.
+
 ## Threat model (short)
 
 | Threat | Mitigation |
@@ -172,16 +195,17 @@ and `mcp.custom_schemes`. Issuer is always `APP_URL`.
 composer test
 composer lint
 composer analyse
+node tests/Erasure/run.mjs
 bash scripts/mutate-per-class.sh   # per-class MSI ≥ 95 once targets land
 ```
 
 [docs/traceability.md](./docs/traceability.md) maps every design scenario
 (S1–S81) to the tests that prove it, and lists what is still open.
 
-CI: PHP 8.3/8.4/8.5 × Laravel 12/13 × lowest/stable, Pint, PHPStan max, Pest,
-`composer validate --strict`, `composer audit`, database engine jobs, real HTTP
-(`php -S`) once the `http` group exists, and qiick standards drift against
-app-ui `v0.12.0`.
+CI runs the PHP 8.3/8.4/8.5 × Laravel 12/13 × lowest/stable matrix, Pint,
+PHPStan max, Pest, Composer validation and audit, real HTTP tests, and qiick
+standards drift against app-ui `v0.15.0`. The fleet erasure suite runs on
+SQLite, PostgreSQL, MySQL and MariaDB.
 
 ## License
 
