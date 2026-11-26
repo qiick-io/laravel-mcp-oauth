@@ -35,6 +35,9 @@ final class HookedGrantStore implements GrantStore
     /** @var Closure(string): void|null runs before every revoke(), with the grant id */
     public ?Closure $beforeRevoke = null;
 
+    /** @var Closure(string): void|null runs once after the next revoke() wrote, with the grant id */
+    public ?Closure $afterNextRevoke = null;
+
     public function __construct(
         public readonly FakeGrantStore $grantStore,
     ) {}
@@ -94,6 +97,14 @@ final class HookedGrantStore implements GrantStore
         }
 
         $this->grantStore->revoke($grantId, $actorIdentifier, $reason);
+
+        // Once, after the write: a store on its own connection has committed,
+        // then the caller's transaction fails (its commit, say).
+        if ($this->afterNextRevoke !== null) {
+            $afterNextRevoke = $this->afterNextRevoke;
+            $this->afterNextRevoke = null;
+            $afterNextRevoke($grantId);
+        }
     }
 
     public function purgeRevokedBefore(\DateTimeImmutable $cutoff): int

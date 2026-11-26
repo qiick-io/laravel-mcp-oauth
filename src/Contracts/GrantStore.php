@@ -43,7 +43,10 @@ interface GrantStore
      * lock (Connected apps, RFC 7009). A store on that connection rolls back
      * with them; one that commits on its own is written only once everything
      * before it succeeded, so a failed audit never leaves a revoked grant
-     * without its entry.
+     * without its entry. If Passport's transaction then fails (its commit),
+     * the package writes the tokens and the entry again in a new one and
+     * reports the failure: a revoked grant is never un-revoked, the revoke
+     * completes forward. The same connection keeps all of it in one commit.
      */
     public function revoke(string $grantId, ?string $actorIdentifier, RevocationReason $reason): void;
 

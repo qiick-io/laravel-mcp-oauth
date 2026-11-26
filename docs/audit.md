@@ -19,7 +19,11 @@ before the change's event:
 - a grant revoke writes the product's `GrantStore` last, after the token
   changes and the entry, holding the client's row lock: a failing sink
   leaves the grant active even in a store that commits on its own, and two
-  concurrent revokes of one grant record one entry and one event.
+  concurrent revokes of one grant record one entry and one event. If
+  Passport's transaction fails after such a store committed (its commit),
+  the tokens and the entry are written again in a new transaction and the
+  failure is reported: the revoke completes forward. A `GrantStore` on
+  Passport's connection keeps all of it in one commit.
 
 | Change | Transaction on | Then dispatched |
 | --- | --- | --- |

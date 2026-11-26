@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth\Actions;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
@@ -118,46 +119,85 @@ final class RevokeTokenAction
         // grant is written last (AuditLogger): a failure before it leaves the
         // grant active, even in a GrantStore that commits on its own, so a
         // retry finds and records it. The event follows the commit.
-        /** @var array{grant: GrantRecord|null, revokedTokenCount: int}|null $revocation Laravel 12 types transaction() as mixed */
-        $revocation = Passport::token()->getConnection()->transaction(function () use ($accessToken, $refreshTokenPayload): ?array {
-            Passport::client()->newQuery()->whereKey($accessToken->getAttribute('client_id'))->lockForUpdate()->first();
+        $grantBeingRevoked = null;
 
-            if (! Passport::refreshToken()->newQuery()->whereKey($refreshTokenPayload['refresh_token_id'])->exists()) {
-                return null;
+        try {
+            /** @var array{grant: GrantRecord|null, revokedTokenCount: int}|null $revocation Laravel 12 types transaction() as mixed */
+            $revocation = Passport::token()->getConnection()->transaction(function () use ($accessToken, $refreshTokenPayload, &$grantBeingRevoked): ?array {
+                Passport::client()->newQuery()->whereKey($accessToken->getAttribute('client_id'))->lockForUpdate()->first();
+
+                if (! Passport::refreshToken()->newQuery()->whereKey($refreshTokenPayload['refresh_token_id'])->exists()) {
+                    return null;
+                }
+
+                $revokedTokenCount = $this->revokeFamilyTokens($accessToken);
+                $grant = $this->boundGrantOf($accessToken);
+
+                if ($grant !== null) {
+                    $this->recordGrantRevokedByClient($grant);
+                    $grantBeingRevoked = $grant;
+                    $this->grantStore->revoke($grant->id, null, RevocationReason::Client);
+                }
+
+                return ['grant' => $grant, 'revokedTokenCount' => $revokedTokenCount];
+            });
+        } catch (Throwable $transactionFailure) {
+            // A GrantStore on a connection of its own committed the revoke,
+            // then Passport's transaction failed (its commit): the grant cannot
+            // be un-revoked, so its family and its one entry are written again
+            // and the revoke completes. Anything else is rethrown untouched.
+            if ($grantBeingRevoked === null || $this->grantStore->activeFor($grantBeingRevoked->clientId, $grantBeingRevoked->userIdentifier)?->id === $grantBeingRevoked->id) {
+                throw $transactionFailure;
             }
 
-            $bindingColumn = GrantBindingColumn::from($this->config);
-            $familyAccessTokenIds = Passport::token()->newQuery()
-                ->where('client_id', $accessToken->getAttribute('client_id'))
-                ->where('user_id', $accessToken->getAttribute('user_id'))
-                ->where($bindingColumn, $accessToken->getAttribute($bindingColumn))
-                ->pluck('id')
-                ->all();
+            app(ExceptionHandler::class)->report($transactionFailure);
+            $revokedGrant = $grantBeingRevoked;
+            /** @var array{grant: GrantRecord, revokedTokenCount: int} $revocation */
+            $revocation = Passport::token()->getConnection()->transaction(function () use ($accessToken, $revokedGrant): array {
+                $revokedTokenCount = $this->revokeFamilyTokens($accessToken);
+                $this->recordGrantRevokedByClient($revokedGrant);
 
-            /** @var int $removedRefreshTokenCount */
-            $removedRefreshTokenCount = Passport::refreshToken()->newQuery()->whereIn('access_token_id', $familyAccessTokenIds)->delete();
-            $revokedTokenCount = $removedRefreshTokenCount
-                + Passport::token()->newQuery()->whereIn('id', $familyAccessTokenIds)->where('revoked', false)->update(['revoked' => true]);
-
-            $grant = $this->boundGrantOf($accessToken);
-
-            if ($grant !== null) {
-                $this->auditLogger->record('oauth_grant_revoked', null, $grant->id, [
-                    'client_id' => $grant->clientId,
-                    'redirect_host' => OAuthConsentRecord::redirectHostOfGrant($grant->id),
-                    'reason' => RevocationReason::Client->value,
-                ]);
-                $this->grantStore->revoke($grant->id, null, RevocationReason::Client);
-            }
-
-            return ['grant' => $grant, 'revokedTokenCount' => $revokedTokenCount];
-        });
+                return ['grant' => $revokedGrant, 'revokedTokenCount' => $revokedTokenCount];
+            });
+        }
 
         if ($revocation === null) {
             return;
         }
 
         $this->dispatchRevoked($accessToken, $revocation['grant'], 'refresh_token', $revocation['revokedTokenCount']);
+    }
+
+    /**
+     * Revokes every access token of the family (same client, user and grant
+     * binding) and removes its refresh tokens.
+     *
+     * @return int the tokens revoked or removed
+     */
+    private function revokeFamilyTokens(Token $accessToken): int
+    {
+        $bindingColumn = GrantBindingColumn::from($this->config);
+        $familyAccessTokenIds = Passport::token()->newQuery()
+            ->where('client_id', $accessToken->getAttribute('client_id'))
+            ->where('user_id', $accessToken->getAttribute('user_id'))
+            ->where($bindingColumn, $accessToken->getAttribute($bindingColumn))
+            ->pluck('id')
+            ->all();
+
+        /** @var int $removedRefreshTokenCount */
+        $removedRefreshTokenCount = Passport::refreshToken()->newQuery()->whereIn('access_token_id', $familyAccessTokenIds)->delete();
+
+        return $removedRefreshTokenCount
+            + Passport::token()->newQuery()->whereIn('id', $familyAccessTokenIds)->where('revoked', false)->update(['revoked' => true]);
+    }
+
+    private function recordGrantRevokedByClient(GrantRecord $grant): void
+    {
+        $this->auditLogger->record('oauth_grant_revoked', null, $grant->id, [
+            'client_id' => $grant->clientId,
+            'redirect_host' => OAuthConsentRecord::redirectHostOfGrant($grant->id),
+            'reason' => RevocationReason::Client->value,
+        ]);
     }
 
     private function revokeAccessToken(Client $client, string $token, ServerRequestInterface $psrRequest): void

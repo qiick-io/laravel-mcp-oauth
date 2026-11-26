@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
@@ -14,7 +15,9 @@ use Qiick\McpOAuth\Actions\RevokeConnectedAppAction;
 use Qiick\McpOAuth\Actions\SwitchMcpOAuthAction;
 use Qiick\McpOAuth\Actions\UnblockRedirectHostAction;
 use Qiick\McpOAuth\Contracts\AuditLogger;
+use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
+use Qiick\McpOAuth\Data\RevocationReason;
 use Qiick\McpOAuth\Events\McpClientBlocked;
 use Qiick\McpOAuth\Events\McpConsentApproved;
 use Qiick\McpOAuth\Events\McpConsentDenied;
@@ -29,7 +32,9 @@ use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
 use Qiick\McpOAuth\Testing\FakeAuditLogger;
+use Qiick\McpOAuth\Testing\FakeGrantStore;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
+use Qiick\McpOAuth\Tests\Support\HookedGrantStore;
 use Qiick\McpOAuth\Tests\Support\TestUser;
 
 uses(AuthorizeFlowTestCase::class);
@@ -303,6 +308,106 @@ it('takes the client row lock inside the revoke transaction, before any write (C
     // The locking read is the transaction's first statement (SQLite compiles
     // no FOR UPDATE; the other grammars quote identifiers their own way).
     expect($statementsInTransaction[0] ?? '')->toMatch('/^select \\* from .?oauth_clients.? where .?oauth_clients.?\\..?id.? = \\?/');
+})->with(['Connected apps', 'RFC 7009']);
+
+/**
+ * A product sink that writes on Passport's connection: its entry commits or
+ * rolls back with the change, as a database activity log would.
+ */
+function transactionalAuditLogger(FakeAuditLogger $recorded): AuditLogger
+{
+    return new class($recorded) implements AuditLogger
+    {
+        public function __construct(private readonly FakeAuditLogger $recorded) {}
+
+        public function record(string $event, ?Authenticatable $causer, ?string $grantId, array $properties): void
+        {
+            Passport::token()->getConnection()->afterCommit(fn () => $this->recorded->record($event, $causer, $grantId, $properties));
+        }
+    };
+}
+
+it('completes a revoke forward when the grant committed on its own connection and the Passport transaction then failed (Codex review of #60)', function (string $path): void {
+    Event::fake([McpGrantRevoked::class, McpTokenRevoked::class]);
+    $client = $this->createClient();
+    ['refresh_token' => $refreshToken, 'user_id' => $userIdentifier] = auditedTokensFor($this, $client);
+    $grant = $this->grantStore()->activeFor((string) $client->getKey(), $userIdentifier);
+    $hookedGrantStore = new HookedGrantStore($this->grantStore());
+    $hookedGrantStore->afterNextRevoke = static function (): never {
+        throw new RuntimeException('The Passport commit failed.');
+    };
+    app()->instance(GrantStore::class, $hookedGrantStore);
+    app()->instance(AuditLogger::class, transactionalAuditLogger($this->auditLogger));
+    Exceptions::fake();
+
+    match ($path) {
+        'Connected apps' => app(RevokeConnectedAppAction::class)->execute($grant, TestUser::query()->findOrFail($userIdentifier)),
+        'RFC 7009' => $this->withHeaders(['Accept' => 'application/json'])
+            ->post('/oauth/revoke', ['token' => $refreshToken, 'client_id' => (string) $client->getKey()])
+            ->assertOk(),
+    };
+
+    // The grant cannot be un-revoked, so its tokens and its one entry follow it.
+    expect($this->grantStore()->activeFor((string) $client->getKey(), $userIdentifier))->toBeNull()
+        ->and(Passport::token()->newQuery()->where('revoked', false)->count())->toBe(0)
+        // Connected apps marks refresh tokens revoked; RFC 7009 removes them.
+        ->and(Passport::refreshToken()->newQuery()->where('revoked', false)->count())->toBe(0)
+        ->and(array_column($this->auditLogger->entries, 'event'))->toBe(['oauth_consent_approved', 'oauth_grant_revoked']);
+    $path === 'Connected apps'
+        ? Event::assertDispatchedTimes(McpGrantRevoked::class, 1)
+        : Event::assertDispatchedTimes(McpTokenRevoked::class, 1);
+    Exceptions::assertReported(static fn (RuntimeException $exception): bool => $exception->getMessage() === 'The Passport commit failed.');
+})->with(['Connected apps', 'RFC 7009']);
+
+it('never completes forward a revoke that failed before its grant write, even once the grant went inactive meanwhile', function (): void {
+    $client = $this->createClient();
+    ['user' => $user] = $this->obtainAuthorizationCode($client);
+    $grant = $this->grantStore()->activeFor((string) $client->getKey(), (string) $user->getKey());
+    $grantStore = $this->grantStore();
+    // The sink fails while another request revokes the same grant.
+    app()->instance(AuditLogger::class, new class($grantStore, $grant) implements AuditLogger
+    {
+        public function __construct(private readonly FakeGrantStore $grantStore, private readonly GrantRecord $grant) {}
+
+        private bool $hasFailed = false;
+
+        public function record(string $event, ?Authenticatable $causer, ?string $grantId, array $properties): void
+        {
+            // Once: a forward completion would then succeed, and must not run.
+            if (! $this->hasFailed) {
+                $this->hasFailed = true;
+                $this->grantStore->revoke($this->grant->id, null, RevocationReason::User);
+
+                throw new RuntimeException('The audit sink is down.');
+            }
+        }
+    });
+
+    expect(fn () => app(RevokeConnectedAppAction::class)->execute($grant, $user))->toThrow(RuntimeException::class, 'The audit sink is down.');
+    expect(Passport::token()->newQuery()->where('revoked', true)->count())->toBe(0);
+});
+
+it('rethrows, with the grant still active, when the store fails before writing (Codex review of #60)', function (string $path): void {
+    $client = $this->createClient();
+    ['refresh_token' => $refreshToken, 'user_id' => $userIdentifier] = auditedTokensFor($this, $client);
+    $grant = $this->grantStore()->activeFor((string) $client->getKey(), $userIdentifier);
+    $hookedGrantStore = new HookedGrantStore($this->grantStore());
+    $hookedGrantStore->beforeRevoke = static function (): never {
+        throw new RuntimeException('The grant store is down.');
+    };
+    app()->instance(GrantStore::class, $hookedGrantStore);
+
+    match ($path) {
+        'Connected apps' => expect(fn () => app(RevokeConnectedAppAction::class)->execute($grant, TestUser::query()->findOrFail($userIdentifier)))
+            ->toThrow(RuntimeException::class, 'The grant store is down.'),
+        'RFC 7009' => $this->withHeaders(['Accept' => 'application/json'])
+            ->post('/oauth/revoke', ['token' => $refreshToken, 'client_id' => (string) $client->getKey()])
+            ->assertServerError(),
+    };
+
+    expect($this->grantStore()->activeFor((string) $client->getKey(), $userIdentifier)?->id)->toBe($grant?->id)
+        ->and(Passport::token()->newQuery()->where('revoked', true)->count())->toBe(0)
+        ->and(Passport::refreshToken()->newQuery()->count())->toBe(1);
 })->with(['Connected apps', 'RFC 7009']);
 
 // --- Mapping to the 1.5 activity log (standards review §5, S78) ----------------

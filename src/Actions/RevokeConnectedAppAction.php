@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Qiick\McpOAuth\Actions;
 
+use Carbon\CarbonInterface;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Contracts\GrantStore;
@@ -15,6 +17,7 @@ use Qiick\McpOAuth\Events\McpGrantRevoked;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
+use Throwable;
 
 /**
  * A user revokes an app from Connected apps (design §5.2): the grant is
@@ -62,33 +65,59 @@ final class RevokeConnectedAppAction
         // a GrantStore that commits on its own, and the revoke can be retried.
         // The event follows the commit, so listeners never hear of a revoke
         // that rolled back.
-        $isRevoked = Passport::token()->getConnection()->transaction(function () use ($grant, $user, $userIdentifier, $revokeStartedAt, $authCodeTtlMinutes): bool {
-            Passport::client()->newQuery()->whereKey($grant->clientId)->lockForUpdate()->first();
+        $isGrantWriteStarted = false;
 
-            if ($this->grantStore->activeFor($grant->clientId, $grant->userIdentifier)?->id !== $grant->id) {
-                return false;
+        try {
+            $isRevoked = Passport::token()->getConnection()->transaction(function () use ($grant, $user, $userIdentifier, $revokeStartedAt, $authCodeTtlMinutes, &$isGrantWriteStarted): bool {
+                Passport::client()->newQuery()->whereKey($grant->clientId)->lockForUpdate()->first();
+
+                if ($this->grantStore->activeFor($grant->clientId, $grant->userIdentifier)?->id !== $grant->id) {
+                    return false;
+                }
+
+                $this->revokeCredentialsAndRecord($grant, $user, $revokeStartedAt, $authCodeTtlMinutes);
+                $isGrantWriteStarted = true;
+                $this->grantStore->revoke($grant->id, $userIdentifier, RevocationReason::User);
+
+                return true;
+            });
+        } catch (Throwable $transactionFailure) {
+            // A GrantStore on a connection of its own committed the revoke,
+            // then Passport's transaction failed (its commit): the grant cannot
+            // be un-revoked, so its credentials and its one entry are written
+            // again and the revoke completes. Anything else is rethrown untouched.
+            if (! $isGrantWriteStarted || $this->grantStore->activeFor($grant->clientId, $grant->userIdentifier)?->id === $grant->id) {
+                throw $transactionFailure;
             }
 
-            $this->revokeGrantTokens->execute($grant);
-            // The pair's only active grant is going (replace() keeps one), so
-            // its unexchanged codes go too.
-            Passport::authCode()->newQuery()
-                ->where('client_id', $grant->clientId)
-                ->where('user_id', $grant->userIdentifier)
-                ->where('expires_at', '<', $revokeStartedAt->copy()->addMinutes($authCodeTtlMinutes))
-                ->update(['revoked' => true]);
-            $this->auditLogger->record('oauth_grant_revoked', $user, $grant->id, [
-                'client_id' => $grant->clientId,
-                'redirect_host' => OAuthConsentRecord::redirectHostOfGrant($grant->id),
-                'reason' => RevocationReason::User->value,
-            ]);
-            $this->grantStore->revoke($grant->id, $userIdentifier, RevocationReason::User);
-
-            return true;
-        });
+            app(ExceptionHandler::class)->report($transactionFailure);
+            Passport::token()->getConnection()->transaction(fn () => $this->revokeCredentialsAndRecord($grant, $user, $revokeStartedAt, $authCodeTtlMinutes));
+            $isRevoked = true;
+        }
 
         if ($isRevoked) {
             event(new McpGrantRevoked($grant->id, $grant->clientId, $grant->userIdentifier, $userIdentifier, RevocationReason::User));
         }
+    }
+
+    /**
+     * The grant's tokens and unexchanged codes, and its audit entry: every
+     * write of the revoke except the grant's own.
+     */
+    private function revokeCredentialsAndRecord(GrantRecord $grant, Authenticatable $user, CarbonInterface $revokeStartedAt, int $authCodeTtlMinutes): void
+    {
+        $this->revokeGrantTokens->execute($grant);
+        // The pair's only active grant is going (replace() keeps one), so
+        // its unexchanged codes go too.
+        Passport::authCode()->newQuery()
+            ->where('client_id', $grant->clientId)
+            ->where('user_id', $grant->userIdentifier)
+            ->where('expires_at', '<', $revokeStartedAt->copy()->addMinutes($authCodeTtlMinutes))
+            ->update(['revoked' => true]);
+        $this->auditLogger->record('oauth_grant_revoked', $user, $grant->id, [
+            'client_id' => $grant->clientId,
+            'redirect_host' => OAuthConsentRecord::redirectHostOfGrant($grant->id),
+            'reason' => RevocationReason::User->value,
+        ]);
     }
 }
