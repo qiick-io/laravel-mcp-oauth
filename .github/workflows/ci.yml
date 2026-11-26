@@ -295,13 +295,15 @@ jobs:
             "illuminate/support:^13.0"
           composer update --no-interaction --prefer-dist --with-all-dependencies
 
+      # Check the migrated package schema before the real HTTP tests add the
+      # test product's grant table to this database.
+      - run: node tests/Erasure/run.mjs
+
       # The whole suite, not only the schema tests: token, refresh, revocation
       # and consent queries differ by dialect (MySQL refuses an UPDATE whose
       # subquery reads the same table, error 1093).
       - name: Pest on ${{ matrix.engine }}
         run: vendor/bin/pest
-
-      - run: node tests/Erasure/run.mjs
 
     env:
       DB_CONNECTION: ${{ matrix.db_connection }}

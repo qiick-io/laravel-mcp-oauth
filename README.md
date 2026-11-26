@@ -192,10 +192,10 @@ and `mcp.custom_schemes`. Issuer is always `APP_URL`.
 ## Testing
 
 ```bash
+node tests/Erasure/run.mjs
 composer test
 composer lint
 composer analyse
-node tests/Erasure/run.mjs
 bash scripts/mutate-per-class.sh   # per-class MSI ≥ 95 once targets land
 ```
 
