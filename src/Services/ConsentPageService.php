@@ -141,7 +141,7 @@ final class ConsentPageService
     {
         $software = trim(($clientInfo->softwareId ?? '').' '.($clientInfo->softwareVersion ?? ''));
         $rows = [
-            'Client ID' => $clientInfo->id,
+            'Client ID' => $clientInfo->metadataDocumentUrl ?? $clientInfo->id,
             'Registered through' => $clientInfo->registrationSource,
             'Resource' => $resource,
             'Returns to' => $returnUri,

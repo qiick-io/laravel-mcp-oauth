@@ -10,9 +10,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
+use Qiick\McpOAuth\Exceptions\ClientMetadataUnavailableException;
 use Qiick\McpOAuth\McpOAuthServer;
-use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
+use Qiick\McpOAuth\Services\ClientMetadataRegistryService;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -24,10 +25,8 @@ use Symfony\Component\HttpFoundation\Response;
  *   clients, which league would let through); the challenge format
  *   (RFC 7636 §4.2) is league's check;
  * - the RFC 8707 `resource` names this server's MCP endpoint;
- * - the client exists, is not revoked, was registered by the package (its
- *   `oauth_client_metadata` row: a product's own Passport client never gets
- *   an MCP token that nothing binds) and none of its redirect hosts is
- *   blocked;
+ * - the client is registered by the package through DCR or CIMD, is active
+ *   and has no blocked redirect host. Passport only receives its internal UUID;
  * - `redirect_uri` equals one registered URI under
  *   {@see RedirectUriGuard::areExactlyEqual()}, or is omitted while the client
  *   has exactly one. League would accept another port on a loopback URI
@@ -36,7 +35,7 @@ use Symfony\Component\HttpFoundation\Response;
  *   strings, so a host-case or empty-query variant that passes here is still
  *   refused there (as `invalid_client`, without a redirect).
  *
- * Every refusal is a JSON 400 and never a redirect: the redirect URI is not
+ * Refusals are local JSON responses: the redirect URI is not
  * trusted yet, and RFC 6749 §4.1.2.1 forbids redirecting to an unvalidated
  * one. A repeated (array) parameter league reads is refused by league itself
  * as a JSON `invalid_request`. The requested scope is dropped (RFC 6749 §3.3):
@@ -49,6 +48,7 @@ final class ValidateAuthorizationRequestMiddleware
     public function __construct(
         private readonly McpOAuthServer $mcpOAuthServer,
         private readonly RedirectUriGuard $redirectUriGuard,
+        private readonly ClientMetadataRegistryService $metadataClients,
     ) {}
 
     /**
@@ -104,25 +104,41 @@ final class ValidateAuthorizationRequestMiddleware
             return self::oauthError('invalid_target', 'The resource parameter is required and must name this MCP endpoint.');
         }
 
-        $client = $this->activeClient($request->query('client_id'));
+        $clientId = $request->query('client_id');
 
-        if ($client === null
-            || ! OAuthClientMetadata::isRegisteredClient($client)
+        if (! is_string($clientId)) {
+            return self::oauthError('invalid_client', 'The client is unknown, revoked or blocked on this server.');
+        }
+
+        $isUuid = Str::isUuid($clientId);
+
+        try {
+            $client = $isUuid ? $this->activeClient($clientId) : $this->metadataClients->resolve($clientId, canRegister: true);
+        } catch (ClientMetadataUnavailableException) {
+            return self::oauthError('temporarily_unavailable', 'Client metadata is temporarily unavailable.', 503);
+        }
+
+        $resolvedClientId = $client?->getKey();
+
+        if ($client === null || ! is_string($resolvedClientId)
             || $this->redirectUriGuard->clientHasBlockedRedirectHost($client)) {
             return self::oauthError('invalid_client', 'The client is unknown, revoked or blocked on this server.');
         }
 
-        if (! $this->isRegisteredRedirectUri($client, $request->query('redirect_uri'))) {
+        if (! $this->isRegisteredRedirectUri($client, $request->query('redirect_uri'), ! $isUuid)) {
             return self::oauthError('invalid_request', 'The redirect_uri is not registered for this client.');
+        }
+
+        if (! $isUuid) {
+            $request->query->set('client_id', $resolvedClientId);
         }
 
         return null;
     }
 
-    private function activeClient(mixed $clientId): ?Client
+    private function activeClient(string $clientId): ?Client
     {
-        // A non-UUID would make PostgreSQL throw on the uuid column.
-        if (! Str::isUuid($clientId)) {
+        if (! $this->metadataClients->isRegisteredWireUuid($clientId)) {
             return null;
         }
 
@@ -135,25 +151,27 @@ final class ValidateAuthorizationRequestMiddleware
         return $client;
     }
 
-    private function isRegisteredRedirectUri(Client $client, mixed $redirectUri): bool
+    private function isRegisteredRedirectUri(Client $client, mixed $redirectUri, bool $requiresLiteralMatch): bool
     {
+        /** @var list<string> $registeredRedirectUris Passport casts the column to a list */
+        $registeredRedirectUris = $client->getAttribute('redirect_uris');
+
         // Omitted (an empty value arrives as null): league falls back to the
         // client's URI only when it has exactly one.
         if ($redirectUri === null) {
-            /** @var list<string> $registeredRedirectUris Passport casts the column to a list */
-            $registeredRedirectUris = $client->getAttribute('redirect_uris');
-
             return count($registeredRedirectUris) === 1;
         }
 
-        return is_string($redirectUri) && $this->redirectUriGuard->clientHasExactRedirectUri($client, $redirectUri);
+        return is_string($redirectUri) && ($requiresLiteralMatch
+            ? in_array($redirectUri, $registeredRedirectUris, true)
+            : $this->redirectUriGuard->clientHasExactRedirectUri($client, $redirectUri));
     }
 
     /**
      * An RFC 6749 §5.2-shaped error body, never a redirect.
      */
-    private static function oauthError(string $error, string $description): JsonResponse
+    private static function oauthError(string $error, string $description, int $status = 400): JsonResponse
     {
-        return new JsonResponse(['error' => $error, 'error_description' => $description], 400);
+        return new JsonResponse(['error' => $error, 'error_description' => $description], $status, ['Cache-Control' => 'no-store']);
     }
 }

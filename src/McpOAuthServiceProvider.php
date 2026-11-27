@@ -41,6 +41,7 @@ use Qiick\McpOAuth\Console\PurgeRevokedRecordsCommand;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Contracts\ApiKeyDoor;
 use Qiick\McpOAuth\Contracts\AuditLogger;
+use Qiick\McpOAuth\Contracts\ClientMetadataDocumentFetcherContract;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\ConsentView;
 use Qiick\McpOAuth\Contracts\GrantAuthorizer;
@@ -53,6 +54,7 @@ use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Internal\ConsumedAuthCodeGrant;
 use Qiick\McpOAuth\Internal\DisabledAdminSwitch;
 use Qiick\McpOAuth\Internal\NullAuditLogger;
+use Qiick\McpOAuth\Internal\OutboundClientMetadataDocumentFetcher;
 use Qiick\McpOAuth\Services\ConsentPageService;
 use Qiick\McpOAuth\Views\InertiaConsentView;
 use ReflectionProperty;
@@ -166,6 +168,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
             return new McpOAuthServer(
                 $app->make(ConfigRepository::class),
                 $app->make(AdminSwitch::class),
+                container: $app,
             );
         });
 
@@ -251,6 +254,10 @@ final class McpOAuthServiceProvider extends ServiceProvider
         });
         $this->configureRateLimiters();
         $this->validateRemainingIntegerConfig();
+        if (self::booleanConfig($this->app->make(ConfigRepository::class)->get('mcp-oauth.cimd.enabled', false), 'cimd.enabled')) {
+            $this->app->bindIf(ClientMetadataDocumentFetcherContract::class, OutboundClientMetadataDocumentFetcher::class);
+        }
+
         $this->bindAccessTokensOnCreation();
         $this->assertAdaptersBoundWhileEnabled();
         // After every provider booted, when uncached routes are loaded. Cached

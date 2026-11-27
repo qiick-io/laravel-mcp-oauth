@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Client ID Metadata Documents can be enabled with `MCP_OAUTH_CIMD_ENABLED`.
+  HTTPS URL client identifiers use Outbound's guarded transport and bounded
+  cache revalidation. The default remains off.
+
 ## [1.0.0-beta.1] - 2026-11-26
 
 First release: a beta. A later beta may still change the public API and the

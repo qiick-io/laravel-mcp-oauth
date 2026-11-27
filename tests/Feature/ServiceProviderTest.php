@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 use Illuminate\Support\ServiceProvider;
+use Qiick\McpOAuth\Contracts\ClientMetadataDocumentFetcherContract;
+use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
+use Qiick\McpOAuth\Internal\OutboundClientMetadataDocumentFetcher;
 use Qiick\McpOAuth\McpOAuthServiceProvider;
 
 it('merges the package defaults into the mcp-oauth config', function (): void {
@@ -30,6 +33,22 @@ it('merges the package defaults into the mcp-oauth config', function (): void {
     expect(config('mcp-oauth.grant_binding_column'))->toBe('api_key_id');
     expect(config('mcp-oauth.user_model'))->toBeNull();
     expect(config('mcp-oauth.migrations.load'))->toBeTrue();
+});
+
+it('binds the isolated Outbound fetcher only when CIMD is enabled', function (): void {
+    expect(app()->bound(ClientMetadataDocumentFetcherContract::class))->toBeFalse();
+
+    config()->set('mcp-oauth.cimd.enabled', true);
+    (new McpOAuthServiceProvider($this->app))->boot();
+
+    expect(app(ClientMetadataDocumentFetcherContract::class))->toBeInstanceOf(OutboundClientMetadataDocumentFetcher::class);
+});
+
+it('refuses to boot with an invalid CIMD switch', function (): void {
+    config()->set('mcp-oauth.cimd.enabled', 'invalid');
+
+    expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
+        ->toThrow(InvalidMcpOAuthConfigException::class, 'cimd.enabled');
 });
 
 it('lets an app publish the config file', function (): void {

@@ -9,9 +9,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
+use Qiick\McpOAuth\Exceptions\ClientMetadataUnavailableException;
 use Qiick\McpOAuth\McpOAuthServer;
-use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
+use Qiick\McpOAuth\Services\ClientMetadataRegistryService;
 use Qiick\McpOAuth\Services\TokenErrorResponseService;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -25,7 +26,7 @@ use Symfony\Component\HttpFoundation\Response;
  * - the RFC 8707 `resource` names this server's MCP endpoint, on the code
  *   exchange and on every refresh (MCP authorization requires it on both);
  * - the client, named in the body or as the HTTP Basic username (never
- *   both, RFC 6749 §2.3), is a UUID, was registered by the package (its
+ *   both, RFC 6749 §2.3), is a UUID or a public CIMD URL, was registered by the package (its
  *   `oauth_client_metadata` row, so every token minted here is bound) and
  *   none of its redirect hosts is blocked.
  *
@@ -41,6 +42,7 @@ final class ValidateTokenRequestMiddleware
         private readonly McpOAuthServer $mcpOAuthServer,
         private readonly RedirectUriGuard $redirectUriGuard,
         private readonly TokenErrorResponseService $tokenErrorResponses,
+        private readonly ClientMetadataRegistryService $metadataClients,
     ) {}
 
     /**
@@ -76,14 +78,58 @@ final class ValidateTokenRequestMiddleware
             return $next($request);
         }
 
-        // A non-UUID would make PostgreSQL throw on the uuid column.
-        if (! Str::isUuid($clientId)
-            || ! OAuthClientMetadata::isRegisteredClient($clientId)
-            || $this->clientHasBlockedRedirectHost($clientId)) {
-            return $this->tokenErrorResponses->invalidClient($request);
+        if (Str::isUuid($clientId)) {
+            if (! $this->metadataClients->isRegisteredWireUuid($clientId) || $this->clientHasBlockedRedirectHost($clientId)) {
+                return $this->tokenErrorResponses->invalidClient($request);
+            }
+        } else {
+            $refusal = $this->resolveMetadataClient($request, $clientId, $basicClientId);
+
+            if ($refusal !== null) {
+                return $refusal;
+            }
         }
 
         return $next($request);
+    }
+
+    /**
+     * Only previously associated public clients can exchange a code or refresh;
+     * token requests cannot create a registration or use a client secret.
+     */
+    private function resolveMetadataClient(Request $request, string $clientId, ?string $basicClientId): ?Response
+    {
+        $parameters = $request->request->all();
+
+        if ($basicClientId !== null || isset($parameters['client_secret']) || isset($parameters['client_assertion']) || isset($parameters['client_assertion_type'])) {
+            return $this->tokenErrorResponses->invalidClient($request);
+        }
+
+        try {
+            $client = $this->metadataClients->resolve($clientId);
+        } catch (ClientMetadataUnavailableException) {
+            return $this->tokenErrorResponses->refusal('temporarily_unavailable', 503);
+        }
+
+        $resolvedClientId = $client?->getKey();
+
+        if ($client === null || ! is_string($resolvedClientId) || $this->redirectUriGuard->clientHasBlockedRedirectHost($client)) {
+            return $this->tokenErrorResponses->invalidClient($request);
+        }
+
+        if ($parameters['grant_type'] === 'authorization_code') {
+            $redirectUri = $parameters['redirect_uri'] ?? null;
+            /** @var list<string> $registeredRedirectUris Passport casts the column to a list */
+            $registeredRedirectUris = $client->getAttribute('redirect_uris');
+
+            if ($redirectUri !== null && ! in_array($redirectUri, $registeredRedirectUris, true)) {
+                return $this->tokenErrorResponses->refusal('invalid_grant');
+            }
+        }
+
+        $request->request->set('client_id', $resolvedClientId);
+
+        return null;
     }
 
     private function clientHasBlockedRedirectHost(string $clientId): bool

@@ -143,10 +143,10 @@ function registerHttpFlowClient(HttpClient $client, string $redirectUri = HTTP_F
  *
  * @return array{access_token: string, refresh_token: string, client_id: string}
  */
-function obtainHttpFlowTokens(string $baseUrl, string $redirectUri = HTTP_FLOW_REDIRECT_URI): array
+function obtainHttpFlowTokens(string $baseUrl, string $redirectUri = HTTP_FLOW_REDIRECT_URI, ?string $clientId = null): array
 {
     $client = httpFlowClient($baseUrl);
-    $clientId = registerHttpFlowClient($client, $redirectUri);
+    $clientId ??= registerHttpFlowClient($client, $redirectUri);
     $authorizeUrl = '/oauth/authorize?'.http_build_query([
         'response_type' => 'code',
         'client_id' => $clientId,
@@ -319,6 +319,23 @@ function withHttpFlowFlags(string $storage, array $flags, Closure $scenario): vo
         }
     }
 }
+
+it('runs consent, token exchange, refresh and the bearer check using a CIMD URL over HTTP', function () use (&$httpFlowServer): void {
+    $baseUrl = $httpFlowServer['baseUrl'];
+
+    withHttpFlowFlags($httpFlowServer['storage'], [HttpFlowServiceProvider::CIMD_ENABLED_FLAG], static function () use ($baseUrl): void {
+        $client = httpFlowClient($baseUrl);
+        $discovery = $client->get('/.well-known/oauth-authorization-server');
+        expect($discovery->getStatusCode())->toBe(200);
+        expect(jsonOf($discovery)['client_id_metadata_document_supported'])->toBeTrue();
+
+        $tokens = obtainHttpFlowTokens($baseUrl, clientId: HttpFlowServiceProvider::CIMD_CLIENT_IDENTIFIER);
+        $rotation = refreshHttpFlowTokens($client, $baseUrl, $tokens['client_id'], $tokens['refresh_token']);
+
+        expect($rotation->getStatusCode())->toBe(200)
+            ->and(listMcpTools($baseUrl, (string) jsonOf($rotation)['access_token'])->getStatusCode())->toBe(200);
+    });
+});
 
 /**
  * @param  array{environment: array<string, string>}  $httpFlowServer

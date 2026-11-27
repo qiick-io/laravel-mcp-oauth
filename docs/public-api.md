@@ -39,6 +39,7 @@ commands are public by name and signature (below), not as PHP classes.
 - `AdminSwitch` (interface)
 - `ApiKeyDoor` (interface)
 - `AuditLogger` (interface)
+- `ClientMetadataDocumentFetcherContract` (interface)
 - `ConsentProvider` (interface)
 - `ConsentView` (interface)
 - `GrantAuthorizer` (interface)
@@ -50,12 +51,17 @@ commands are public by name and signature (below), not as PHP classes.
 
 - `AuthorizationDecision` (class)
 - `ClientInfo` (class)
+- `ClientMetadataDocumentData` (class)
 - `ConsentDecision` (class)
 - `ConsentOption` (class)
 - `ConsentOptions` (class)
 - `ConsentPage` (class)
 - `GrantRecord` (class)
 - `RevocationReason` (enum)
+
+### `Qiick\McpOAuth\Enums`
+
+- `ClientMetadataFetchStatusEnum` (enum)
 
 ### `Qiick\McpOAuth\Erasure`
 

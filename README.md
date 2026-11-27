@@ -222,13 +222,37 @@ Products implement `Qiick\McpOAuth\Contracts\*` (`AdminSwitch`, `GrantStore`,
 `ConsentProvider`, `GrantAuthorizer`, `ApiKeyDoor`, `McpCredentialBinder`,
 `AuditLogger`, `ConsentView`, `OAuthUserResolver`). Wire and consent shapes are
 the `@api` DTOs under `Qiick\McpOAuth\Data` and events under
-`Qiick\McpOAuth\Events`. Public ids are UUID strings only.
+`Qiick\McpOAuth\Events`. Package records use UUIDs. CIMD clients use their
+document URL as the OAuth wire identifier.
 
 ## Config
 
 Publishable `config/mcp-oauth.php` (tag `mcp-oauth-config`). Env prefix
 `MCP_OAUTH_*`. Redirect allowlists stay in `laravel/mcp`’s `mcp.redirect_domains`
 and `mcp.custom_schemes`. Issuer is always `APP_URL`.
+
+### Client ID Metadata Documents
+
+Set `MCP_OAUTH_CIMD_ENABLED=true` to accept public HTTPS `client_id` URLs
+at authorize, token and revocation. The discovery flag is omitted by default.
+The document's `client_id` must match the URL byte for byte. The URL needs a
+non-root path. The package resolves it to a Passport UUID internally and
+requires an exact registered callback for CIMD authorization and code exchange.
+Only public clients using authorization code with PKCE are supported.
+
+CIMD uses an isolated Outbound transport with HTTPS, pinned public DNS answers,
+no redirects, and the timeout and byte ceilings in `cimd.*`. The cache uses
+`max-age` when supplied, with `cache_max_seconds` as the ceiling and
+`cache_min_seconds` as the fallback when the document has no cache lifetime.
+`no-cache` triggers revalidation and `no-store` skips document storage. A 304
+renews a previously validated entry. An unavailable client document returns
+503 without using stale metadata or discarding the last good entry. Invalid
+documents return `invalid_client` locally and are never used as redirect targets.
+
+Applications using Outbound solely for CIMD can add `qiick/laravel-outbound`
+to their own Composer `extra.laravel.dont-discover` list to omit its webhook
+provider, migrations and scheduled jobs. The CIMD transport uses the library
+factory directly.
 
 ## Testing
 

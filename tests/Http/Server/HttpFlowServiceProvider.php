@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Qiick\McpOAuth\Tests\Http\Server;
 
+use Illuminate\Http\Client\Factory;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -14,6 +15,7 @@ use Laravel\Mcp\Server\Middleware\AddWwwAuthenticateHeader;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Contracts\ApiKeyDoor;
+use Qiick\McpOAuth\Contracts\ClientMetadataDocumentFetcherContract;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\ConsentView;
 use Qiick\McpOAuth\Contracts\GrantAuthorizer;
@@ -21,6 +23,7 @@ use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Contracts\McpCredentialBinder;
 use Qiick\McpOAuth\Http\Middleware\McpBearerDoorMiddleware;
 use Qiick\McpOAuth\Http\Middleware\McpChallengeMiddleware;
+use Qiick\McpOAuth\Internal\OutboundClientMetadataDocumentFetcher;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Testing\FakeAdminSwitch;
 use Qiick\McpOAuth\Testing\FakeApiKeyDoor;
@@ -30,6 +33,9 @@ use Qiick\McpOAuth\Testing\FakeMcpCredentialBinder;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 use Qiick\McpOAuth\Tests\Support\TestDatabaseConnection;
 use Qiick\McpOAuth\Tests\Support\TestUser;
+use Qiick\Outbound\Http\OutboundHttpStackData;
+use Qiick\Outbound\Testing\FakeHostResolver;
+use Qiick\Outbound\Testing\FakeOutboundHttpFactory;
 
 /**
  * The product side of the `http` group: what an adopting app wires (design
@@ -56,6 +62,10 @@ final class HttpFlowServiceProvider extends ServiceProvider
     /** Passport finds no key files. */
     public const string KEYS_MISSING_FLAG = 'keys-missing';
 
+    public const string CIMD_ENABLED_FLAG = 'cimd-enabled';
+
+    public const string CIMD_CLIENT_IDENTIFIER = 'https://client.example/oauth-client.json';
+
     public function register(): void
     {
         $storagePath = (string) getenv('MCP_HTTP_STORAGE');
@@ -77,6 +87,23 @@ final class HttpFlowServiceProvider extends ServiceProvider
         $config->set('mcp-oauth.enabled', ! is_file($storagePath.'/'.self::CONFIG_OFF_FLAG));
         $config->set('mcp-oauth.mcp_enabled', true);
 
+        if (is_file($storagePath.'/'.self::CIMD_ENABLED_FLAG)) {
+            $factory = FakeOutboundHttpFactory::fake([
+                self::CIMD_CLIENT_IDENTIFIER => Factory::response([
+                    'client_id' => self::CIMD_CLIENT_IDENTIFIER,
+                    'client_name' => 'CIMD HTTP client',
+                    'redirect_uris' => ['http://127.0.0.1:9/callback'],
+                    'grant_types' => ['authorization_code', 'refresh_token'],
+                ]),
+            ]);
+            $factory->preventStrayRequests();
+            $resolver = (new FakeHostResolver)->with('client.example', ['8.8.8.8']);
+            $this->app->instance(ClientMetadataDocumentFetcherContract::class, new OutboundClientMetadataDocumentFetcher(
+                $config,
+                OutboundHttpStackData::make($resolver, httpFactory: $factory),
+            ));
+        }
+
         $this->app->instance(AdminSwitch::class, new FakeAdminSwitch(isEnabled: ! is_file($storagePath.'/'.self::ADMIN_SWITCH_OFF_FLAG)));
         $this->app->instance(ConsentProvider::class, new FakeConsentProvider(AuthorizeFlowTestCase::defaultConsentOptions()));
         $this->app->bind(ConsentView::class, HtmlConsentView::class);
@@ -91,6 +118,10 @@ final class HttpFlowServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // The package has merged its shipped CIMD settings by this point.
+        $storagePath = (string) getenv('MCP_HTTP_STORAGE');
+        $this->app['config']->set('mcp-oauth.cimd.enabled', is_file($storagePath.'/'.self::CIMD_ENABLED_FLAG));
+
         McpOAuthRoutes::register();
 
         Route::middleware('web')->group(static function (): void {
