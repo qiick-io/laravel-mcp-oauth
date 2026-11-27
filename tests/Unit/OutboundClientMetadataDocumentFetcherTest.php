@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Request;
 use Qiick\McpOAuth\Enums\ClientMetadataFetchStatusEnum;
+use Qiick\McpOAuth\Internal\ClientMetadataHostResolver;
 use Qiick\McpOAuth\Internal\OutboundClientMetadataDocumentFetcher;
 use Qiick\Outbound\Http\OutboundHttpStackData;
 use Qiick\Outbound\Testing\FakeHostResolver;
@@ -21,6 +22,16 @@ it('refuses a later DNS answer with a private address before sending another req
     expect($fetcher->fetch(OUTBOUND_CIMD_URL)->status)->toBe(ClientMetadataFetchStatusEnum::Fetched)
         ->and($fetcher->fetch(OUTBOUND_CIMD_URL)->status)->toBe(ClientMetadataFetchStatusEnum::Invalid);
     $factory->assertSentCount(1);
+});
+
+it('reports empty DNS answers as transient without attempting a request', function (): void {
+    $resolver = new ClientMetadataHostResolver(new FakeHostResolver);
+    $factory = FakeOutboundHttpFactory::make();
+    $factory->preventStrayRequests();
+    $fetcher = new OutboundClientMetadataDocumentFetcher(config(), OutboundHttpStackData::make($resolver, httpFactory: $factory));
+
+    expect($fetcher->fetch(OUTBOUND_CIMD_URL)->status)->toBe(ClientMetadataFetchStatusEnum::Unavailable);
+    $factory->assertNothingSent();
 });
 
 it('does not follow a redirect even to the same origin', function (): void {

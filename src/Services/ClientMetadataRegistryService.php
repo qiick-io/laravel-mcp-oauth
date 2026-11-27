@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth\Services;
 
 use DateTimeInterface;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -36,6 +37,7 @@ final class ClientMetadataRegistryService
         private readonly McpOAuthServer $server,
         private readonly RedirectUriGuard $redirectUriGuard,
         private readonly ClientRepository $clients,
+        private readonly CacheRepository $cache,
     ) {}
 
     /**
@@ -71,6 +73,19 @@ final class ClientMetadataRegistryService
             throw new ClientMetadataUnavailableException;
         }
 
+        $retryKey = 'mcp-oauth:cimd:'.hash('sha256', $url);
+        $minimumSeconds = $this->cacheMinimumSeconds();
+
+        // Reserve the fetch on the application's shared cache. A negative
+        // entry holds only a status, even for URLs that never had a client row.
+        if (! $this->cache->add($retryKey, ClientMetadataFetchStatusEnum::Unavailable->value, max($minimumSeconds, BoundedPositiveInt::CIMD_TIMEOUT_SECONDS_MAX + 1))) {
+            if ($this->cache->get($retryKey) === ClientMetadataFetchStatusEnum::Invalid->value) {
+                return null;
+            }
+
+            throw new ClientMetadataUnavailableException;
+        }
+
         $etag = $metadata?->getAttribute('metadata_document_etag');
         $response = $this->container->make(ClientMetadataDocumentFetcherContract::class)->fetch($url, is_string($etag) ? $etag : null);
 
@@ -92,10 +107,20 @@ final class ClientMetadataRegistryService
         }
 
         if ($response->status === ClientMetadataFetchStatusEnum::Unavailable) {
+            $this->cache->put($retryKey, ClientMetadataFetchStatusEnum::Unavailable->value, $minimumSeconds);
+
             throw new ClientMetadataUnavailableException;
         }
 
-        return $resolved !== null && $this->hasAllowedRedirects(self::stringList($resolved->getAttribute('redirect_uris'))) ? $resolved : null;
+        if ($resolved === null || ! $this->hasAllowedRedirects(self::stringList($resolved->getAttribute('redirect_uris')))) {
+            $this->cache->put($retryKey, ClientMetadataFetchStatusEnum::Invalid->value, $minimumSeconds);
+
+            return null;
+        }
+
+        $this->cache->forget($retryKey);
+
+        return $resolved;
     }
 
     /** A client can revoke its own tokens even during a metadata outage. */
@@ -118,6 +143,12 @@ final class ClientMetadataRegistryService
             $parsed = $this->redirectUriGuard->parseCanonical($url);
         } catch (InvalidArgumentException) {
             return false;
+        }
+
+        foreach (explode('/', $parsed->path) as $segment) {
+            if (in_array(rawurldecode($segment), ['.', '..'], true)) {
+                return false;
+            }
         }
 
         return $parsed->scheme === 'https'
@@ -242,10 +273,8 @@ final class ClientMetadataRegistryService
         $validated = $response->status === ClientMetadataFetchStatusEnum::Fetched ? $this->validateDocument($url, $document) : null;
 
         if ($validated === null) {
-            if ($client !== null && $response->status === ClientMetadataFetchStatusEnum::Fetched && ($document['client_id'] ?? null) !== $url) {
-                // An identity mismatch invalidates outstanding refresh tokens even if a later fetch is valid.
-                Passport::refreshToken()->newQuery()->whereIn('access_token_id', $client->tokens()->select('id'))->update(['revoked' => true]);
-                $client->authCodes()->update(['revoked' => true]);
+            if ($client !== null) {
+                $this->revokeIssuedCredentials($client);
             }
 
             $metadata?->update([
@@ -259,6 +288,11 @@ final class ClientMetadataRegistryService
         }
 
         ['client_name' => $name, 'redirect_uris' => $redirectUris, 'grant_types' => $grantTypes] = $validated;
+
+        if ($client !== null && ($client->getAttribute('redirect_uris') !== $redirectUris || $client->getAttribute('grant_types') !== $grantTypes)) {
+            $this->revokeIssuedCredentials($client);
+        }
+
         $client ??= $this->clients->createAuthorizationCodeGrantClient($name, $redirectUris, confidential: false);
         $client->forceFill(['name' => $name, 'redirect_uris' => $redirectUris, 'grant_types' => $grantTypes])->save();
 
@@ -276,12 +310,25 @@ final class ClientMetadataRegistryService
         return $client;
     }
 
+    /** A terminal refusal or changed callback/grant policy retires credentials issued under the previous policy. */
+    private function revokeIssuedCredentials(Client $client): void
+    {
+        Passport::refreshToken()->newQuery()->whereIn('access_token_id', $client->tokens()->select('id'))->update(['revoked' => true]);
+        $client->tokens()->update(['revoked' => true]);
+        $client->authCodes()->update(['revoked' => true]);
+    }
+
+    private function cacheMinimumSeconds(): int
+    {
+        return BoundedPositiveInt::require($this->config->get('mcp-oauth.cimd.cache_min_seconds'), 'cimd.cache_min_seconds', BoundedPositiveInt::CIMD_CACHE_SECONDS_MAX);
+    }
+
     /**
      * @param  array<string, mixed>  $document  only the validated, supported metadata is persisted
      */
     private function updateCache(OAuthClientMetadata $metadata, ClientMetadataDocumentData $response, ?array $document = null): void
     {
-        $minimumSeconds = BoundedPositiveInt::require($this->config->get('mcp-oauth.cimd.cache_min_seconds'), 'cimd.cache_min_seconds', BoundedPositiveInt::CIMD_CACHE_SECONDS_MAX);
+        $minimumSeconds = $this->cacheMinimumSeconds();
         $maximumSeconds = BoundedPositiveInt::require($this->config->get('mcp-oauth.cimd.cache_max_seconds'), 'cimd.cache_max_seconds', BoundedPositiveInt::CIMD_CACHE_SECONDS_MAX);
         $freshnessSeconds = $response->maxAgeSeconds;
         $previousEtag = null;
@@ -296,7 +343,9 @@ final class ClientMetadataRegistryService
             }
         }
 
-        $freshnessSeconds = min($maximumSeconds, max(0, $freshnessSeconds ?? $minimumSeconds));
+        // Keep operational registration fields for the minimum interval. A
+        // no-store response leaves neither a document body nor a validator.
+        $freshnessSeconds = $response->shouldCache ? min($maximumSeconds, max($minimumSeconds, $freshnessSeconds ?? 0)) : $minimumSeconds;
         $fetchedAt = now();
 
         $metadata->fill([
@@ -306,7 +355,7 @@ final class ClientMetadataRegistryService
                 : ($response->shouldCache ? $metadata->getAttribute('metadata_document_sha256') : null),
             'metadata_document_etag' => $response->shouldCache ? ($response->etag ?? $previousEtag) : null,
             'metadata_document_fetched_at' => $fetchedAt,
-            'metadata_document_expires_at' => $response->shouldCache ? $fetchedAt->copy()->addSeconds($freshnessSeconds) : null,
+            'metadata_document_expires_at' => $fetchedAt->copy()->addSeconds($freshnessSeconds),
             'metadata_document_status' => 'valid',
             'metadata_document_error' => null,
         ])->save();
@@ -318,15 +367,13 @@ final class ClientMetadataRegistryService
      */
     private function validateDocument(string $url, array $document): ?array
     {
-        $authenticationMethods = self::stringList($document['token_endpoint_auth_methods_supported'] ?? [$document['token_endpoint_auth_method'] ?? 'none']);
-        $authenticationMethod = $document['token_endpoint_auth_method'] ?? null;
+        $authenticationMethods = self::stringList(array_key_exists('token_endpoint_auth_methods_supported', $document) ? $document['token_endpoint_auth_methods_supported'] : ['none']);
+        $authenticationMethod = array_key_exists('token_endpoint_auth_method', $document) ? $document['token_endpoint_auth_method'] : 'none';
         $grantTypes = array_values(array_intersect(McpOAuthServer::supportedGrantTypes(), self::stringList($document['grant_types'] ?? ['authorization_code'])));
 
         if (($document['client_id'] ?? null) !== $url
             || array_key_exists('client_secret', $document) || array_key_exists('client_secret_expires_at', $document)
-            || ! in_array('none', $authenticationMethods, true)
-            || array_diff($authenticationMethods, ['none', 'private_key_jwt']) !== []
-            || ($authenticationMethod !== null && ! in_array($authenticationMethod, $authenticationMethods, true))
+            || $authenticationMethod !== 'none' || $authenticationMethods !== ['none']
             || ! in_array('authorization_code', $grantTypes, true)
             || ! in_array('code', self::stringList($document['response_types'] ?? ['code']), true)) {
             return null;

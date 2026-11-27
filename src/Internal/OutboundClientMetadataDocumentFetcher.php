@@ -14,7 +14,6 @@ use Qiick\Outbound\Http\HttpRequestOptions;
 use Qiick\Outbound\Http\OutboundHttpException;
 use Qiick\Outbound\Http\OutboundHttpStackData;
 use Qiick\Outbound\Http\OutboundRequest;
-use Qiick\Outbound\Ssrf\DnsHostResolver;
 use Qiick\Outbound\Ssrf\UnsafeUrl;
 use stdClass;
 
@@ -30,7 +29,7 @@ final class OutboundClientMetadataDocumentFetcher implements ClientMetadataDocum
 
     public function __construct(private readonly ConfigRepository $config, ?OutboundHttpStackData $stack = null)
     {
-        $this->stack = $stack ?? OutboundHttpStackData::make(new DnsHostResolver);
+        $this->stack = $stack ?? OutboundHttpStackData::make(new ClientMetadataHostResolver);
     }
 
     public function fetch(string $metadataDocumentUrl, ?string $etag = null): ClientMetadataDocumentData

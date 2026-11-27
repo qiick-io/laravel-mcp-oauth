@@ -236,18 +236,25 @@ and `mcp.custom_schemes`. Issuer is always `APP_URL`.
 Set `MCP_OAUTH_CIMD_ENABLED=true` to accept public HTTPS `client_id` URLs
 at authorize, token and revocation. The discovery flag is omitted by default.
 The document's `client_id` must match the URL byte for byte. The URL needs a
-non-root path. The package resolves it to a Passport UUID internally and
+non-root path without dot segments. The package resolves it to a Passport UUID internally and
 requires an exact registered callback for CIMD authorization and code exchange.
-Only public clients using authorization code with PKCE are supported.
+Only public clients using authorization code with PKCE are supported. A
+document may omit its authentication method or declare `none`.
 
 CIMD uses an isolated Outbound transport with HTTPS, pinned public DNS answers,
-no redirects, and the timeout and byte ceilings in `cimd.*`. The cache uses
-`max-age` when supplied, with `cache_max_seconds` as the ceiling and
-`cache_min_seconds` as the fallback when the document has no cache lifetime.
-`no-cache` triggers revalidation and `no-store` skips document storage. A 304
-renews a previously validated entry. An unavailable client document returns
-503 without using stale metadata or discarding the last good entry. Invalid
-documents return `invalid_client` locally and are never used as redirect targets.
+no redirects, and the timeout and byte ceilings in `cimd.*`. Document
+freshness is bounded by `cache_min_seconds` and `cache_max_seconds`.
+`max-age=0`, `no-cache` and `no-store` all use the minimum interval before the
+next fetch. `no-store` retains only the validated fields needed for the client
+registration. It keeps neither the cached document nor its ETag. A 304 renews
+a previously validated entry. Fetch failures are remembered for the minimum
+interval using a status under the URL's digest in the application's cache.
+Use a shared cache for multiple servers to apply the same limit across them.
+
+An unavailable client document returns 503 and preserves the last good entry.
+It cannot be used for an authorization or token request until revalidated.
+Invalid documents return `invalid_client` locally. Terminal failures and
+changes to callbacks or grant types revoke the client's issued credentials.
 
 Applications using Outbound solely for CIMD can add `qiick/laravel-outbound`
 to their own Composer `extra.laravel.dont-discover` list to omit its webhook

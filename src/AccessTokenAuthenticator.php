@@ -27,7 +27,8 @@ use Symfony\Bridge\PsrHttpMessage\Factory\PsrHttpFactory;
  * 1. signature, expiry and token row (Passport's ResourceServer);
  * 2. the row exists and its audience is this MCP resource (RFC 8707);
  * 3. the client exists, is not revoked (a fresh query) and was registered by
- *    the package;
+ *    the package. A CIMD client also needs its feature on and its last
+ *    validation must not have failed on trust or document policy;
  * 4. none of the client's redirect hosts is blocked;
  * 5. the client and user have an active grant, and the token is bound to it;
  * 6. the wire scopes are exactly `mcp:use`;
@@ -91,7 +92,7 @@ final class AccessTokenAuthenticator
             ->first();
 
         if ($client === null
-            || ! OAuthClientMetadata::isRegisteredClient($client)
+            || ! $this->hasUsableClientMetadata($client)
             || $this->redirectUriGuard->clientHasBlockedRedirectHost($client)) {
             return AuthorizationDecision::invalidToken(self::REVOKED);
         }
@@ -115,6 +116,14 @@ final class AccessTokenAuthenticator
         $decision = $this->grantAuthorizer->authorize($request, $grant);
 
         return $decision->isAllowed ? $grant : $decision;
+    }
+
+    private function hasUsableClientMetadata(Client $client): bool
+    {
+        $metadata = OAuthClientMetadata::query()->where('client_id', $client->getKey())->first();
+
+        return $metadata !== null && ($metadata->getAttribute('metadata_document_url') === null
+            || ($this->mcpOAuthServer->supportsClientIdMetadataDocuments() && $metadata->getAttribute('metadata_document_status') !== 'invalid'));
     }
 
     /**
