@@ -1,0 +1,15 @@
+name: Signed release tag
+
+# Fleet convention F23: a release tag counts only when GitHub shows it as
+# Verified (the maintainer signs it locally with `git tag -s`).
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  signed-tag:
+    # qiick-io/app-ui@v0.15.0
+    uses: qiick-io/app-ui/.github/workflows/signed-tag.yml@0d97ae1429a856411c76e6de1ec258cae0eabab6 # v0.15.0

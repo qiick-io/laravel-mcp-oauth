@@ -1,0 +1,432 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
+use Laravel\Passport\Passport;
+use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
+use Qiick\McpOAuth\McpOAuthReadiness;
+use Qiick\McpOAuth\McpOAuthServer;
+use Qiick\McpOAuth\Testing\FakeAdminSwitch;
+
+function makeServer(bool $configEnabled, bool $adminEnabled, mixed $mcpEnabled = true): McpOAuthServer
+{
+    config()->set('mcp-oauth.enabled', $configEnabled);
+    config()->set('mcp-oauth.mcp_enabled', $mcpEnabled);
+    config()->set('app.url', 'https://mcp-oauth.test');
+
+    return new McpOAuthServer(config(), new FakeAdminSwitch($adminEnabled));
+}
+
+it('is off unless config, admin switch and product MCP flag are all true', function (): void {
+    expect(makeServer(false, true)->isEnabled())->toBeFalse()
+        ->and(makeServer(true, false)->isEnabled())->toBeFalse()
+        ->and(makeServer(true, true, false)->isEnabled())->toBeFalse()
+        ->and(makeServer(true, true, true)->isEnabled())->toBeTrue()
+        ->and(makeServer(true, true, null)->isEnabled())->toBeFalse();
+});
+
+it('treats an unreadable admin switch store as off', function (): void {
+    config()->set('mcp-oauth.enabled', true);
+    config()->set('mcp-oauth.mcp_enabled', true);
+
+    $server = new McpOAuthServer(
+        config(),
+        new FakeAdminSwitch(isEnabled: true, storeIsUnreadable: true),
+    );
+
+    expect($server->isEnabled())->toBeFalse();
+});
+
+it('treats a throwing admin switch as off (S11)', function (): void {
+    config()->set('mcp-oauth.enabled', true);
+    config()->set('mcp-oauth.mcp_enabled', true);
+
+    $server = new McpOAuthServer(
+        config(),
+        new FakeAdminSwitch(isEnabled: true, throwsOnRead: true),
+    );
+
+    expect($server->isEnabled())->toBeFalse();
+});
+
+it('treats a half-set env key pair as missing', function (): void {
+    config()->set('passport.private_key', "-----BEGIN RSA PRIVATE KEY-----\nenv\n-----END RSA PRIVATE KEY-----");
+    config()->set('passport.public_key', null);
+
+    expect(makeServer(true, true)->hasPassportKeys())->toBeFalse();
+
+    config()->set('passport.private_key', null);
+    config()->set('passport.public_key', "-----BEGIN PUBLIC KEY-----\nenv\n-----END PUBLIC KEY-----");
+
+    expect(makeServer(true, true)->hasPassportKeys())->toBeFalse();
+
+    config()->set('passport.private_key', null);
+    config()->set('passport.public_key', null);
+});
+
+it('treats world-readable key files as missing', function (): void {
+    config()->set('passport.private_key', null);
+    config()->set('passport.public_key', null);
+
+    $privatePath = Passport::keyPath('oauth-private.key');
+    $publicPath = Passport::keyPath('oauth-public.key');
+    @mkdir(dirname($privatePath), 0777, true);
+    file_put_contents($privatePath, 'private');
+    file_put_contents($publicPath, 'public');
+    chmod($privatePath, 0644);
+    chmod($publicPath, 0644);
+
+    try {
+        expect(makeServer(true, true)->hasPassportKeys())->toBeFalse();
+    } finally {
+        @unlink($privatePath);
+        @unlink($publicPath);
+    }
+});
+
+it('builds issuer and resource from APP_URL, never the request Host', function (): void {
+    $server = makeServer(true, true);
+    Request::create('https://evil.example/mcp', 'GET', server: ['HTTP_HOST' => 'evil.example']);
+
+    expect($server->issuer())->toBe('https://mcp-oauth.test')
+        ->and($server->resourceIdentifier())->toBe('https://mcp-oauth.test/mcp')
+        ->and($server->acceptsResource('https://mcp-oauth.test/mcp'))->toBeTrue()
+        ->and($server->acceptsResource('https://evil.example/mcp'))->toBeFalse()
+        ->and($server->protectedResourceMetadataUrl())->toBe(
+            'https://mcp-oauth.test/.well-known/oauth-protected-resource/mcp',
+        );
+});
+
+it('normalises a trailing slash in mcp_path', function (): void {
+    config()->set('mcp-oauth.mcp_path', '/mcp/');
+
+    expect(makeServer(true, true)->resourceIdentifier())->toBe('https://mcp-oauth.test/mcp');
+});
+
+it('reports passport_keys only while OAuth is enabled', function (): void {
+    $off = makeServer(false, false);
+    expect((new McpOAuthReadiness($off))->checks())->toBe([]);
+
+    config()->set('passport.private_key', null);
+    config()->set('passport.public_key', null);
+    $failing = makeServer(true, true);
+    expect((new McpOAuthReadiness($failing))->checks())->toBe(['passport_keys' => 'fail']);
+
+    config()->set('passport.private_key', "-----BEGIN RSA PRIVATE KEY-----\na\n-----END RSA PRIVATE KEY-----");
+    config()->set('passport.public_key', "-----BEGIN PUBLIC KEY-----\nb\n-----END PUBLIC KEY-----");
+    $ready = makeServer(true, true);
+    expect((new McpOAuthReadiness($ready))->checks())->toBe(['passport_keys' => 'ok']);
+
+    config()->set('passport.private_key', null);
+    config()->set('passport.public_key', null);
+});
+
+it('accepts a complete env key pair and rejects empty strings', function (): void {
+    config()->set('passport.private_key', "-----BEGIN RSA PRIVATE KEY-----\na\n-----END RSA PRIVATE KEY-----");
+    config()->set('passport.public_key', "-----BEGIN PUBLIC KEY-----\nb\n-----END PUBLIC KEY-----");
+    expect(makeServer(true, true)->hasPassportKeys())->toBeTrue();
+
+    config()->set('passport.private_key', '');
+    config()->set('passport.public_key', '');
+    expect(makeServer(true, true)->hasPassportKeys())->toBeFalse();
+
+    config()->set('passport.private_key', null);
+    config()->set('passport.public_key', null);
+});
+
+it('resolves mcp_enabled from a config key string or a closure', function (): void {
+    config()->set('product.mcp', true);
+    expect(makeServer(true, true, 'product.mcp')->isEnabled())->toBeTrue();
+
+    config()->set('product.mcp', false);
+    expect(makeServer(true, true, 'product.mcp')->isEnabled())->toBeFalse();
+
+    expect(makeServer(true, true, static fn (): bool => true)->isEnabled())->toBeTrue()
+        ->and(makeServer(true, true, static fn (): bool => false)->isEnabled())->toBeFalse();
+});
+
+it('is ready only when enabled, keys exist and app.url is absolute', function (): void {
+    config()->set('passport.private_key', null);
+    config()->set('passport.public_key', null);
+    expect(makeServer(true, true)->isReady())->toBeFalse();
+
+    config()->set('passport.private_key', "-----BEGIN RSA PRIVATE KEY-----\na\n-----END RSA PRIVATE KEY-----");
+    config()->set('passport.public_key', "-----BEGIN PUBLIC KEY-----\nb\n-----END PUBLIC KEY-----");
+    $ready = makeServer(true, true);
+    expect($ready->isReady())->toBeTrue()
+        ->and(makeServer(false, true)->isReady())->toBeFalse();
+
+    config()->set('app.url', 'mcp-oauth.test');
+    expect($ready->isReady())->toBeFalse();
+
+    config()->set('app.url', 'https://mcp-oauth.test');
+    config()->set('passport.private_key', null);
+    config()->set('passport.public_key', null);
+});
+
+it('exposes wire scope, grant types, challenge methods and TTLs', function (): void {
+    $server = makeServer(true, true);
+
+    expect($server::WIRE_SCOPE)->toBe('mcp:use')
+        ->and($server::supportedGrantTypes())->toBe(['authorization_code', 'refresh_token'])
+        ->and($server::supportedCodeChallengeMethods())->toBe(['S256'])
+        ->and($server->scopeDescriptions())->toHaveKey('mcp:use')
+        ->and($server->accessTokenLifetime()->format('%i'))->toBe('60')
+        ->and($server->refreshTokenLifetime()->format('%d'))->toBe('30');
+});
+
+it('accepts mode-600, 440 and 660 key files as usable', function (int $mode): void {
+    config()->set('passport.private_key', null);
+    config()->set('passport.public_key', null);
+
+    $privatePath = Passport::keyPath('oauth-private.key');
+    $publicPath = Passport::keyPath('oauth-public.key');
+    @mkdir(dirname($privatePath), 0777, true);
+    @chmod($privatePath, 0600);
+    @chmod($publicPath, 0600);
+    file_put_contents($privatePath, 'private');
+    file_put_contents($publicPath, 'public');
+    chmod($privatePath, $mode);
+    chmod($publicPath, $mode);
+
+    try {
+        expect(makeServer(true, true)->hasPassportKeys())->toBeTrue();
+    } finally {
+        @chmod($privatePath, 0600);
+        @chmod($publicPath, 0600);
+        @unlink($privatePath);
+        @unlink($publicPath);
+    }
+})->with([
+    '600' => [0600],
+    '440' => [0440],
+    '660' => [0660],
+]);
+
+it('compares the resource path exactly and scheme and host case-insensitively (RFC 8707, MCP)', function (): void {
+    $server = makeServer(true, true);
+    config()->set('app.url', 'https://mcp.example/API');
+    config()->set('mcp-oauth.mcp_path', 'MCP');
+
+    expect($server->resourceIdentifier())->toBe('https://mcp.example/API/MCP')
+        ->and($server->acceptsResource('https://mcp.example/API/MCP'))->toBeTrue()
+        ->and($server->acceptsResource('https://mcp.example/API/MCP/'))->toBeTrue()
+        // MCP: implementations SHOULD accept uppercase scheme and host.
+        ->and($server->acceptsResource('https://MCP.EXAMPLE/API/MCP'))->toBeTrue()
+        ->and($server->acceptsResource('HTTPS://mcp.example/API/MCP'))->toBeTrue()
+        ->and($server->acceptsResource('https://mcp.example/api/mcp'))->toBeFalse()
+        ->and($server->acceptsResource('https://mcp.example/API/MCP//'))->toBeFalse()
+        ->and($server->acceptsResource('https://mcp.example:443/API/MCP'))->toBeFalse()
+        ->and($server->acceptsResource('https://mcp.example/API/MCP?x=1'))->toBeFalse()
+        ->and($server->acceptsResource('https://mcp.example/API/MCP#x'))->toBeFalse()
+        ->and($server->acceptsResource('https://user@mcp.example/API/MCP'))->toBeFalse()
+        ->and($server->acceptsResource('https://evil.example/API/MCP'))->toBeFalse()
+        ->and($server->acceptsResource('mcp.example/API/MCP'))->toBeFalse();
+});
+
+it('accepts the lower-case host when APP_URL spells it in upper case', function (): void {
+    $server = makeServer(true, true);
+    config()->set('app.url', 'https://MCP.Example');
+
+    expect($server->acceptsResource('https://mcp.example/mcp'))->toBeTrue()
+        ->and($server->acceptsResource('https://MCP.Example/mcp'))->toBeTrue();
+});
+
+it('falls back to the default path when mcp_path is only slashes', function (): void {
+    $server = makeServer(true, true);
+    config()->set('mcp-oauth.mcp_path', '/');
+
+    expect($server->resourceIdentifier())->toBe('https://mcp-oauth.test/mcp')
+        ->and($server->acceptsResource('https://mcp-oauth.test/mcp'))->toBeTrue();
+});
+
+// --- M9: the contract the discovery documents and adopters read ------------
+
+it('pins the MCP authorization spec revision from config (M8, M9)', function (): void {
+    $server = makeServer(true, true);
+
+    expect($server->specRevision())->toBe('2026-07-28');
+
+    config()->set('mcp-oauth.spec_revision', '2025-11-25');
+
+    expect($server->specRevision())->toBe('2025-11-25');
+});
+
+it('fails closed on a spec revision that is not a date', function (mixed $specRevision): void {
+    $server = makeServer(true, true);
+    config()->set('mcp-oauth.spec_revision', $specRevision);
+
+    expect(fn (): string => $server->specRevision())
+        ->toThrow(InvalidMcpOAuthConfigException::class, 'spec_revision');
+})->with([
+    'empty' => [''],
+    'null' => [null],
+    'not a date' => ['latest'],
+    'a date with a suffix' => ['2026-07-28-draft'],
+    'a date with a prefix' => ['v2026-07-28'],
+    'a date with a trailing newline' => ["2026-07-28\n"],
+]);
+
+it('advertises the revocation endpoint from APP_URL and no client ID metadata documents', function (): void {
+    $server = makeServer(true, true);
+
+    expect($server->revocationEndpointUrl())->toBe('https://mcp-oauth.test/oauth/revoke')
+        ->and($server->supportsClientIdMetadataDocuments())->toBeFalse();
+
+    config()->set('mcp-oauth.cimd.enabled', true);
+
+    // No fetcher yet: switching CIMD on must not make the metadata claim it.
+    expect($server->supportsClientIdMetadataDocuments())->toBeFalse();
+});
+
+it('builds the RFC 8414 and RFC 9728 documents from APP_URL', function (): void {
+    $server = makeServer(true, true);
+    config()->set('mcp-oauth.mcp_path', 'api/mcp');
+    $clientAuthenticationMethods = ['none', 'client_secret_basic', 'client_secret_post'];
+
+    expect($server->authorizationServerMetadata())->toBe([
+        'issuer' => 'https://mcp-oauth.test',
+        'authorization_endpoint' => 'https://mcp-oauth.test/oauth/authorize',
+        'token_endpoint' => 'https://mcp-oauth.test/oauth/token',
+        'registration_endpoint' => 'https://mcp-oauth.test/oauth/register',
+        'revocation_endpoint' => 'https://mcp-oauth.test/oauth/revoke',
+        'scopes_supported' => ['mcp:use'],
+        'response_types_supported' => ['code'],
+        'grant_types_supported' => ['authorization_code', 'refresh_token'],
+        'code_challenge_methods_supported' => ['S256'],
+        'token_endpoint_auth_methods_supported' => $clientAuthenticationMethods,
+        'revocation_endpoint_auth_methods_supported' => $clientAuthenticationMethods,
+        'authorization_response_iss_parameter_supported' => true,
+    ])->and($server->protectedResourceMetadata())->toBe([
+        'resource' => 'https://mcp-oauth.test/api/mcp',
+        'authorization_servers' => ['https://mcp-oauth.test'],
+        'scopes_supported' => ['mcp:use'],
+        'bearer_methods_supported' => ['header'],
+    ]);
+});
+
+it('serves no revocation endpoint when revocation_enabled reads as false', function (mixed $isRevocationEnabled): void {
+    $server = makeServer(true, true);
+    config()->set('mcp-oauth.revocation_enabled', $isRevocationEnabled);
+
+    expect($server->revocationEndpointUrl())->toBeNull()
+        ->and($server->authorizationServerMetadata())
+        ->not->toHaveKey('revocation_endpoint')
+        ->not->toHaveKey('revocation_endpoint_auth_methods_supported')
+        ->toHaveKey('token_endpoint_auth_methods_supported');
+})->with([
+    'off' => [false],
+    'the string false' => ['false'],
+    'zero' => ['0'],
+    'the string off' => ['off'],
+    'null' => [null],
+    'anything else' => ['maybe'],
+]);
+
+it('serves the revocation endpoint when revocation_enabled reads as true, or is unset (#33 review N1)', function (mixed $isRevocationEnabled): void {
+    $server = makeServer(true, true);
+    config()->set('mcp-oauth.revocation_enabled', $isRevocationEnabled);
+
+    // A config file published before the key existed.
+    if ($isRevocationEnabled === 'unset') {
+        config()->set('mcp-oauth', Arr::except(config('mcp-oauth'), 'revocation_enabled'));
+    }
+
+    expect($server->revocationEndpointUrl())->toBe('https://mcp-oauth.test/oauth/revoke');
+})->with([
+    'true' => [true],
+    'the string true' => ['true'],
+    'one' => ['1'],
+    'the string on' => ['on'],
+    'yes' => ['yes'],
+    'unset' => ['unset'],
+]);
+
+it('accepts an issuer with a host, a port and a path', function (string $appUrl): void {
+    $server = makeServer(true, true);
+    config()->set('app.url', $appUrl);
+
+    expect($server->hasAbsoluteIssuer())->toBeTrue();
+})->with(['https://app.example', 'http://127.0.0.1:8000', 'https://app.example:65535', 'https://app.example:1', 'https://app.example/', 'HTTPS://APP.EXAMPLE']);
+
+// --- A key pair Passport's signer can use (Codex review of #44) -----------------
+
+/**
+ * @param  array<string, int|string>  $keyOptions
+ * @return array{private: string, public: string}
+ */
+function generatedKeyPair(array $keyOptions = ['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]): array
+{
+    $privateKey = openssl_pkey_new($keyOptions);
+    assert($privateKey !== false);
+    openssl_pkey_export($privateKey, $privatePem);
+    $keyDetails = openssl_pkey_get_details($privateKey);
+    assert(is_array($keyDetails) && is_string($privatePem));
+
+    return ['private' => $privatePem, 'public' => (string) $keyDetails['key']];
+}
+
+it('accepts a matching RSA pair of at least 2048 bits, from env PEM with \n escapes or from files', function (string $source): void {
+    $server = makeServer(true, true);
+    $keyPair = generatedKeyPair();
+
+    if ($source === 'env') {
+        config()->set('passport.private_key', str_replace("\n", '\n', $keyPair['private']));
+        config()->set('passport.public_key', str_replace("\n", '\n', $keyPair['public']));
+    } else {
+        // Empty env keys count as unset: Passport falls back to the files.
+        config()->set(['passport.private_key' => '', 'passport.public_key' => '']);
+        $privatePath = Passport::keyPath('oauth-private.key');
+        $publicPath = Passport::keyPath('oauth-public.key');
+        @mkdir(dirname($privatePath), 0777, true);
+        file_put_contents($privatePath, $keyPair['private']);
+        file_put_contents($publicPath, $keyPair['public']);
+        chmod($privatePath, 0600);
+        chmod($publicPath, 0600);
+    }
+
+    try {
+        expect($server->hasUsablePassportKeyPair())->toBeTrue();
+    } finally {
+        if ($source === 'files') {
+            @unlink(Passport::keyPath('oauth-private.key'));
+            @unlink(Passport::keyPath('oauth-public.key'));
+        }
+    }
+})->with(['env', 'files']);
+
+it('refuses keys the signer cannot use', function (string $case): void {
+    $server = makeServer(true, true);
+    $keyPair = generatedKeyPair();
+    $keyPairs = [
+        'missing' => ['private' => '', 'public' => ''],
+        'the private key corrupt' => ['private' => 'not a key', 'public' => $keyPair['public']],
+        'the public key corrupt' => ['private' => $keyPair['private'], 'public' => 'not a key'],
+        'two different pairs' => ['private' => $keyPair['private'], 'public' => generatedKeyPair()['public']],
+        'an EC pair' => generatedKeyPair(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']),
+        'RSA under 2048 bits' => generatedKeyPair(['private_key_bits' => 1024, 'private_key_type' => OPENSSL_KEYTYPE_RSA]),
+    ];
+    config()->set('passport.private_key', $keyPairs[$case]['private']);
+    config()->set('passport.public_key', $keyPairs[$case]['public']);
+    Passport::loadKeysFrom(sys_get_temp_dir().'/mcp-oauth-no-keys-'.uniqid());
+
+    expect($server->hasUsablePassportKeyPair())->toBeFalse();
+})->with(['missing', 'the private key corrupt', 'the public key corrupt', 'two different pairs', 'an EC pair', 'RSA under 2048 bits']);
+
+it('refuses an issuer without an authority or with an unusable port', function (string $appUrl): void {
+    $server = makeServer(true, true);
+    config()->set('app.url', $appUrl);
+
+    expect($server->hasAbsoluteIssuer())->toBeFalse();
+})->with([
+    'no authority' => ['http:/path'],
+    'port 0' => ['https://app.example:0'],
+    'port above 65535' => ['https://app.example:65536'],
+    'a non-numeric port' => ['https://app.example:https'],
+    'a signed port' => ['https://app.example:+80'],
+    'a signed port, the digits in the path' => ['https://app.example:+80/base:80'],
+    'a path, where no package route is served' => ['https://app.example/base'],
+    'a port with a leading space' => ['https://app.example: 80'],
+]);
