@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth\Data;
 
 /**
- * What the user approved. Product scopes only — never the wire scope mcp:use.
+ * What the user approved. Product permissions and protocol resource scopes
+ * are recorded independently.
  *
  * @api
  */
@@ -18,6 +19,7 @@ final readonly class ConsentDecision
      * @param  string|null  $resource  the MCP resource the grant is for (RFC 8707)
      * @param  string|null  $consentVersion  the version of the consent text the product showed
      * @param  string|null  $locale  the locale the page was shown in
+     * @param  array<string, string>  $resourceScopes  approved audience to wire scope pairs, empty for legacy MCP grants
      */
     public function __construct(
         public string $clientId,
@@ -31,5 +33,6 @@ final readonly class ConsentDecision
         public ?string $resource = null,
         public ?string $consentVersion = null,
         public ?string $locale = null,
+        public array $resourceScopes = [],
     ) {}
 }

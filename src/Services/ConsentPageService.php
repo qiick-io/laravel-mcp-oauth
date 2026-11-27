@@ -55,7 +55,9 @@ final class ConsentPageService
 
         $consentOptions = $this->container->make(ConsentProvider::class)
             ->options($parameters['request'], $parameters['user'], $clientInfo);
-        $resource = $this->mcpOAuthServer->resourceIdentifier();
+        /** @var array<string, string> $resourceScopes validated by the authorization middleware */
+        $resourceScopes = $parameters['request']->attributes->get(ResourceIndicatorsService::REQUEST_ATTRIBUTE, []);
+        $resource = array_key_first($resourceScopes) ?? $this->mcpOAuthServer->resourceIdentifier();
         $locale = app()->getLocale();
 
         // The oauth_consent_records columns: string(32) and string(16).
@@ -67,12 +69,18 @@ final class ConsentPageService
             throw new LogicException('The application locale must be at most 16 characters to be recorded with consent.');
         }
 
-        $parameters['request']->session()->put(PendingAuthorizationRequestService::RENDERED_CONSENT_SESSION_KEY, [
+        $renderedConsent = [
             'authToken' => $parameters['authToken'],
             'consentVersion' => $consentOptions->consentVersion,
             'locale' => $locale,
             'resource' => $resource,
-        ]);
+        ];
+
+        if ($resourceScopes !== []) {
+            $renderedConsent['resourceScopes'] = $resourceScopes;
+        }
+
+        $parameters['request']->session()->put(PendingAuthorizationRequestService::RENDERED_CONSENT_SESSION_KEY, $renderedConsent);
 
         $consentPage = new ConsentPage(
             client: [
@@ -85,6 +93,7 @@ final class ConsentPageService
             authToken: $parameters['authToken'],
             options: $consentOptions,
             advanced: self::advancedRows($clientInfo, $resource, is_string($redirectUri) ? $redirectUri : $clientInfo->redirectUris[0]),
+            resourceScopes: $resourceScopes,
         );
 
         return $this->container->make(ConsentView::class)->render($parameters, $consentPage);

@@ -95,6 +95,7 @@ final class ConsentDecisionService
             resource: $pendingAuthorizationRequest->renderedResource,
             consentVersion: $pendingAuthorizationRequest->renderedConsentVersion,
             locale: $pendingAuthorizationRequest->renderedLocale,
+            resourceScopes: $pendingAuthorizationRequest->resourceScopes,
         );
     }
 

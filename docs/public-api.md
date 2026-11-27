@@ -57,7 +57,13 @@ commands are public by name and signature (below), not as PHP classes.
 - `ConsentOptions` (class)
 - `ConsentPage` (class)
 - `GrantRecord` (class)
+- `ProtectedResourceDefinitionData` (class)
 - `RevocationReason` (enum)
+
+Register product resources with `McpOAuthServer::registerResource()` during
+application boot before calling `McpOAuthRoutes::register()`. Each definition
+has an exact URL under the issuer, one wire scope and server-assigned client
+classes. Its metadata is available on the corresponding nested RFC 9728 route.
 
 ### `Qiick\McpOAuth\Enums`
 

@@ -34,6 +34,9 @@ use Qiick\McpOAuth\Actions\RevokeGrantTokensAction;
 use Qiick\McpOAuth\Actions\RevokeTokenAction;
 use Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository;
 use Qiick\McpOAuth\Bridge\OneShotAuthCodeRepository;
+use Qiick\McpOAuth\Bridge\ResourceAccessTokenRepository;
+use Qiick\McpOAuth\Bridge\ResourceRefreshGrant;
+use Qiick\McpOAuth\Bridge\ResourceScopeRepository;
 use Qiick\McpOAuth\Console\McpOAuthCheckCommand;
 use Qiick\McpOAuth\Console\PruneAuthCodeExchangesCommand;
 use Qiick\McpOAuth\Console\PruneUnusedClientsCommand;
@@ -56,6 +59,7 @@ use Qiick\McpOAuth\Internal\DisabledAdminSwitch;
 use Qiick\McpOAuth\Internal\NullAuditLogger;
 use Qiick\McpOAuth\Internal\OutboundClientMetadataDocumentFetcher;
 use Qiick\McpOAuth\Services\ConsentPageService;
+use Qiick\McpOAuth\Services\ResourceIndicatorsService;
 use Qiick\McpOAuth\Views\InertiaConsentView;
 use ReflectionProperty;
 use Symfony\Component\HttpFoundation\Response;
@@ -402,6 +406,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
             // product's own createToken() keeps working. A local list, not a
             // class constant: pcov never covers a constant.
             $serverGrantTypes = [...McpOAuthServer::supportedGrantTypes(), 'personal_access'];
+            $hasAdditionalResources = $isMcpOAuthEnabled && $this->app->make(McpOAuthServer::class)->registeredResources() !== [];
 
             foreach ($enabledGrantTypes as $grantIdentifier => $grant) {
                 // Password, implicit, client credentials, device: whatever Passport enables.
@@ -417,9 +422,25 @@ final class McpOAuthServiceProvider extends ServiceProvider
 
                 $authCodeTtlProperty = new ReflectionProperty(AuthCodeGrant::class, 'authCodeTTL');
                 $authCodeTtlProperty->setValue($grant, $authCodeInterval);
+
+                if ($hasAdditionalResources) {
+                    $grant->setScopeRepository($this->app->make(ResourceScopeRepository::class));
+                }
             }
 
             $enabledGrantTypesProperty->setValue($authorizationServer, $enabledGrantTypes);
+
+            if ($hasAdditionalResources && isset($enabledGrantTypes['refresh_token'])) {
+                $refreshGrant = new ResourceRefreshGrant(
+                    $this->app->make(PassportRefreshTokenRepository::class),
+                    $this->app->make(ConfigRepository::class),
+                    $this->app->make(ResourceIndicatorsService::class),
+                );
+                $refreshGrant->setRefreshTokenTTL(Passport::refreshTokensExpireIn());
+                $authorizationServer->enableGrantType($refreshGrant, Passport::tokensExpireIn());
+                $refreshGrant->setScopeRepository($this->app->make(ResourceScopeRepository::class));
+                $refreshGrant->setAccessTokenRepository($this->app->make(ResourceAccessTokenRepository::class));
+            }
         };
 
         $this->app->afterResolving(AuthorizationServer::class, $harden);

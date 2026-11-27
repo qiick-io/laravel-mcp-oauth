@@ -25,11 +25,17 @@ final class InertiaConsentView implements ConsentView
     {
         // ConsentOptions and ConsentOption are readonly objects with public
         // properties: they serialise to exactly the documented props.
-        return Inertia::render(self::COMPONENT, [
+        $properties = [
             'client' => $page->client,
             'authToken' => $page->authToken,
             'options' => $page->options,
             'advanced' => $page->advanced,
-        ])->toResponse($parameters['request']);
+        ];
+
+        if ($page->resourceScopes !== []) {
+            $properties['resourceScopes'] = $page->resourceScopes;
+        }
+
+        return Inertia::render(self::COMPONENT, $properties)->toResponse($parameters['request']);
     }
 }

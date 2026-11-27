@@ -7,11 +7,13 @@ namespace Qiick\McpOAuth;
 use DateInterval;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Container\Container;
+use InvalidArgumentException;
 use Laravel\Mcp\Server\Registrar;
 use Laravel\Passport\Passport;
 use League\Uri\UriString;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Contracts\ClientMetadataDocumentFetcherContract;
+use Qiick\McpOAuth\Data\ProtectedResourceDefinitionData;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Throwable;
@@ -25,6 +27,9 @@ use Throwable;
 final class McpOAuthServer
 {
     public const string WIRE_SCOPE = Registrar::OAUTH_SCOPE;
+
+    /** @var array<string, ProtectedResourceDefinitionData> Product resources registered during bootstrap */
+    private array $registeredResources = [];
 
     /**
      * The grants the token endpoint accepts and the metadata advertises.
@@ -197,6 +202,29 @@ final class McpOAuthServer
         return $this->issuer().'/.well-known/oauth-protected-resource/'.$this->mcpPath();
     }
 
+    /** Registers an additional resource and its Passport scope during application boot. */
+    public function registerResource(ProtectedResourceDefinitionData $resource): void
+    {
+        $issuerPrefix = $this->issuer().'/';
+        $identifier = $resource->identifier;
+        $resourcePath = substr($identifier, strlen($issuerPrefix));
+
+        if (! str_starts_with($identifier, $issuerPrefix) || strlen($identifier) > 512
+            || preg_match('~\A[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*\z~', $resourcePath) !== 1
+            || $this->acceptsResource($identifier) || isset($this->registeredResources[$identifier])) {
+            throw new InvalidArgumentException('A protected resource needs a distinct canonical path under the issuer.');
+        }
+
+        $this->registeredResources[$identifier] = $resource;
+        Passport::tokensCan($this->scopeDescriptions());
+    }
+
+    /** @return array<string, ProtectedResourceDefinitionData> Additional resources keyed by their exact identifier */
+    public function registeredResources(): array
+    {
+        return $this->registeredResources;
+    }
+
     /**
      * The MCP authorization spec revision this server implements (M8), a
      * `YYYY-MM-DD` date. Fails closed on anything else rather than stamp a
@@ -258,7 +286,7 @@ final class McpOAuthServer
             'token_endpoint' => $issuer.'/oauth/token',
             'registration_endpoint' => $issuer.'/oauth/register',
             'revocation_endpoint' => $revocationEndpointUrl,
-            'scopes_supported' => [self::WIRE_SCOPE],
+            'scopes_supported' => array_keys($this->scopeDescriptions()),
             'response_types_supported' => ['code'],
             'grant_types_supported' => self::supportedGrantTypes(),
             'code_challenge_methods_supported' => self::supportedCodeChallengeMethods(),
@@ -285,12 +313,12 @@ final class McpOAuthServer
      *
      * @return array<string, mixed>
      */
-    public function protectedResourceMetadata(): array
+    public function protectedResourceMetadata(?ProtectedResourceDefinitionData $resource = null): array
     {
         return [
-            'resource' => $this->resourceIdentifier(),
+            'resource' => $resource->identifier ?? $this->resourceIdentifier(),
             'authorization_servers' => [$this->issuer()],
-            'scopes_supported' => [self::WIRE_SCOPE],
+            'scopes_supported' => [$resource->scope ?? self::WIRE_SCOPE],
             'bearer_methods_supported' => ['header'],
         ];
     }
@@ -300,9 +328,15 @@ final class McpOAuthServer
      */
     public function scopeDescriptions(): array
     {
-        return [
+        $descriptions = [
             self::WIRE_SCOPE => 'Use the MCP server with the access the user grants',
         ];
+
+        foreach ($this->registeredResources as $resource) {
+            $descriptions[$resource->scope] ??= 'Use the protected resource with the access the user grants';
+        }
+
+        return $descriptions;
     }
 
     public function accessTokenLifetime(): DateInterval

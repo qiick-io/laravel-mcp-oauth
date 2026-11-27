@@ -107,9 +107,9 @@ final class McpOAuthRoutes
     /**
      * RFC 8414 and RFC 9728 documents (design §5.2 items 2–4). They replace
      * `Mcp::oauthRoutes()`, which a product must not call: its documents are
-     * built from the request Host and sit outside the off-gate. Both documents
-     * are served at the root and at the MCP path only; any other nested path
-     * is a 404, so no other resource or issuer is advertised.
+     * built from the request Host and sit outside the off-gate. The root
+     * serves the MCP defaults. Each registered resource gets its own nested
+     * protected resource document under the same issuer.
      */
     private static function registerDiscoveryRoutes(): void
     {
@@ -135,6 +135,12 @@ final class McpOAuthRoutes
         // clients find these documents at the well-known paths.
         Route::get('.well-known/oauth-protected-resource/'.$mcpPath, ProtectedResourceMetadataController::class)
             ->name('mcp.oauth.protected-resource.mcp');
+
+        foreach ($mcpOAuthServer->registeredResources() as $resource) {
+            $resourcePath = Str::after($resource->identifier, $mcpOAuthServer->issuer().'/');
+            Route::get('.well-known/oauth-protected-resource/'.$resourcePath, ProtectedResourceMetadataController::class)
+                ->defaults('resourceIdentifier', $resource->identifier);
+        }
     }
 
     /**
@@ -207,6 +213,11 @@ final class McpOAuthRoutes
             ['GET', $mcpOAuthServer->protectedResourceMetadataUrl(), ProtectedResourceMetadataController::class],
         ];
         $revocationEndpoint = $mcpOAuthServer->revocationEndpointUrl();
+
+        foreach ($mcpOAuthServer->registeredResources() as $resource) {
+            $resourcePath = Str::after($resource->identifier, $issuer.'/');
+            $advertisedEndpoints[] = ['GET', $issuer.'/.well-known/oauth-protected-resource/'.$resourcePath, ProtectedResourceMetadataController::class];
+        }
 
         if ($revocationEndpoint !== null) {
             $advertisedEndpoints[] = ['POST', $revocationEndpoint, RevokeTokenController::class];

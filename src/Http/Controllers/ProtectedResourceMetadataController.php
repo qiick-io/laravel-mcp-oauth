@@ -8,17 +8,18 @@ use Illuminate\Http\JsonResponse;
 use Qiick\McpOAuth\McpOAuthServer;
 
 /**
- * RFC 9728 protected resource metadata of the MCP endpoint (design §5.2,
- * S13, S14; standards review S6), served at the root well-known path and at
- * the one nested path of the MCP endpoint. The document is built by
- * {@see McpOAuthServer::protectedResourceMetadata()}.
+ * RFC 9728 metadata for MCP and each registered product resource. The
+ * resolved route carries the additional identifier, so a request cannot
+ * choose another resource through the query or its Host header.
  *
  * @internal
  */
 final class ProtectedResourceMetadataController
 {
-    public function __invoke(McpOAuthServer $mcpOAuthServer): JsonResponse
+    public function __invoke(McpOAuthServer $mcpOAuthServer, ?string $resourceIdentifier = null): JsonResponse
     {
-        return new JsonResponse($mcpOAuthServer->protectedResourceMetadata());
+        $resource = $resourceIdentifier === null ? null : $mcpOAuthServer->registeredResources()[$resourceIdentifier] ?? abort(404);
+
+        return new JsonResponse($mcpOAuthServer->protectedResourceMetadata($resource));
     }
 }

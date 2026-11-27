@@ -17,6 +17,7 @@ final readonly class GrantRecord
      * @param  list<string>  $scopes
      * @param  array<string, scalar|list<scalar>|null>  $display
      * @param  array<string, scalar|list<scalar>|null>  $metadata  the product's own fields
+     * @param  array<string, string>  $resourceScopes  immutable audience to wire scope pairs copied from the decision
      */
     public function __construct(
         public string $id,
@@ -30,5 +31,6 @@ final readonly class GrantRecord
         public ?DateTimeImmutable $revokedAt = null,
         public ?RevocationReason $revocationReason = null,
         public array $metadata = [],
+        public array $resourceScopes = [],
     ) {}
 }
