@@ -67,6 +67,11 @@ it('uses shipped public metadata with CIMD fetching disabled and supplies the ex
     $bearer = Request::create('/mcp', server: ['HTTP_AUTHORIZATION' => 'Bearer '.$tokens->json('access_token')]);
     expect(app(AccessTokenAuthenticator::class)->authenticate($bearer))->toBeInstanceOf(GrantRecord::class);
 
+    $registered = Passport::client()->newQuery()->sole();
+    $registered->forceFill(['redirect_uris' => ['https://other.example/callback']])->save();
+    expect(app(AccessTokenAuthenticator::class)->authenticate($bearer))->not->toBeInstanceOf(GrantRecord::class);
+    $registered->forceFill(['redirect_uris' => [PINNED_COMPANION_CALLBACK]])->save();
+
     config()->set('mcp-oauth.companion.enabled', false);
     $this->post('/oauth/token', $tokenRequest)->assertUnauthorized()->assertJsonPath('error', 'invalid_client');
     $this->post('/oauth/token', [
@@ -132,11 +137,30 @@ it('rejects incomplete metadata declarations before registering the first-party 
     'identifier without path' => ['https://companion.qiick.io', 'qiick Companion', [PINNED_COMPANION_CALLBACK], 'qiick'],
     'identifier with query' => [PINNED_COMPANION_IDENTIFIER.'?other=one', 'qiick Companion', [PINNED_COMPANION_CALLBACK], 'qiick'],
     'blank name' => [PINNED_COMPANION_IDENTIFIER, ' ', [PINNED_COMPANION_CALLBACK], 'qiick'],
+    'oversized name' => [PINNED_COMPANION_IDENTIFIER, str_repeat('n', 256), [PINNED_COMPANION_CALLBACK], 'qiick'],
     'blank operator' => [PINNED_COMPANION_IDENTIFIER, 'qiick Companion', [PINNED_COMPANION_CALLBACK], ' '],
     'missing callbacks' => [PINNED_COMPANION_IDENTIFIER, 'qiick Companion', [], 'qiick'],
     'loopback callback' => [PINNED_COMPANION_IDENTIFIER, 'qiick Companion', ['http://127.0.0.1/callback'], 'qiick'],
     'custom-scheme callback' => [PINNED_COMPANION_IDENTIFIER, 'qiick Companion', ['io.qiick.companion:/callback'], 'qiick'],
+    'oversized HTTPS callback' => [PINNED_COMPANION_IDENTIFIER, 'qiick Companion', [PINNED_COMPANION_CALLBACK.str_repeat('r', 1025 - strlen(PINNED_COMPANION_CALLBACK))], 'qiick'],
 ]);
+
+it('reserves distinct companion identifiers at the declared size limits without creating clients', function (): void {
+    $server = app(McpOAuthServer::class);
+    $identifier = PINNED_COMPANION_IDENTIFIER.str_repeat('i', 2048 - strlen(PINNED_COMPANION_IDENTIFIER));
+    $callback = PINNED_COMPANION_CALLBACK.str_repeat('r', 1024 - strlen(PINNED_COMPANION_CALLBACK));
+    $definition = new CompanionClientDefinitionData($identifier, str_repeat('n', 255), [$callback], 'qiick');
+    $server->registerCompanionClient($definition);
+    registerPinnedCompanion();
+
+    expect($server->companionClientFor($identifier))->toBe($definition)
+        ->and($server->companionClientFor(PINNED_COMPANION_IDENTIFIER)?->redirectUris)->toBe([PINNED_COMPANION_CALLBACK])
+        ->and(fn () => $server->registerCompanionClient($definition))->toThrow(InvalidArgumentException::class)
+        ->and(fn () => $server->registerCompanionClient(new CompanionClientDefinitionData(
+            $server->resourceIdentifier(), 'Resource', [$callback], 'qiick',
+        )))->toThrow(InvalidArgumentException::class)
+        ->and(OAuthClientMetadata::query()->exists())->toBeFalse();
+});
 
 it('replies to denial with the exact issuer and refuses callbacks outside the shipped list', function (): void {
     $this->enableOAuth();
