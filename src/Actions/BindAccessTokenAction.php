@@ -89,9 +89,7 @@ final class BindAccessTokenAction
             $consumedGrantId = $this->consumedAuthCodeGrant->take();
 
             // Consumed with no active grant: nothing may be bound, not even a later consent.
-            $selectedGrantId ??= $consumedGrantId;
-
-            return $selectedGrantId === null ? null : $this->grantStore->find($selectedGrantId);
+            return $consumedGrantId === null ? null : $this->grantStore->find($consumedGrantId);
         }
 
         if ($selectedGrantId !== null) {

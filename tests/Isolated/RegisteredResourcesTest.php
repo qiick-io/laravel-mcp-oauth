@@ -5,11 +5,14 @@ declare(strict_types=1);
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\AccessTokenAuthenticator;
+use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\ProtectedResourceDefinitionData;
 use Qiick\McpOAuth\Events\McpConsentApprovedEvent;
+use Qiick\McpOAuth\Http\Middleware\ValidateAuthorizationRequestMiddleware;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
@@ -153,14 +156,17 @@ it('retains each displayed resource when the user denies consent', function (): 
     McpOAuthRoutes::register();
     $client = $this->createClient();
     OAuthClientMetadata::query()->where('client_id', $client->getKey())->update(['registration_source' => 'companion']);
+    $authorizationUrl = $this->authorizeUrl($client, ['resource' => COMPANION_RESOURCE])
+        .'&resource='.rawurlencode(AuthorizeFlowTestCase::RESOURCE);
     $page = $this->actingAs($this->createUser())
-        ->get($this->authorizeUrl($client).'&resource='.rawurlencode(COMPANION_RESOURCE), ['X-Inertia' => 'true'])
+        ->get($authorizationUrl, ['X-Inertia' => 'true'])
         ->assertOk();
     $this->delete('/oauth/authorize', ['auth_token' => $page->json('props.authToken')])
         ->assertRedirectContains('error=access_denied');
 
     $evidence = OAuthConsentRecord::query()->sole();
     expect($evidence->getAttribute('decision'))->toBe('denied')
+        ->and($evidence->getAttribute('resource'))->toBe(COMPANION_RESOURCE)
         ->and($evidence->getAttribute('resource_scopes'))->toEqual([
             AuthorizeFlowTestCase::RESOURCE => 'mcp:use', COMPANION_RESOURCE => 'companion:device',
         ]);
@@ -230,6 +236,13 @@ it('exchanges a one-shot code for exactly one audience and refreshes the other w
     $this->flushSession();
 
     $mcpToken = $this->post('/oauth/token', $this->codeExchange($client, $responseParameters['code']))->assertOk();
+    $boundGrant = $this->grantStore()->find(Passport::token()->newQuery()->sole()->api_key_id);
+    expect($boundGrant)->toBeInstanceOf(GrantRecord::class);
+    $this->grantStore()->seed(new GrantRecord(
+        (string) Str::uuid7(), $boundGrant->clientId, $boundGrant->userIdentifier, false,
+        $boundGrant->scopes, $boundGrant->authorizedAt, null, resourceScopes: $boundGrant->resourceScopes,
+    ));
+
     $refreshRequest = [
         'grant_type' => 'refresh_token',
         'client_id' => (string) $client->getKey(),
@@ -237,6 +250,7 @@ it('exchanges a one-shot code for exactly one audience and refreshes the other w
         'resource' => COMPANION_RESOURCE_NORMALIZABLE,
     ];
     $companionToken = $this->post('/oauth/token', $refreshRequest)->assertOk();
+    expect(Passport::token()->newQuery()->where('audience', COMPANION_RESOURCE)->sole()->api_key_id)->toBe($boundGrant->id);
 
     $authenticate = app(AccessTokenAuthenticator::class);
     $mcpRequest = Request::create('/mcp', server: ['HTTP_AUTHORIZATION' => 'Bearer '.$mcpToken->json('access_token')]);
@@ -288,4 +302,115 @@ it('cannot refresh into another resource unless the user approved the correspond
     $this->post('/oauth/token', $refresh)->assertBadRequest()->assertJsonPath('error', 'invalid_target');
     $this->post('/oauth/token', [...$refresh, 'resource' => AuthorizeFlowTestCase::RESOURCE])
         ->assertOk()->assertJsonPath('scope', 'mcp:use');
+});
+
+it('requires the registered audience, exact approved pair and live bound grant at bearer use', function (): void {
+    $this->enableOAuth();
+    registerCompanionResource();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    ['code' => $code] = $this->obtainAuthorizationCode($client);
+    $tokens = $this->post('/oauth/token', $this->codeExchange($client, $code))->assertOk();
+    $bearer = Request::create('/mcp', server: ['HTTP_AUTHORIZATION' => 'Bearer '.$tokens->json('access_token')]);
+    $authenticate = app(AccessTokenAuthenticator::class);
+    $grant = $authenticate->authenticate($bearer);
+    expect($grant)->toBeInstanceOf(GrantRecord::class);
+
+    $token = Passport::token()->newQuery()->sole();
+    $token->forceFill(['api_key_id' => (string) Str::uuid7()])->save();
+    expect($authenticate->authenticate($bearer))->not->toBeInstanceOf(GrantRecord::class);
+    $token->forceFill(['api_key_id' => $grant->id])->save();
+
+    foreach ([
+        ['clientId' => $grant->clientId, 'userIdentifier' => $grant->userIdentifier, 'revoked' => true, 'resourceScopes' => $grant->resourceScopes],
+        ['clientId' => (string) $this->createClient()->getKey(), 'userIdentifier' => $grant->userIdentifier, 'revoked' => false, 'resourceScopes' => $grant->resourceScopes],
+        ['clientId' => $grant->clientId, 'userIdentifier' => 'another-principal', 'revoked' => false, 'resourceScopes' => $grant->resourceScopes],
+        ['clientId' => $grant->clientId, 'userIdentifier' => $grant->userIdentifier, 'revoked' => false, 'resourceScopes' => [COMPANION_RESOURCE => 'companion:device']],
+    ] as $inconsistentGrant) {
+        $this->grantStore()->seed(new GrantRecord(
+            id: $grant->id,
+            clientId: $inconsistentGrant['clientId'],
+            userIdentifier: $inconsistentGrant['userIdentifier'],
+            revoked: $inconsistentGrant['revoked'],
+            scopes: $grant->scopes,
+            authorizedAt: $grant->authorizedAt,
+            lastUsedAt: null,
+            resourceScopes: $inconsistentGrant['resourceScopes'],
+        ));
+        expect($authenticate->authenticate($bearer))->not->toBeInstanceOf(GrantRecord::class);
+    }
+
+    $this->grantStore()->seed(new GrantRecord(
+        $grant->id, $grant->clientId, $grant->userIdentifier, false, $grant->scopes, $grant->authorizedAt, null,
+    ));
+    $unknownResource = 'https://mcp-oauth.test/unregistered';
+    $token->forceFill(['audience' => $unknownResource])->save();
+    expect($authenticate->authenticate($bearer, $unknownResource))->not->toBeInstanceOf(GrantRecord::class);
+});
+
+it('sets the selected scopes on a synthesized authorize request and keeps an unrelated login destination', function (): void {
+    $this->enableOAuth();
+    registerCompanionResource();
+    $client = $this->createClient();
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->update(['registration_source' => 'companion']);
+    $middleware = app(ValidateAuthorizationRequestMiddleware::class);
+    $authorizationUrl = $this->authorizeUrl($client, ['resource' => COMPANION_RESOURCE, 'scope' => null]);
+    $request = Request::create($authorizationUrl);
+    $request->server->remove('QUERY_STRING');
+    $response = $middleware->handle($request, static fn (Request $accepted) => response()->json($accepted->query()));
+    expect($response->getStatusCode())->toBe(200)
+        ->and(json_decode((string) $response->getContent(), true)['scope'])->toBe('companion:device');
+
+    $request->query->set('scope', McpOAuthServer::WIRE_SCOPE);
+    expect($middleware->handle($request, static fn () => response('unexpected'))->getStatusCode())->toBe(400);
+
+    $request = Request::create($authorizationUrl);
+    $session = app('session')->driver();
+    $session->put('url.intended', '/somewhere-else');
+    $request->setLaravelSession($session);
+    $middleware->handle($request, static fn () => redirect('/login'));
+    expect($session->get('url.intended'))->toBe('/somewhere-else');
+});
+
+it('rejects duplicate or ambiguous scope fields and keeps the legacy MCP-only consent shape', function (): void {
+    $this->enableOAuth();
+    registerCompanionResource();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $this->actingAs($this->createUser());
+
+    foreach (['&scope=companion%3Adevice', '&scope%5B%5D=mcp%3Ause'] as $ambiguousScope) {
+        $this->get($this->authorizeUrl($client).$ambiguousScope)
+            ->assertBadRequest()->assertJsonPath('error', 'invalid_scope');
+    }
+
+    $this->get($this->authorizeUrl($client), ['X-Inertia' => 'true'])
+        ->assertOk()->assertJsonMissingPath('props.resourceScopes');
+});
+
+it('refuses to record approval when the product discards an approved resource', function (): void {
+    Event::fake([McpConsentApprovedEvent::class]);
+    $this->enableOAuth();
+    registerCompanionResource();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->update(['registration_source' => 'companion']);
+    $user = $this->createUser();
+    $grant = new GrantRecord(
+        (string) Str::uuid7(), (string) $client->getKey(), (string) $user->getAuthIdentifier(), false, ['mcp:read'], null, null,
+    );
+    $this->mock(GrantStore::class)->shouldReceive('replace')->once()->andReturn($grant);
+
+    $page = $this->actingAs($user)
+        ->get($this->authorizeUrl($client).'&resource='.rawurlencode(COMPANION_RESOURCE), ['X-Inertia' => 'true'])
+        ->assertOk();
+    $this->withoutExceptionHandling();
+    expect(fn () => $this->post('/oauth/authorize', [
+        'auth_token' => $page->json('props.authToken'),
+        'scopes' => ['mcp:read'],
+        'role' => 'editor',
+        'resources' => ['news'],
+    ]))->toThrow(LogicException::class, 'The GrantStore must preserve the approved resource scopes.');
+    expect(OAuthConsentRecord::query()->exists())->toBeFalse();
+    Event::assertNotDispatched(McpConsentApprovedEvent::class);
 });
