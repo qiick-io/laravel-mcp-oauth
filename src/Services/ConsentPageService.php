@@ -14,6 +14,7 @@ use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\ConsentView;
 use Qiick\McpOAuth\Data\ClientInfo;
 use Qiick\McpOAuth\Data\ConsentPage;
+use Qiick\McpOAuth\Data\GrantInstallationData;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
@@ -57,6 +58,7 @@ final class ConsentPageService
             ->options($parameters['request'], $parameters['user'], $clientInfo);
         /** @var array<string, string> $resourceScopes validated by the authorization middleware */
         $resourceScopes = $parameters['request']->attributes->get(ResourceIndicatorsService::REQUEST_ATTRIBUTE, []);
+        $installation = $parameters['request']->attributes->get(GrantInstallationData::REQUEST_ATTRIBUTE);
         $resource = array_key_first($resourceScopes) ?? $this->mcpOAuthServer->resourceIdentifier();
         $locale = app()->getLocale();
 
@@ -80,6 +82,10 @@ final class ConsentPageService
             $renderedConsent['resourceScopes'] = $resourceScopes;
         }
 
+        if ($installation instanceof GrantInstallationData) {
+            $renderedConsent['installation'] = ['installId' => $installation->installId, 'keyThumbprint' => $installation->keyThumbprint];
+        }
+
         $parameters['request']->session()->put(PendingAuthorizationRequestService::RENDERED_CONSENT_SESSION_KEY, $renderedConsent);
 
         $consentPage = new ConsentPage(
@@ -98,6 +104,7 @@ final class ConsentPageService
                 is_string($redirectUri) ? $redirectUri : $clientInfo->redirectUris[0],
             ),
             resourceScopes: $resourceScopes,
+            isInstallationPairing: $installation instanceof GrantInstallationData,
         );
 
         return $this->container->make(ConsentView::class)->render($parameters, $consentPage);

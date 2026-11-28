@@ -2,14 +2,52 @@
 
 declare(strict_types=1);
 
+use Illuminate\Http\Request;
+use Laravel\Passport\Client;
+use Laravel\Passport\Passport;
+use Qiick\McpOAuth\AccessTokenAuthenticator;
+use Qiick\McpOAuth\Actions\PruneAuthCodeExchangesAction;
+use Qiick\McpOAuth\Actions\RevokeAuthCodeTokensAction;
+use Qiick\McpOAuth\Actions\RevokeConnectedAppAction;
+use Qiick\McpOAuth\Data\ConsentOption;
+use Qiick\McpOAuth\Data\ConsentOptions;
+use Qiick\McpOAuth\Data\GrantRecord;
+use Qiick\McpOAuth\Erasure\McpOAuthEraser;
 use Qiick\McpOAuth\McpOAuthRoutes;
+use Qiick\McpOAuth\Models\OAuthAuthCodeExchange;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
+use Qiick\McpOAuth\Tests\Support\TestUser;
 
 uses(AuthorizeFlowTestCase::class);
 
 const FIRST_INSTALLATION = 'edb06dcc-75b5-4af4-b08e-25393e025fa2';
+const SECOND_INSTALLATION = 'f3add97d-af1e-4169-b778-65ad96ba090f';
 const FIRST_INSTALLATION_THUMBPRINT = '0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2ai4EcM';
+const FIRST_INSTALLATION_ORGANISATION = 'd86c20ee-59a8-4fac-a057-1ad7c6f88857';
+const SECOND_INSTALLATION_ORGANISATION = '3840d961-0846-46de-9668-b077979ee5c5';
+
+function approveInstallation(AuthorizeFlowTestCase $testCase, Client $client, TestUser $user, string $installId, ?string $organisation = null): string
+{
+    $page = $testCase->actingAs($user)->get($testCase->authorizeUrl($client, [
+        'install_id' => $installId,
+        'companion_jkt' => FIRST_INSTALLATION_THUMBPRINT,
+    ]), ['X-Inertia' => 'true'])->assertOk()->assertJsonPath('props.isInstallationPairing', true);
+    $approval = $testCase->post('/oauth/authorize', [
+        'auth_token' => $page->json('props.authToken'),
+        'scopes' => ['mcp:read'],
+        'role' => 'editor',
+        'resources' => ['news'],
+        'organisation' => $organisation,
+        'install_id' => 'discarded-form-value',
+        'companion_jkt' => 'discarded-form-value',
+    ])->assertRedirectContains('code=');
+    parse_str((string) parse_url((string) $approval->headers->get('Location'), PHP_URL_QUERY), $redirect);
+    app('auth')->forgetGuards();
+    $testCase->flushSession();
+
+    return $redirect['code'];
+}
 
 it('refuses installation inputs from clients without trusted enrollment', function (array $installationParameters): void {
     $this->enableOAuth();
@@ -41,3 +79,189 @@ it('requires an installation id and a correctly encoded key thumbprint for flagg
     'padded thumbprint' => [['install_id' => FIRST_INSTALLATION, 'companion_jkt' => FIRST_INSTALLATION_THUMBPRINT.'=']],
     'array' => [['install_id' => [FIRST_INSTALLATION], 'companion_jkt' => FIRST_INSTALLATION_THUMBPRINT]],
 ]);
+
+it('pins codes and tokens to the consented installation and organisation', function (): void {
+    $options = AuthorizeFlowTestCase::defaultConsentOptions();
+    $this->enableOAuth(new ConsentOptions(
+        $options->scopes, $options->roles, $options->resources, $options->resourcesRequired, $options->canGrant,
+        organisations: [
+            new ConsentOption(FIRST_INSTALLATION_ORGANISATION, 'First organisation', grantable: true),
+            new ConsentOption(SECOND_INSTALLATION_ORGANISATION, 'Second organisation', grantable: true),
+        ],
+    ));
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->update([
+        'registration_source' => 'companion',
+        'has_per_install_grants' => true,
+    ]);
+    $user = $this->createUser();
+    $firstCode = approveInstallation($this, $client, $user, strtoupper(FIRST_INSTALLATION), FIRST_INSTALLATION_ORGANISATION);
+    $secondCode = approveInstallation($this, $client, $user, SECOND_INSTALLATION, FIRST_INSTALLATION_ORGANISATION);
+    $otherOrganisationCode = approveInstallation($this, $client, $user, FIRST_INSTALLATION, SECOND_INSTALLATION_ORGANISATION);
+    $authenticator = app(AccessTokenAuthenticator::class);
+    $bearers = [];
+    $grants = [];
+    $refreshTokens = [];
+
+    foreach ([
+        [$firstCode, FIRST_INSTALLATION, FIRST_INSTALLATION_ORGANISATION],
+        [$secondCode, SECOND_INSTALLATION, FIRST_INSTALLATION_ORGANISATION],
+        [$otherOrganisationCode, FIRST_INSTALLATION, SECOND_INSTALLATION_ORGANISATION],
+    ] as [$code, $installId, $organisation]) {
+        $tokens = $this->post('/oauth/token', $this->codeExchange($client, $code))->assertOk();
+        $bearer = Request::create('/mcp', server: ['HTTP_AUTHORIZATION' => 'Bearer '.$tokens->json('access_token')]);
+        $grant = $authenticator->authenticate($bearer);
+        expect($grant)->toBeInstanceOf(GrantRecord::class)
+            ->and($grant->installation?->installId)->toBe($installId)
+            ->and($grant->installation?->organisationId)->toBe($organisation)
+            ->and($grant->installation?->keyThumbprint)->toBe(FIRST_INSTALLATION_THUMBPRINT)
+            ->and($grant->authorizedAt)->not->toBeNull();
+        $bearers[] = $bearer;
+        $grants[] = $grant;
+        $refreshTokens[] = $tokens->json('refresh_token');
+    }
+
+    approveInstallation($this, $client, $user, FIRST_INSTALLATION, FIRST_INSTALLATION_ORGANISATION);
+    expect($authenticator->authenticate($bearers[0]))->not->toBeInstanceOf(GrantRecord::class)
+        ->and($authenticator->authenticate($bearers[1]))->toBeInstanceOf(GrantRecord::class)
+        ->and($authenticator->authenticate($bearers[2]))->toBeInstanceOf(GrantRecord::class);
+
+    app(RevokeConnectedAppAction::class)->execute($grants[1], $user);
+    expect($this->grantStore()->find($grants[1]->id)?->revoked)->toBeTrue()
+        ->and($authenticator->authenticate($bearers[2]))->toBeInstanceOf(GrantRecord::class);
+
+    $this->post('/oauth/revoke', ['client_id' => $client->getKey(), 'token' => $refreshTokens[2]])->assertOk();
+    expect($this->grantStore()->find($grants[2]->id)?->revoked)->toBeTrue();
+});
+
+it('stops refresh at the absolute installation grant age even after rotation', function (?int $configuredAge, int $age): void {
+    $this->enableOAuth();
+
+    if ($configuredAge !== null) {
+        config()->set('mcp-oauth.companion.grant_max_age_days', $configuredAge);
+    }
+
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->update([
+        'registration_source' => 'companion',
+        'has_per_install_grants' => true,
+    ]);
+    $user = $this->createUser();
+    $code = approveInstallation($this, $client, $user, FIRST_INSTALLATION);
+    $issued = $this->post('/oauth/token', $this->codeExchange($client, $code))->assertOk();
+    $grant = $this->grantStore()->activeFor((string) $client->getKey(), (string) $user->getAuthIdentifier());
+    $consentedAt = $grant?->authorizedAt;
+    expect($consentedAt)->toBeInstanceOf(DateTimeImmutable::class);
+    $expiresAt = $consentedAt->add(new DateInterval("P{$age}D"));
+    $this->travelTo($expiresAt->sub(new DateInterval('PT1S')));
+    $parameters = [
+        'grant_type' => 'refresh_token',
+        'client_id' => $client->getKey(),
+        'resource' => AuthorizeFlowTestCase::RESOURCE,
+    ];
+    $rotated = $this->post('/oauth/token', [...$parameters, 'refresh_token' => $issued->json('refresh_token')])->assertOk();
+    $this->travelTo($expiresAt);
+
+    $this->post('/oauth/token', [...$parameters, 'refresh_token' => $rotated->json('refresh_token')])
+        ->assertBadRequest()->assertJsonPath('error', 'invalid_grant');
+    $bearer = Request::create('/mcp', server: ['HTTP_AUTHORIZATION' => 'Bearer '.$rotated->json('access_token')]);
+    expect(app(AccessTokenAuthenticator::class)->authenticate($bearer))->not->toBeInstanceOf(GrantRecord::class)
+        ->and($this->grantStore()->find($grant->id)?->authorizedAt)->toEqual($consentedAt);
+})->with(['shipped default' => [null, 180], 'configured age' => [7, 7]]);
+
+it('revokes only the exchanged installation grant when a code is replayed', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->update([
+        'registration_source' => 'companion',
+        'has_per_install_grants' => true,
+    ]);
+    $user = $this->createUser();
+    $first = $this->codeExchange($client, approveInstallation($this, $client, $user, FIRST_INSTALLATION));
+    $second = $this->codeExchange($client, approveInstallation($this, $client, $user, SECOND_INSTALLATION));
+    $this->post('/oauth/token', $first)->assertOk();
+    $secondTokens = $this->post('/oauth/token', $second)->assertOk();
+    $this->post('/oauth/token', $first)->assertBadRequest()->assertJsonPath('error', 'invalid_grant');
+
+    $bearer = Request::create('/mcp', server: ['HTTP_AUTHORIZATION' => 'Bearer '.$secondTokens->json('access_token')]);
+    $grant = app(AccessTokenAuthenticator::class)->authenticate($bearer);
+    expect($grant)->toBeInstanceOf(GrantRecord::class)
+        ->and($grant->installation?->installId)->toBe(SECOND_INSTALLATION)
+        ->and(Passport::token()->newQuery()->where('revoked', true)->count())->toBe(1);
+});
+
+it('never falls back to another installation when the code has no valid grant binding', function (string $problem): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->update([
+        'registration_source' => 'companion',
+        'has_per_install_grants' => true,
+    ]);
+    $user = $this->createUser();
+    $code = approveInstallation($this, $client, $user, FIRST_INSTALLATION);
+    $exchange = OAuthAuthCodeExchange::query()->sole();
+
+    if ($problem === 'missing binding') {
+        $exchange->delete();
+    } else {
+        $exchange->update(['grant_id' => SECOND_INSTALLATION]);
+    }
+
+    $this->post('/oauth/token', $this->codeExchange($client, $code))
+        ->assertBadRequest()->assertJsonPath('error', 'invalid_grant');
+    expect(Passport::token()->newQuery()->exists())->toBeFalse();
+})->with(['missing binding', 'missing grant']);
+
+it('prunes a pending code when it expires without revoking the installation grant', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->update([
+        'registration_source' => 'companion',
+        'has_per_install_grants' => true,
+    ]);
+    approveInstallation($this, $client, $this->createUser(), FIRST_INSTALLATION);
+    $exchange = OAuthAuthCodeExchange::query()->sole();
+    $this->travelTo($exchange->expires_at->copy()->addSecond());
+
+    app(RevokeAuthCodeTokensAction::class)->execute($exchange->auth_code_id);
+    expect($this->grantStore()->find($exchange->grant_id)?->revoked)->toBeFalse()
+        ->and(app(PruneAuthCodeExchangesAction::class)->execute(false))->toBe(1)
+        ->and(OAuthAuthCodeExchange::query()->exists())->toBeFalse();
+});
+
+it('erases pending and exchanged credentials for all subject installations', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->update([
+        'registration_source' => 'companion',
+        'has_per_install_grants' => true,
+    ]);
+    $subject = $this->createUser();
+    $anotherUser = $this->createUser();
+    $consumedCode = approveInstallation($this, $client, $subject, FIRST_INSTALLATION);
+    approveInstallation($this, $client, $subject, SECOND_INSTALLATION);
+    OAuthAuthCodeExchange::query()->create([
+        'auth_code_id' => str_repeat('a', 80),
+        'grant_id' => SECOND_INSTALLATION,
+        'user_identifier' => (string) $anotherUser->getAuthIdentifier(),
+        'expires_at' => now()->addMinute(),
+    ]);
+    $this->post('/oauth/token', $this->codeExchange($client, $consumedCode))->assertOk();
+    expect(OAuthAuthCodeExchange::query()->count())->toBe(3);
+
+    $report = app(McpOAuthEraser::class)->erase(
+        (string) $subject->getAuthIdentifier(), FIRST_INSTALLATION_ORGANISATION, McpOAuthEraser::DELETE,
+    );
+
+    expect($report->stores['oauth_auth_code_exchanges']['deleted'])->toBe(2)
+        ->and(OAuthAuthCodeExchange::query()->sole()->user_identifier)->toBe((string) $anotherUser->getAuthIdentifier())
+        ->and(Passport::token()->newQuery()->exists())->toBeFalse()
+        ->and(Passport::refreshToken()->newQuery()->exists())->toBeFalse()
+        ->and(Passport::authCode()->newQuery()->exists())->toBeFalse();
+});

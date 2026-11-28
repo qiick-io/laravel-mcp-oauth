@@ -9,6 +9,7 @@ use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Internal\GrantBindingColumn;
+use Qiick\McpOAuth\Models\OAuthAuthCodeExchange;
 
 /**
  * Revokes every access token bound to a grant (the binding column holds
@@ -36,5 +37,11 @@ final class RevokeGrantTokensAction
 
         Passport::refreshToken()->newQuery()->whereIn('access_token_id', $grantAccessTokenIds)->update(['revoked' => true]);
         Passport::token()->newQuery()->whereIn('id', $grantAccessTokenIds)->update(['revoked' => true]);
+
+        if ($grant->installation !== null) {
+            Passport::authCode()->newQuery()->whereIn('id', OAuthAuthCodeExchange::query()
+                ->where('grant_id', $grant->id)
+                ->select('auth_code_id'))->update(['revoked' => true]);
+        }
     }
 }

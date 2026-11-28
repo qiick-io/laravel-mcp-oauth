@@ -5,6 +5,7 @@ declare(strict_types=1);
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Cookie\CookieJar;
 use GuzzleHttp\Promise\Utils;
+use GuzzleHttp\Psr7\Request as HttpRequest;
 use Psr\Http\Message\ResponseInterface;
 use Qiick\McpOAuth\Tests\Http\Server\HttpFlowServiceProvider;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
@@ -106,13 +107,13 @@ function writeHttpFlowPassportKeys(string $storage): void
     }
 }
 
-function httpFlowClient(string $baseUrl): HttpClient
+function httpFlowClient(string $baseUrl, ?CookieJar $cookieJar = null): HttpClient
 {
     return new HttpClient([
         'base_uri' => $baseUrl,
         'http_errors' => false,
         'allow_redirects' => false,
-        'cookies' => new CookieJar,
+        'cookies' => $cookieJar ?? new CookieJar,
         'timeout' => 20,
     ]);
 }
@@ -172,30 +173,8 @@ function obtainHttpFlowTokens(string $baseUrl, string $redirectUri = HTTP_FLOW_R
     $client = httpFlowClient($baseUrl);
     $clientId ??= registerHttpFlowClient($client, $redirectUri);
     $authorizeUrl = httpFlowAuthorizeUrl($baseUrl, $clientId, $redirectUri, $additionalResources);
-
-    expect($client->get($authorizeUrl)->getHeaderLine('Location'))->toEndWith('/login');
-
-    $loginCsrfToken = preg_replace('/^.*name="_token" value="([^"]+)".*$/s', '$1', (string) $client->get('/login')->getBody());
-    $login = $client->post('/login', ['form_params' => ['_token' => $loginCsrfToken, 'user_id' => 1]]);
-
-    $consentResponse = $client->get($login->getHeaderLine('Location'));
-    expect($consentResponse->getStatusCode())->toBe(200);
-    $consentPage = (string) $consentResponse->getBody();
-    preg_match('/name="_token" value="([^"]+)".*name="auth_token" value="([^"]+)"/s', $consentPage, $tokens);
-
-    expect($tokens)->toHaveCount(3);
-
-    foreach ($additionalResources as $resource) {
-        expect($consentPage)->toContain($resource)->toContain("{$baseUrl}/mcp");
-    }
-
-    $approval = $client->post('/oauth/authorize', ['form_params' => [
-        '_token' => $tokens[1],
-        'auth_token' => $tokens[2],
-        'scopes' => ['mcp:read'],
-        'role' => 'editor',
-        'resources' => ['news'],
-    ]]);
+    $displayedResources = $additionalResources === [] ? [] : ["{$baseUrl}/mcp", ...$additionalResources];
+    $approval = $client->post('/oauth/authorize', ['form_params' => prepareHttpFlowConsent($client, $authorizeUrl, $displayedResources)]);
     parse_str((string) parse_url($approval->getHeaderLine('Location'), PHP_URL_QUERY), $redirectParameters);
 
     expect($approval->getStatusCode())->toBe(302)
@@ -217,6 +196,37 @@ function obtainHttpFlowTokens(string $baseUrl, string $redirectUri = HTTP_FLOW_R
     $tokenPair = jsonOf($tokenResponse);
 
     return [...$tokenPair, 'client_id' => $clientId];
+}
+
+/**
+ * @param  list<string>  $displayedResources
+ * @return array{_token: string, auth_token: string, scopes: list<string>, role: string, resources: list<string>}
+ */
+function prepareHttpFlowConsent(HttpClient $client, string $authorizeUrl, array $displayedResources = []): array
+{
+    expect($client->get($authorizeUrl)->getHeaderLine('Location'))->toEndWith('/login');
+
+    $loginCsrfToken = preg_replace('/^.*name="_token" value="([^"]+)".*$/s', '$1', (string) $client->get('/login')->getBody());
+    $login = $client->post('/login', ['form_params' => ['_token' => $loginCsrfToken, 'user_id' => 1]]);
+
+    $consentResponse = $client->get($login->getHeaderLine('Location'));
+    expect($consentResponse->getStatusCode())->toBe(200);
+    $consentPage = (string) $consentResponse->getBody();
+    preg_match('/name="_token" value="([^"]+)".*name="auth_token" value="([^"]+)"/s', $consentPage, $tokens);
+
+    expect($tokens)->toHaveCount(3);
+
+    foreach ($displayedResources as $resource) {
+        expect($consentPage)->toContain($resource);
+    }
+
+    return [
+        '_token' => $tokens[1],
+        'auth_token' => $tokens[2],
+        'scopes' => ['mcp:read'],
+        'role' => 'editor',
+        'resources' => ['news'],
+    ];
 }
 
 function listMcpTools(string $baseUrl, string $accessToken): ResponseInterface
@@ -361,9 +371,9 @@ it('runs consent, token exchange, refresh and the bearer check using a CIMD URL 
 /**
  * @param  array{environment: array<string, string>}  $httpFlowServer
  */
-function runHttpFlowCommand(array $httpFlowServer, string $action, string $subject): void
+function runHttpFlowCommand(array $httpFlowServer, string $action, string $subject): string
 {
-    (new Process([PHP_BINARY, 'tests/Http/Server/command.php', $action, $subject], dirname(__DIR__, 2), $httpFlowServer['environment']))->mustRun();
+    return (new Process([PHP_BINARY, 'tests/Http/Server/command.php', $action, $subject], dirname(__DIR__, 2), $httpFlowServer['environment']))->mustRun()->getOutput();
 }
 
 function requestCompanion(HttpClient $client, string $accessToken): ResponseInterface
@@ -505,6 +515,88 @@ it('CMP3: races one refresh on two database connections across both audiences', 
         }
     });
 });
+
+it('races two installation approvals on independent database connections', function (string $secondInstallId, int $expectedActive) use (&$httpFlowServer): void {
+    $baseUrl = $httpFlowServer['baseUrl'];
+    $storage = $httpFlowServer['storage'];
+    $transport = httpFlowClient($baseUrl);
+    $clientId = registerHttpFlowClient($transport);
+    runHttpFlowCommand($httpFlowServer, 'classify-installation', $clientId);
+    $flags = [HttpFlowServiceProvider::COMPANION_ENABLED_FLAG, HttpFlowServiceProvider::CONSENT_RACE_FLAG];
+
+    withHttpFlowFlags($storage, $flags, static function () use ($httpFlowServer, $baseUrl, $storage, $transport, $clientId, $secondInstallId, $expectedActive): void {
+        $companionResource = "{$baseUrl}/companion";
+        $targets = [
+            'first' => ['installId' => 'edb06dcc-75b5-4af4-b08e-25393e025fa2', 'origin' => $baseUrl],
+            'second' => ['installId' => $secondInstallId, 'origin' => $httpFlowServer['secondBaseUrl']],
+        ];
+        $forms = [];
+
+        foreach ($targets as $participant => $target) {
+            $marker = $storage.'/consent-arrived-'.$participant;
+
+            if (is_file($marker)) {
+                unlink($marker);
+            }
+
+            $cookieJar = new CookieJar;
+            $browser = httpFlowClient($baseUrl, $cookieJar);
+            $authorizeUrl = httpFlowAuthorizeUrl($baseUrl, $clientId, HTTP_FLOW_REDIRECT_URI, [$companionResource]).'&'.http_build_query([
+                'install_id' => $target['installId'],
+                'companion_jkt' => '0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2ai4EcM',
+            ]);
+            $approvalUrl = $target['origin'].'/oauth/authorize';
+            $consentForm = prepareHttpFlowConsent($browser, $authorizeUrl, ["{$baseUrl}/mcp", $companionResource]);
+            $cookieHeader = $cookieJar->withCookieHeader(new HttpRequest('POST', $approvalUrl))->getHeaderLine('Cookie');
+            $forms[] = [$approvalUrl, [
+                'cookies' => false,
+                'headers' => ['Cookie' => $cookieHeader, 'X-Consent-Race' => $participant],
+                'form_params' => $consentForm,
+            ]];
+        }
+
+        // A single curl_multi handler sends both independent browser sessions together.
+        $approvals = Utils::unwrap(array_map(
+            static fn (array $form) => $transport->postAsync($form[0], $form[1]),
+            $forms,
+        ));
+        expect(is_file($storage.'/consent-arrived-first'))->toBeTrue()
+            ->and(is_file($storage.'/consent-arrived-second'))->toBeTrue()
+            ->and(trim(runHttpFlowCommand($httpFlowServer, 'count-active-installations', $clientId)))->toBe((string) $expectedActive);
+        $successfulExchanges = 0;
+
+        foreach ($approvals as $approval) {
+            expect($approval->getStatusCode())->toBe(302);
+            parse_str((string) parse_url($approval->getHeaderLine('Location'), PHP_URL_QUERY), $redirect);
+            expect($redirect)->toHaveKey('code');
+            $exchange = $transport->post('/oauth/token', ['form_params' => [
+                'grant_type' => 'authorization_code',
+                'client_id' => $clientId,
+                'redirect_uri' => HTTP_FLOW_REDIRECT_URI,
+                'code' => $redirect['code'],
+                'code_verifier' => AuthorizeFlowTestCase::CODE_VERIFIER,
+                'resource' => "{$baseUrl}/mcp",
+            ]]);
+
+            if ($exchange->getStatusCode() === 200) {
+                $mcpTokens = jsonOf($exchange);
+                $companion = refreshHttpFlowTokens($transport, $baseUrl, $clientId, $mcpTokens['refresh_token'], $companionResource);
+                expect($companion->getStatusCode())->toBe(200)
+                    ->and(requestCompanion($transport, jsonOf($companion)['access_token'])->getStatusCode())->toBe(200)
+                    ->and(listMcpTools($baseUrl, $mcpTokens['access_token'])->getStatusCode())->toBe(200);
+                $successfulExchanges++;
+            } else {
+                expect($exchange->getStatusCode())->toBe(400)
+                    ->and(jsonOf($exchange)['error'])->toBe('invalid_grant');
+            }
+        }
+
+        expect($successfulExchanges)->toBe($expectedActive);
+    });
+})->with([
+    'different installations' => ['f3add97d-af1e-4169-b778-65ad96ba090f', 2],
+    'the same installation' => ['edb06dcc-75b5-4af4-b08e-25393e025fa2', 1],
+]);
 
 it('refuses an existing token once its redirect host is blocked (step 5)', function () use (&$httpFlowServer): void {
     $baseUrl = $httpFlowServer['baseUrl'];

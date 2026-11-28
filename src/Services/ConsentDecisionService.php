@@ -12,6 +12,7 @@ use Illuminate\Validation\ValidationException;
 use Qiick\McpOAuth\Data\ConsentDecision;
 use Qiick\McpOAuth\Data\ConsentOption;
 use Qiick\McpOAuth\Data\ConsentOptions;
+use Qiick\McpOAuth\Data\GrantInstallationData;
 use Qiick\McpOAuth\Data\PendingAuthorizationRequestData;
 
 /**
@@ -81,6 +82,7 @@ final class ConsentDecisionService
 
         $isAllResources = $request->boolean('all_resources');
         $organisation = count($organisations) === 1 ? $organisations[0]->value : ($validated['organisation'] ?? null);
+        $pendingInstallation = $pendingAuthorizationRequest->installation;
 
         return new ConsentDecision(
             clientId: $clientId,
@@ -96,6 +98,9 @@ final class ConsentDecisionService
             consentVersion: $pendingAuthorizationRequest->renderedConsentVersion,
             locale: $pendingAuthorizationRequest->renderedLocale,
             resourceScopes: $pendingAuthorizationRequest->resourceScopes,
+            installation: $pendingInstallation === null
+                ? null
+                : new GrantInstallationData($pendingInstallation->installId, $pendingInstallation->keyThumbprint, $organisation),
         );
     }
 

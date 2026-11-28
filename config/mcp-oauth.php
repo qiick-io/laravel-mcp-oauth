@@ -44,6 +44,11 @@ return [
 
     'auth_code_ttl_minutes' => env('MCP_OAUTH_AUTH_CODE_TTL_MINUTES', '10'),
 
+    // Absolute time since the user consented for this Companion installation.
+    'companion' => [
+        'grant_max_age_days' => env('MCP_OAUTH_COMPANION_GRANT_MAX_AGE_DAYS', '180'),
+    ],
+
     /*
      * Named rate limiters (design §5.6): throttle:mcp-oauth-{register,authorize,
      * token,revoke}. Per-IP via ClientThrottleKey; per-client when client_id

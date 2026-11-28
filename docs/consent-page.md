@@ -65,6 +65,8 @@ interface OAuthAuthorizePageProps {
     advanced: { label: string; value: string }[];
     /** Present when consent covers an additional RFC 8707 resource. */
     resourceScopes?: Record<string, string>;
+    /** Present for a consent that authorizes pairing with this installation. */
+    isInstallationPairing?: true;
     options: {
         scopes: ConsentOption[];
         /** Empty: the product has no role choice; post no `role` */
@@ -92,6 +94,10 @@ What the page must show:
 - each requested protocol resource in `resourceScopes`, which is independent
   of the product permissions in `options.resources`;
 - every entry of `notices`.
+
+When `isInstallationPairing` is true, display “Pair this phone”. The
+authorization request's installation id and key thumbprint stay in the
+server session and travel to the grant without being posted by the form.
 
 For registered resources, the append-only record captures the entire displayed
 map in `oauth_consent_records.resource_scopes` for either decision.

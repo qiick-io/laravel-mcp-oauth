@@ -34,5 +34,6 @@ final readonly class ConsentDecision
         public ?string $consentVersion = null,
         public ?string $locale = null,
         public array $resourceScopes = [],
+        public ?GrantInstallationData $installation = null,
     ) {}
 }

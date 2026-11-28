@@ -48,8 +48,6 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class ValidateAuthorizationRequestMiddleware
 {
-    public const string INSTALLATION_ATTRIBUTE = 'mcp_oauth_grant_installation';
-
     public function __construct(
         private readonly McpOAuthServer $mcpOAuthServer,
         private readonly RedirectUriGuard $redirectUriGuard,
@@ -201,7 +199,7 @@ final class ValidateAuthorizationRequestMiddleware
             return self::oauthError('invalid_request', 'A random UUIDv4 installation id and SHA-256 key thumbprint are required.');
         }
 
-        $request->attributes->set(self::INSTALLATION_ATTRIBUTE, new GrantInstallationData(strtolower($installId), $keyThumbprint));
+        $request->attributes->set(GrantInstallationData::REQUEST_ATTRIBUTE, new GrantInstallationData(strtolower($installId), $keyThumbprint));
 
         return null;
     }

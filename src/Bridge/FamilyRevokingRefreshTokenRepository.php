@@ -13,8 +13,11 @@ use Laravel\Passport\RefreshToken;
 use Laravel\Passport\Token;
 use League\OAuth2\Server\Exception\OAuthServerException;
 use Qiick\McpOAuth\Contracts\GrantStore;
+use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
 use Qiick\McpOAuth\Events\McpRefreshTokenReusedEvent;
+use Qiick\McpOAuth\Internal\ConsumedAuthCodeGrant;
+use Qiick\McpOAuth\Services\InstallationGrantLifetimeService;
 
 /**
  * Passport refresh-token bridge with atomic reuse detection (design §8.4).
@@ -82,10 +85,20 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
             $this->accessTokenForRefreshToken($tokenId)?->getAttribute($this->bindingColumn()),
         );
 
-        if ($grantId !== null && ! $this->grantIsActive($grantId)) {
+        $grant = $grantId === null ? null : $this->grantStore->find($grantId);
+
+        if ($grantId !== null && $grant?->revoked !== false) {
             Log::warning('MCP OAuth refresh refused: bound grant already revoked.');
 
             throw OAuthServerException::invalidRefreshToken(self::CLIENT_INVALID_REFRESH_HINT);
+        }
+
+        if ($grant?->installation !== null) {
+            if (InstallationGrantLifetimeService::hasExpired($grant, $this->config)) {
+                throw OAuthServerException::invalidRefreshToken(self::CLIENT_INVALID_REFRESH_HINT);
+            }
+
+            app(ConsumedAuthCodeGrant::class)->record($grant->id);
         }
     }
 
@@ -104,14 +117,17 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
             return true;
         }
 
-        if ($refreshToken->getAttribute('revoked') === true
-            || ! $this->accessTokenHasActiveBoundGrant($refreshToken->getAttribute('access_token_id'))) {
+        $grant = $refreshToken->getAttribute('revoked') === true
+            ? null
+            : $this->activeBoundGrant($refreshToken->getAttribute('access_token_id'));
+
+        if ($grant === null) {
             $this->revokeFamilyForRefreshToken($tokenId);
 
             return true;
         }
 
-        return false;
+        return InstallationGrantLifetimeService::hasExpired($grant, $this->config);
     }
 
     /**
@@ -214,18 +230,19 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
      * a binding to a grant that {@see GrantStore::find()} still reports as
      * not revoked.
      */
-    private function accessTokenHasActiveBoundGrant(mixed $accessTokenId): bool
+    private function activeBoundGrant(mixed $accessTokenId): ?GrantRecord
     {
         /** @var Token|null $accessToken */
         $accessToken = Passport::token()->newQuery()->whereKey($accessTokenId)->first();
 
         if ($accessToken === null || $accessToken->getAttribute('revoked') === true) {
-            return false;
+            return null;
         }
 
         $grantId = $this->grantIdFromBinding($accessToken->getAttribute($this->bindingColumn()));
+        $grant = $grantId === null ? null : $this->grantStore->find($grantId);
 
-        return $grantId !== null && $this->grantIsActive($grantId);
+        return $grant?->revoked === false ? $grant : null;
     }
 
     /**
@@ -239,13 +256,6 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
         $accessToken = Passport::token()->newQuery()->whereKey($accessTokenId)->first();
 
         return $accessToken;
-    }
-
-    private function grantIsActive(string $grantId): bool
-    {
-        $grant = $this->grantStore->find($grantId);
-
-        return $grant !== null && ! $grant->revoked;
     }
 
     private function bindingColumn(): string

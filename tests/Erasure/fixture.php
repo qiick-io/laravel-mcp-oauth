@@ -43,7 +43,7 @@ return new class implements ErasureFixture
                 'metadata_document_url', 'metadata_document_url_sha256', 'metadata_document', 'metadata_document_sha256',
                 'metadata_document_etag', 'metadata_document_fetched_at', 'metadata_document_expires_at',
                 'metadata_document_status', 'metadata_document_error', 'require_pushed_authorization_requests',
-                'dpop_bound_access_tokens', 'revoked_at', 'revocation_reason', 'retention_until', 'metadata',
+                'dpop_bound_access_tokens', 'has_per_install_grants', 'revoked_at', 'revocation_reason', 'retention_until', 'metadata',
                 'schema_version', 'created_at', 'updated_at',
             ], 'other'),
             'oauth_clients' => array_fill_keys([
@@ -67,7 +67,7 @@ return new class implements ErasureFixture
                 ...array_fill_keys(['id', 'user_id', 'scopes'], 'personal'),
             ],
             'oauth_auth_code_exchanges' => [
-                ...array_fill_keys(['schema_version', 'created_at'], 'other'),
+                ...array_fill_keys(['schema_version', 'created_at', 'expires_at'], 'other'),
                 ...array_fill_keys(['auth_code_id', 'grant_id', 'user_identifier', 'metadata'], 'personal'),
             ],
             'oauth_access_tokens' => [

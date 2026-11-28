@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Qiick\McpOAuth\Traits\UsesPassportConnectionTrait;
 
 /**
@@ -16,6 +17,7 @@ use Qiick\McpOAuth\Traits\UsesPassportConnectionTrait;
  *
  * @property string $auth_code_id
  * @property string $grant_id
+ * @property Carbon|null $expires_at Pending codes carry their expiry. Consumed codes carry null.
  * @property array<string, mixed>|null $metadata
  * @property int $schema_version
  *
@@ -38,7 +40,7 @@ final class OAuthAuthCodeExchange extends Model
     /**
      * @var list<string>
      */
-    protected $fillable = ['auth_code_id', 'grant_id', 'user_identifier', 'metadata'];
+    protected $fillable = ['auth_code_id', 'grant_id', 'user_identifier', 'metadata', 'expires_at'];
 
     /**
      * `schema_version` is an int on every engine (PostgreSQL and MySQL drivers
@@ -50,6 +52,7 @@ final class OAuthAuthCodeExchange extends Model
     {
         return [
             'metadata' => 'array',
+            'expires_at' => 'datetime',
             'schema_version' => 'integer',
         ];
     }

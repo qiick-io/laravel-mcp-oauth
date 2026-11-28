@@ -27,7 +27,8 @@ use Throwable;
  * in flight cannot be exchanged later. The client stays: the user may
  * authorise it again.
  *
- * Codes carry no grant, so "this grant's codes" is read from time: only codes
+ * Installation code bindings are revoked with the grant. For legacy clients,
+ * the code's grant is inferred from time: only codes
  * issued before the revoke began (Passport writes `expires_at` as the issue
  * time plus the code TTL), and only while no newer grant is active for that
  * client and user. A newer consent already revoked the older codes when it
@@ -73,7 +74,7 @@ final class RevokeConnectedAppAction
             $isRevoked = Passport::token()->getConnection()->transaction(function () use ($grant, $user, $userIdentifier, $revokeStartedAt, $authCodeTtlMinutes, &$isGrantWriteStarted): bool {
                 Passport::client()->newQuery()->whereKey($grant->clientId)->lockForUpdate()->first();
 
-                if ($this->grantStore->activeFor($grant->clientId, $grant->userIdentifier)?->id !== $grant->id) {
+                if (! $this->hasActiveGrant($grant)) {
                     return false;
                 }
 
@@ -88,7 +89,7 @@ final class RevokeConnectedAppAction
             // then Passport's transaction failed (its commit): the grant cannot
             // be un-revoked, so its credentials and its one entry are written
             // again and the revoke completes. Anything else is rethrown untouched.
-            if (! $isGrantWriteStarted || $this->grantStore->activeFor($grant->clientId, $grant->userIdentifier)?->id === $grant->id) {
+            if (! $isGrantWriteStarted || $this->hasActiveGrant($grant)) {
                 throw $transactionFailure;
             }
 
@@ -102,6 +103,13 @@ final class RevokeConnectedAppAction
         }
     }
 
+    private function hasActiveGrant(GrantRecord $grant): bool
+    {
+        return $grant->installation === null
+            ? $this->grantStore->activeFor($grant->clientId, $grant->userIdentifier)?->id === $grant->id
+            : $this->grantStore->find($grant->id)?->revoked === false;
+    }
+
     /**
      * The grant's tokens and unexchanged codes, and its audit entry: every
      * write of the revoke except the grant's own.
@@ -109,13 +117,15 @@ final class RevokeConnectedAppAction
     private function revokeCredentialsAndRecord(GrantRecord $grant, Authenticatable $user, CarbonInterface $revokeStartedAt, int $authCodeTtlMinutes): void
     {
         $this->revokeGrantTokens->execute($grant);
-        // The pair's only active grant is going (replace() keeps one), so
-        // its unexchanged codes go too.
-        Passport::authCode()->newQuery()
-            ->where('client_id', $grant->clientId)
-            ->where('user_id', $grant->userIdentifier)
-            ->where('expires_at', '<', $revokeStartedAt->copy()->addMinutes($authCodeTtlMinutes))
-            ->update(['revoked' => true]);
+        if ($grant->installation === null) {
+            // Legacy codes are inferred from the client, user and issue time.
+            Passport::authCode()->newQuery()
+                ->where('client_id', $grant->clientId)
+                ->where('user_id', $grant->userIdentifier)
+                ->where('expires_at', '<', $revokeStartedAt->copy()->addMinutes($authCodeTtlMinutes))
+                ->update(['revoked' => true]);
+        }
+
         $this->auditLogger->record('oauth_grant_revoked', $user, $grant->id, [
             'client_id' => $grant->clientId,
             'redirect_host' => OAuthConsentRecord::redirectHostOfGrant($grant->id),

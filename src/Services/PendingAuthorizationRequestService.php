@@ -12,6 +12,7 @@ use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
 use League\OAuth2\Server\RequestTypes\AuthorizationRequest;
 use League\OAuth2\Server\RequestTypes\AuthorizationRequestInterface;
+use Qiick\McpOAuth\Data\GrantInstallationData;
 use Qiick\McpOAuth\Data\PendingAuthorizationRequestData;
 use Qiick\McpOAuth\Exceptions\ClientMetadataUnavailableException;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
@@ -115,8 +116,13 @@ final class PendingAuthorizationRequestService
             }
         }
 
-        /** @var array{authToken: string, consentVersion: ?string, locale: string, resource: string, resourceScopes?: array<string, string>} $renderedConsent written by ConsentPageService::render() */
+        /** @var array{authToken: string, consentVersion: ?string, locale: string, resource: string, resourceScopes?: array<string, string>, installation?: array{installId: string, keyThumbprint: string}} $renderedConsent written by ConsentPageService::render() */
         $resourceScopes = $renderedConsent['resourceScopes'] ?? [];
+        $installation = $renderedConsent['installation'] ?? null;
+
+        if (($installation !== null) !== OAuthClientMetadata::isPerInstallClient($pendingClient->getIdentifier())) {
+            $this->refuse($request);
+        }
 
         if ($resourceScopes !== [] && $this->resourceIndicators->resolve(
             array_keys($resourceScopes), $authorizationRequest->getClient()->getIdentifier(),
@@ -132,6 +138,7 @@ final class PendingAuthorizationRequestService
             renderedLocale: $renderedConsent['locale'],
             renderedResource: $renderedConsent['resource'],
             resourceScopes: $resourceScopes,
+            installation: $installation === null ? null : new GrantInstallationData($installation['installId'], $installation['keyThumbprint']),
         );
     }
 

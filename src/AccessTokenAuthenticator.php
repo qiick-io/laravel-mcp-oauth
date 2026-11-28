@@ -19,6 +19,7 @@ use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\ProtectedResourceDefinitionData;
 use Qiick\McpOAuth\Internal\GrantBindingColumn;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
+use Qiick\McpOAuth\Services\InstallationGrantLifetimeService;
 use Symfony\Bridge\PsrHttpMessage\Factory\PsrHttpFactory;
 
 /**
@@ -110,7 +111,7 @@ final class AccessTokenAuthenticator
         $owner = $accessToken->only(['client_id', 'user_id']);
         $grant = $this->grantFor($accessToken, $owner['client_id'], (string) $owner['user_id']);
 
-        if ($grant === null) {
+        if ($grant === null || InstallationGrantLifetimeService::hasExpired($grant, $this->config)) {
             return AuthorizationDecision::invalidToken(self::REVOKED);
         }
 
@@ -145,7 +146,7 @@ final class AccessTokenAuthenticator
 
     private function grantFor(Token $accessToken, string $clientId, string $userIdentifier): ?GrantRecord
     {
-        if ($this->mcpOAuthServer->registeredResources() === []) {
+        if ($this->mcpOAuthServer->registeredResources() === [] && ! OAuthClientMetadata::isPerInstallClient($clientId)) {
             return $this->grantStore->activeFor($clientId, $userIdentifier);
         }
 

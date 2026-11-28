@@ -41,7 +41,7 @@ final class RevokeAuthCodeTokensAction
     public function execute(string $authCodeId): void
     {
         $exchange = OAuthAuthCodeExchange::query()->find($authCodeId);
-        $grant = $exchange === null ? null : $this->grantStore->find($exchange->grant_id);
+        $grant = $exchange === null || $exchange->expires_at !== null ? null : $this->grantStore->find($exchange->grant_id);
 
         // Already revoked: its tokens are refused at use, and the first reason stays.
         if ($grant === null || $grant->revoked) {
