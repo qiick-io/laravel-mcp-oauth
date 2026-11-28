@@ -15,8 +15,8 @@ function inventory(overrides = {}, workingDirectory = process.cwd()) {
             MUTATE_LIST: '1',
             MUTATE_SCOPE: 'changed',
             MUTATE_CLASSES: '[]',
-            MUTATE_SHARD: '1',
-            MUTATE_SHARDS: '1',
+            MUTATE_SHARD: undefined,
+            MUTATE_SHARDS: undefined,
             ...overrides,
         },
     });
@@ -42,6 +42,14 @@ test('rejects a malformed path rather than passing an empty selection', () => {
     const result = inventory({ MUTATE_CLASSES: '["./src/McpOAuthServer.php"]' });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /source paths/);
+});
+
+test('rejects partial shard settings', () => {
+    for (const shardSettings of [{ MUTATE_SHARDS: '20' }, { MUTATE_SHARD: '1' }]) {
+        const result = inventory({ MUTATE_SCOPE: 'all', ...shardSettings });
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr, /Set both MUTATE_SHARD and MUTATE_SHARDS/);
+    }
 });
 
 test('every source path belongs to exactly one shard', (context) => {

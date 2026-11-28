@@ -13,9 +13,15 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 MIN="${MUTATE_MIN:-95}"
-SHARD="${MUTATE_SHARD:-1}"
-SHARDS="${MUTATE_SHARDS:-1}"
 SCOPE="${MUTATE_SCOPE:-all}"
+
+if [[ -v MUTATE_SHARD && ! -v MUTATE_SHARDS ]] || [[ -v MUTATE_SHARDS && ! -v MUTATE_SHARD ]]; then
+  echo "Set both MUTATE_SHARD and MUTATE_SHARDS to run a shard." >&2
+  exit 1
+fi
+
+SHARD="${MUTATE_SHARD-1}"
+SHARDS="${MUTATE_SHARDS-1}"
 
 for shard_input in "${SHARD}" "${SHARDS}"; do
   if [[ ! "${shard_input}" =~ ^[1-9][0-9]*$ ]]; then
