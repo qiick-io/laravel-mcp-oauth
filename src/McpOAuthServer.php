@@ -13,6 +13,7 @@ use Laravel\Passport\Passport;
 use League\Uri\UriString;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Contracts\ClientMetadataDocumentFetcherContract;
+use Qiick\McpOAuth\Data\CompanionClientDefinitionData;
 use Qiick\McpOAuth\Data\ProtectedResourceDefinitionData;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
@@ -30,6 +31,41 @@ final class McpOAuthServer
 
     /** @var array<string, ProtectedResourceDefinitionData> Product resources registered during bootstrap */
     private array $registeredResources = [];
+
+    /** @var array<string, CompanionClientDefinitionData> First-party identifiers reserved during bootstrap */
+    private array $companionClients = [];
+
+    /** Reserves a first-party identifier without accessing storage or the network. */
+    public function registerCompanionClient(CompanionClientDefinitionData $definition): void
+    {
+        if (isset($this->companionClients[$definition->identifier]) || $definition->identifier === $this->resourceIdentifier()) {
+            throw new InvalidArgumentException('Companion client requires an identifier distinct from existing clients and the MCP resource.');
+        }
+
+        $this->companionClients[$definition->identifier] = $definition;
+    }
+
+    /** @internal The reservation remains when the administrator disables Companion. */
+    public function companionClientFor(string $identifier): ?CompanionClientDefinitionData
+    {
+        return $this->companionClients[$identifier] ?? null;
+    }
+
+    /**
+     * @internal
+     *
+     * @return array<string, CompanionClientDefinitionData> Definitions keyed by client identifier.
+     */
+    public function companionClientDefinitions(): array
+    {
+        return $this->companionClients;
+    }
+
+    /** @internal Applies only to first-party Companion identities. */
+    public function isCompanionClientEnabled(): bool
+    {
+        return filter_var($this->config->get('mcp-oauth.companion.enabled', false), FILTER_VALIDATE_BOOLEAN);
+    }
 
     /**
      * The grants the token endpoint accepts and the metadata advertises.

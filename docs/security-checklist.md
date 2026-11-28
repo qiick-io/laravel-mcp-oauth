@@ -120,6 +120,14 @@ trusted Companion class during setup. The product's live principal and
 organisation checks run through `GrantAuthorizer` and are exercised by
 changing its decision between HTTP requests.
 
+## First-party Companion identity and issuer (MO4)
+
+`Isolated/PreRegisteredCompanionClientTest` proves the shipped callback policy,
+reservation from dynamic and fetched registrations, refusal while disabled,
+and issuer equality on approval and denial. It exercises DTO validation,
+the shipped callback list under the instance host blocklist and the deploy
+check for a missing definition or unavailable host policy.
+
 ## Open items
 
 None.

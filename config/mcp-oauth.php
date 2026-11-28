@@ -44,8 +44,10 @@ return [
 
     'auth_code_ttl_minutes' => env('MCP_OAUTH_AUTH_CODE_TTL_MINUTES', '10'),
 
-    // Absolute time since the user consented for this Companion installation.
+    // First-party Companion clients remain reserved when disabled.
     'companion' => [
+        'enabled' => env('MCP_OAUTH_COMPANION_ENABLED', false),
+        // Absolute time since consent for this installation.
         'grant_max_age_days' => env('MCP_OAUTH_COMPANION_GRANT_MAX_AGE_DAYS', '180'),
     ],
 

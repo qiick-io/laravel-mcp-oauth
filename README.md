@@ -252,8 +252,9 @@ current product data on every request.
 ## Config
 
 Publishable `config/mcp-oauth.php` (tag `mcp-oauth-config`). Env prefix
-`MCP_OAUTH_*`. Redirect allowlists stay in `laravel/mcp`’s `mcp.redirect_domains`
-and `mcp.custom_schemes`. Issuer is always `APP_URL`.
+`MCP_OAUTH_*`. Dynamic clients use the redirect policy from
+`laravel/mcp`’s `mcp.redirect_domains` and `mcp.custom_schemes`. Issuer is
+always `APP_URL`.
 
 ### Client ID Metadata Documents
 
@@ -284,6 +285,34 @@ Applications using Outbound solely for CIMD can add `qiick/laravel-outbound`
 to their own Composer `extra.laravel.dont-discover` list to omit its webhook
 provider, migrations and scheduled jobs. The CIMD transport uses the library
 factory directly.
+
+### Pre-registered Companion clients
+
+The product or Companion service provider supplies the shipped identity during
+boot. Pass the claimed HTTPS callback URLs from the mobile build to
+`McpOAuthServer::registerCompanionClient()`.
+
+```php
+use Qiick\McpOAuth\Data\CompanionClientDefinitionData;
+use Qiick\McpOAuth\McpOAuthServer;
+
+app(McpOAuthServer::class)->registerCompanionClient(new CompanionClientDefinitionData(
+    identifier: 'https://companion.qiick.io/oauth/client-metadata.json',
+    name: 'qiick Companion',
+    redirectUris: ['https://companion.qiick.io/oauth/callback'],
+    operatorName: 'qiick',
+));
+```
+
+Bind an `InstallationGrantStoreContract` and set
+`MCP_OAUTH_COMPANION_ENABLED=true` to enable the client. The reservation holds
+regardless of this setting or the live CIMD switch. The definition validates
+the identifier and HTTPS callback list when constructed. The shipped list
+authorizes exact callbacks for this identity, subject to the instance's host
+blocklist. Run `mcp-oauth:check` to check the enabled definition before deploy.
+The consent page identifies the operator. The authorization server advertises
+RFC 9207 support and every redirect with an authorization result includes the
+issuer as `iss`.
 
 ## Testing
 

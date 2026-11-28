@@ -34,9 +34,21 @@ final class InertiaConsentView implements ConsentView
             'advanced' => $page->advanced,
         ];
 
+        $notices = $page->options->notices;
+
         if ($page->isInstallationPairing) {
             $properties['isInstallationPairing'] = true;
-            $properties['options'] = [...(array) $page->options, 'notices' => [...$page->options->notices, 'Pair this phone.']];
+            $notices[] = 'Pair this phone.';
+        }
+
+        $operatorName = $page->client['operatorName'] ?? null;
+
+        if ($operatorName !== null) {
+            $notices[] = 'Operated by '.$operatorName.'.';
+        }
+
+        if ($notices !== $page->options->notices) {
+            $properties['options'] = [...(array) $page->options, 'notices' => $notices];
         }
 
         if ($page->resourceScopes !== []) {

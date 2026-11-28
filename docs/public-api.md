@@ -53,6 +53,7 @@ commands are public by name and signature (below), not as PHP classes.
 - `AuthorizationDecision` (class)
 - `ClientInfo` (class)
 - `ClientMetadataDocumentData` (class)
+- `CompanionClientDefinitionData` (class)
 - `ConsentDecision` (class)
 - `ConsentOption` (class)
 - `ConsentOptions` (class)
@@ -132,6 +133,15 @@ registered identifier as its second argument at the product endpoint.
 
 ## Companion installation grants
 
+Register a first-party Companion identity during product boot using
+`McpOAuthServer::registerCompanionClient(CompanionClientDefinitionData)`.
+The server reserves its exact CIMD identifier for the shipped name,
+operator and claimed HTTPS callbacks. The constructor rejects invalid shipped
+metadata. Its exact callback list is subject to the instance host blocklist.
+The pinned client is public and uses authorization code with PKCE and
+refresh. Turning off `companion.enabled` refuses authorize, token and bearer
+requests for the identity. The shipped definition remains reserved.
+
 An enrolled per-install client sends its random `install_id` as a UUIDv4 and
 `companion_jkt` as the 43-character base64url SHA-256 JWK thumbprint. The
 package normalizes the UUID to lowercase. After consent,
@@ -161,6 +171,7 @@ with the variable that sets it where there is one:
 | `access_token_ttl_minutes` | `MCP_OAUTH_ACCESS_TOKEN_TTL_MINUTES` |
 | `refresh_token_ttl_days` | `MCP_OAUTH_REFRESH_TOKEN_TTL_DAYS` |
 | `auth_code_ttl_minutes` | `MCP_OAUTH_AUTH_CODE_TTL_MINUTES` |
+| `companion.enabled` | `MCP_OAUTH_COMPANION_ENABLED` (false by default) |
 | `companion.grant_max_age_days` | `MCP_OAUTH_COMPANION_GRANT_MAX_AGE_DAYS` (180 by default, 1–3650) |
 | `registrations_per_minute` | `MCP_OAUTH_REGISTRATIONS_PER_MINUTE` |
 | `authorize_requests_per_minute` | `MCP_OAUTH_AUTHORIZE_REQUESTS_PER_MINUTE` |
@@ -187,10 +198,11 @@ with the variable that sets it where there is one:
 
 ## Commands
 
-- `mcp-oauth:check`: reports the switch, issuer, resource, keys and routes. It
-  exits 1 beside a foreign Passport route or one of laravel/mcp's OAuth routes,
-  whatever the switch, and when OAuth is on but not ready or not served at the
-  origin; with OAuth off it exits 0 otherwise.
+- `mcp-oauth:check` reports the switch, issuer, resource, keys and routes. It
+  exits 1 beside a foreign Passport or laravel/mcp OAuth route, or when
+  enabled OAuth is unready or unavailable at the origin. With Companion
+  enabled, it exits 1 and warns when a shipped definition is missing,
+  blocked by a host rule or its host policy cannot be read.
 - `mcp-oauth:prune-auth-code-exchanges {--dry-run}`
 - `mcp-oauth:prune-unused-clients {--dry-run}`
 - `mcp-oauth:purge-revoked {--dry-run}`

@@ -7,8 +7,8 @@ namespace Qiick\McpOAuth\Data;
 /**
  * Passport client facts shown on consent and in admin lists, with what the
  * client registered (RFC 7591) from its metadata row. Every field after
- * `isRedirectLoopback` is the client's own claim except `registrationSource`;
- * the name is always self-asserted.
+ * `isRedirectLoopback` is a client claim except the registration source and
+ * the operator of a first-party client. Its shipped name is marked trusted.
  *
  * @api
  */
@@ -36,5 +36,6 @@ final readonly class ClientInfo
         public ?string $softwareVersion = null,
         public ?string $metadataDocumentUrl = null,
         public bool $nameIsSelfAsserted = true,
+        public ?string $operatorName = null,
     ) {}
 }
