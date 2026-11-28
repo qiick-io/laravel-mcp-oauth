@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Qiick\McpOAuth\Tests\Support;
 
+use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Http;
@@ -31,6 +32,21 @@ abstract class PackageTestCase extends TestCase
 
         Http::preventStrayRequests();
         Process::preventStrayProcesses();
+    }
+
+    protected function tearDown(): void
+    {
+        $database = $this->app?->resolved('db') === true ? $this->app->make(DatabaseManager::class) : null;
+
+        try {
+            parent::tearDown();
+        } finally {
+            // Testbench applications can keep one another alive through event
+            // and reconnection closures until the cycle collector runs.
+            foreach ($database?->getConnections() ?? [] as $connection) {
+                $connection->disconnect();
+            }
+        }
     }
 
     /**
