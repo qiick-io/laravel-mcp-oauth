@@ -56,6 +56,7 @@ commands are public by name and signature (below), not as PHP classes.
 - `ConsentOption` (class)
 - `ConsentOptions` (class)
 - `ConsentPage` (class)
+- `GrantInstallationData` (class)
 - `GrantRecord` (class)
 - `ProtectedResourceDefinitionData` (class)
 - `RevocationReason` (enum)
