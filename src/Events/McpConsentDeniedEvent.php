@@ -14,5 +14,6 @@ final readonly class McpConsentDeniedEvent
     public function __construct(
         public string $clientId,
         public string $userIdentifier,
+        public ?string $installId = null,
     ) {}
 }

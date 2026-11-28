@@ -200,6 +200,7 @@ final class RevokeTokenAction
             'client_id' => $grant->clientId,
             'redirect_host' => OAuthConsentRecord::redirectHostOfGrant($grant->id),
             'reason' => RevocationReason::Client->value,
+            ...($grant->installation === null ? [] : ['install_id' => $grant->installation->installId]),
         ]);
     }
 
@@ -283,6 +284,7 @@ final class RevokeTokenAction
             grantId: $grant?->id,
             tokenType: $tokenType,
             revokedTokenCount: $revokedTokenCount,
+            installId: $grant?->installation?->installId,
         ));
     }
 

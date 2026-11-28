@@ -12,6 +12,7 @@ use Laravel\Passport\Token;
 use Lcobucci\JWT\Validation\RequiredConstraintsViolated;
 use League\OAuth2\Server\Exception\OAuthServerException;
 use League\OAuth2\Server\ResourceServer;
+use Qiick\McpOAuth\Actions\RevokeConnectedAppAction;
 use Qiick\McpOAuth\Contracts\GrantAuthorizer;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\AuthorizationDecision;
@@ -111,7 +112,7 @@ final class AccessTokenAuthenticator
         $owner = $accessToken->only(['client_id', 'user_id']);
         $grant = $this->grantFor($accessToken, $owner['client_id'], (string) $owner['user_id']);
 
-        if ($grant === null || InstallationGrantLifetimeService::hasExpired($grant, $this->config)) {
+        if ($grant === null) {
             return AuthorizationDecision::invalidToken(self::REVOKED);
         }
 
@@ -127,6 +128,12 @@ final class AccessTokenAuthenticator
 
         if (! $this->isBoundTo($accessToken, $grant) || ! $hasApprovedScope) {
             return AuthorizationDecision::invalidToken(self::NOT_VALID);
+        }
+
+        if (InstallationGrantLifetimeService::hasExpired($grant, $this->config)) {
+            app(RevokeConnectedAppAction::class)->expire($grant);
+
+            return AuthorizationDecision::invalidToken(self::REVOKED);
         }
 
         $decision = $this->grantAuthorizer->authorize($request, $grant);

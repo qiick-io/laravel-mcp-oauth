@@ -151,7 +151,7 @@ final class DatabaseGrantStore implements InstallationGrantStoreContract
 
     private static function recordFrom(object $row): GrantRecord
     {
-        /** @var object{id: string, client_id: string, user_identifier: string, revoked: bool|int|string, scopes: string, resource_scopes: string, authorized_at: string, organisation_id: ?string, install_id: ?string, companion_jkt: string} $row */
+        /** @var object{id: string, client_id: string, user_identifier: string, revoked: bool|int|string, scopes: string, resource_scopes: string, authorized_at: string, organisation_id: ?string, install_id: ?string, companion_jkt: string, revocation_reason: ?string} $row */
         /** @var list<string> $scopes */
         $scopes = json_decode($row->scopes, true);
         /** @var array<string, string> $resourceScopes */
@@ -167,6 +167,7 @@ final class DatabaseGrantStore implements InstallationGrantStoreContract
             scopes: $scopes,
             authorizedAt: new DateTimeImmutable($row->authorized_at),
             lastUsedAt: null,
+            revocationReason: $row->revocation_reason === null ? null : RevocationReason::from($row->revocation_reason),
             resourceScopes: $resourceScopes,
             installation: $row->install_id === null ? null : new GrantInstallationData($row->install_id, $row->companion_jkt, $row->organisation_id),
         );

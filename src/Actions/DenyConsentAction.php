@@ -45,12 +45,14 @@ final class DenyConsentAction
             $this->auditLogger->record('oauth_consent_denied', $pendingAuthorizationRequest->user, null, [
                 'client_id' => $clientInfo->id,
                 'redirect_host' => $clientInfo->redirectHost,
+                ...($pendingAuthorizationRequest->installation === null ? [] : ['install_id' => $pendingAuthorizationRequest->installation->installId]),
             ]);
         });
 
         $this->events->dispatch(new McpConsentDeniedEvent(
             clientId: $clientInfo->id,
             userIdentifier: PassportUserIdentifier::of($pendingAuthorizationRequest->user),
+            installId: $pendingAuthorizationRequest->installation?->installId,
         ));
 
         // League's AuthorizationRequest starts unapproved, so completing it

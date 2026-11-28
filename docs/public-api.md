@@ -144,6 +144,10 @@ the same installation and the consent time. Return the prior grant when
 present so the package can retire its credentials. Ordinary clients keep
 the existing `GrantStore::replace()` contract.
 
+After the absolute grant deadline, the first attempted bearer or refresh use
+revokes the installation grant and its credentials with `RevocationReason::Expired`.
+Return that stored reason on reads of revoked installation grants.
+
 ## Config keys and environment variables
 
 Every key of `config/mcp-oauth.php` (published with the `mcp-oauth-config` tag),

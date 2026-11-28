@@ -25,5 +25,6 @@ final readonly class McpConsentApprovedEvent
         public array $resources,
         public ?string $resource = null,
         public array $resourceScopes = [],
+        public ?string $installId = null,
     ) {}
 }

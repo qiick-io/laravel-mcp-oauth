@@ -19,7 +19,8 @@ interface InstallationGrantStoreContract extends GrantStore
      * (client, principal, organisation, installation) tuple and return its
      * prior grant, if any, for credential retirement. Persist the thumbprint
      * and consent time on the new grant. Every read and erasure path includes
-     * grants created through this extension.
+     * grants created through this extension. Reads of revoked grants include
+     * the stored reason, so an expiry can be distinguished from reuse.
      */
     public function replaceForInstallation(ConsentDecision $decision): GrantReplacementData;
 }

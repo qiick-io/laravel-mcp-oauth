@@ -12,6 +12,7 @@ use Laravel\Passport\Passport;
 use Laravel\Passport\RefreshToken;
 use Laravel\Passport\Token;
 use League\OAuth2\Server\Exception\OAuthServerException;
+use Qiick\McpOAuth\Actions\RevokeConnectedAppAction;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
@@ -95,6 +96,8 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
 
         if ($grant?->installation !== null) {
             if (InstallationGrantLifetimeService::hasExpired($grant, $this->config)) {
+                app(RevokeConnectedAppAction::class)->expire($grant);
+
                 throw OAuthServerException::invalidRefreshToken(self::CLIENT_INVALID_REFRESH_HINT);
             }
 
@@ -127,7 +130,13 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
             return true;
         }
 
-        return InstallationGrantLifetimeService::hasExpired($grant, $this->config);
+        if (InstallationGrantLifetimeService::hasExpired($grant, $this->config)) {
+            app(RevokeConnectedAppAction::class)->expire($grant);
+
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -203,6 +212,12 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
         $grantId = $this->grantIdFromBinding($bindingValue);
 
         if ($grantId !== null) {
+            $grant = $this->grantStore->find($grantId);
+
+            if ($grant?->revocationReason === RevocationReason::Expired) {
+                return;
+            }
+
             $this->grantStore->revoke($grantId, null, RevocationReason::Reuse);
 
             $eventDispatcher = $this->events;
@@ -214,12 +229,14 @@ final class FamilyRevokingRefreshTokenRepository extends RefreshTokenRepository
                 $eventUserIdentifier,
                 $grantId,
                 $revokedTokenCount,
+                $grant,
             ): void {
                 $eventDispatcher->dispatch(new McpRefreshTokenReusedEvent(
                     clientId: $clientId,
                     userIdentifier: $eventUserIdentifier,
                     grantId: $grantId,
                     revokedTokenCount: $revokedTokenCount,
+                    installId: $grant?->installation?->installId,
                 ));
             });
         }

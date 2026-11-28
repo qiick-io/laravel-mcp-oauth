@@ -16,5 +16,6 @@ final readonly class McpRefreshTokenReusedEvent
         public string $userIdentifier,
         public string $grantId,
         public int $revokedTokenCount,
+        public ?string $installId = null,
     ) {}
 }

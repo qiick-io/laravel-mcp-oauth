@@ -141,6 +141,7 @@ final class ApproveConsentAction
                 'redirect_host' => $clientInfo->redirectHost,
                 'scopes' => $decision->scopes,
                 'resources' => $decision->resources,
+                ...($grant->installation === null ? [] : ['install_id' => $grant->installation->installId]),
             ]);
 
             return $grant;
@@ -155,6 +156,7 @@ final class ApproveConsentAction
             resources: $decision->resources,
             resource: $decision->resource,
             resourceScopes: $decision->resourceScopes,
+            installId: $grant->installation?->installId,
         ));
 
         if ($decision->installation !== null) {
