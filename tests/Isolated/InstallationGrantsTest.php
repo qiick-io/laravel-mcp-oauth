@@ -126,6 +126,23 @@ it('includes the pending installation in the consent denial audit', function ():
         ->and($audit->entries[0]['properties']['install_id'])->toBe(FIRST_INSTALLATION);
 });
 
+it('preserves product options and notices on the installation consent page', function (): void {
+    $options = AuthorizeFlowTestCase::defaultConsentOptions();
+    $this->enableOAuth(new ConsentOptions(
+        $options->scopes, $options->roles, $options->resources, $options->resourcesRequired, $options->canGrant,
+        notices: ['Access applies to this organisation.'],
+    ));
+    McpOAuthRoutes::register();
+    $client = createInstallationClient($this);
+
+    $this->actingAs($this->createUser())->get($this->authorizeUrl($client, [
+        'install_id' => FIRST_INSTALLATION,
+        'companion_jkt' => FIRST_INSTALLATION_THUMBPRINT,
+    ]), ['X-Inertia' => 'true'])->assertOk()
+        ->assertJsonPath('props.options.scopes.0.value', 'mcp:read')
+        ->assertJsonPath('props.options.notices', ['Access applies to this organisation.', 'Pair this phone.']);
+});
+
 it('requires an installation id and a correctly encoded key thumbprint for flagged clients', function (array $installationParameters): void {
     $this->enableOAuth();
     McpOAuthRoutes::register();
