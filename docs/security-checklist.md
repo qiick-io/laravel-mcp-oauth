@@ -104,6 +104,22 @@ checks a changed DNS answer, no redirect following and conditional requests.
 `Http/RealHttpFlowTest` exercises the CIMD login and token lifecycle over HTTP
 with a deterministic outbound transport fixture.
 
+## Additional protected resources (Companion CMP3 and CMP4)
+
+The CMP3 flows in `Http/RealHttpFlowTest` prove the browser returns with
+both resource indicators, the user sees both audiences, each token has one
+approved scope, and rotation retires only the selected audience's token.
+The race uses two PHP processes and independent database connections,
+including on PostgreSQL and MySQL. Reuse makes every issued credential
+unusable. `Isolated/RegisteredResourcesTest` covers the stored audience
+and scope, immutable grant pairs and rejection of ambiguous fields.
+
+CMP4 exercises real DCR and fetched CIMD identities, a browser session and
+an API key against the restricted resource. The test fixture assigns the
+trusted Companion class during setup. The product's live principal and
+organisation checks run through `GrantAuthorizer` and are exercised by
+changing its decision between HTTP requests.
+
 ## Open items
 
 None.
