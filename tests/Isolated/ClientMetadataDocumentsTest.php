@@ -11,20 +11,23 @@ use Qiick\McpOAuth\Data\AuthorizationDecision;
 use Qiick\McpOAuth\Data\ClientMetadataDocumentData;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Enums\ClientMetadataFetchStatusEnum;
+use Qiick\McpOAuth\Http\Middleware\ValidateAuthorizationRequestMiddleware;
+use Qiick\McpOAuth\Http\Middleware\ValidateTokenRequestMiddleware;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
+use Symfony\Component\HttpFoundation\Response;
 
 uses(AuthorizeFlowTestCase::class);
 
 const CIMD_CLIENT_IDENTIFIER = 'https://client.example/oauth-client.json';
 
-function metadataAuthorizeUrl(string $identifier = CIMD_CLIENT_IDENTIFIER): string
+function metadataAuthorizeUrl(string $identifier = CIMD_CLIENT_IDENTIFIER, string $redirectUri = AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI): string
 {
     return '/oauth/authorize?'.http_build_query([
         'response_type' => 'code',
         'client_id' => $identifier,
-        'redirect_uri' => AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI,
+        'redirect_uri' => $redirectUri,
         'code_challenge' => AuthorizeFlowTestCase::CODE_CHALLENGE,
         'code_challenge_method' => 'S256',
         'resource' => AuthorizeFlowTestCase::RESOURCE,
@@ -142,6 +145,53 @@ it('refuses mismatched client ids and transport failures locally without registe
     'different exact identifier' => ['fetched', 400, 'invalid_client'],
     'transient transport failure' => ['unavailable', 503, 'temporarily_unavailable'],
 ]);
+
+it('compares the metadata callback literally before handing off to Passport', function (): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $this->mock(ClientMetadataDocumentFetcherContract::class)->shouldNotReceive('fetch');
+    $client = $this->createClient();
+    identifyAsMetadataClient($client);
+
+    $this->get(metadataAuthorizeUrl(redirectUri: 'https://APP.EXAMPLE/callback'))
+        ->assertBadRequest()
+        ->assertJsonPath('error', 'invalid_request')
+        ->assertHeader('Cache-Control', 'no-store, private')
+        ->assertHeaderMissing('Location');
+});
+
+it('refuses a metadata client whose Passport model cannot supply a string identifier', function (): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $this->mock(ClientMetadataDocumentFetcherContract::class)->shouldNotReceive('fetch');
+    identifyAsMetadataClient($this->createClient());
+    $clientWithIntegerKey = new class extends Client
+    {
+        protected $table = 'oauth_clients';
+
+        public function getKey(): int
+        {
+            return 1;
+        }
+    };
+    Passport::useClientModel($clientWithIntegerKey::class);
+
+    try {
+        // The vendor may also refuse the rewritten value. Prove that neither
+        // middleware forwards an identifier the package cannot represent.
+        $downstream = static fn (): Response => new Response(status: 204);
+        $authorization = Request::create(metadataAuthorizeUrl());
+        $token = Request::create('/oauth/token', 'POST', [
+            'client_id' => CIMD_CLIENT_IDENTIFIER,
+            'grant_type' => 'refresh_token',
+            'refresh_token' => 'unused',
+            'resource' => AuthorizeFlowTestCase::RESOURCE,
+        ]);
+
+        expect(app(ValidateAuthorizationRequestMiddleware::class)->handle($authorization, $downstream)->getStatusCode())->toBe(400)
+            ->and(app(ValidateTokenRequestMiddleware::class)->handle($token, $downstream)->getStatusCode())->toBe(401);
+    } finally {
+        Passport::useClientModel(Client::class);
+    }
+});
 
 it('keeps the last good document on an outage and revalidates expired data with the ETag', function (): void {
     config()->set('mcp-oauth.cimd.enabled', true);
@@ -288,7 +338,7 @@ it('revokes issued tokens when the refreshed callback policy changes or becomes 
         ->and($authenticator->authenticate($bearerRequest))->toBeInstanceOf(AuthorizationDecision::class);
 })->with(['fetched', 'invalid']);
 
-it('refuses token assertions before processing a public metadata client code', function (): void {
+it('refuses client authentication before processing a public metadata client code', function (string $unsupportedParameter): void {
     config()->set('mcp-oauth.cimd.enabled', true);
     $this->mock(ClientMetadataDocumentFetcherContract::class)->shouldNotReceive('fetch');
     $client = $this->createClient();
@@ -296,9 +346,14 @@ it('refuses token assertions before processing a public metadata client code', f
     identifyAsMetadataClient($client);
     $exchange = $this->codeExchange($client, $code, ['client_id' => CIMD_CLIENT_IDENTIFIER]);
 
-    $this->post('/oauth/token', [...$exchange, 'client_assertion' => 'unsupported'])
+    $this->post('/oauth/token', [...$exchange, $unsupportedParameter => 'unsupported'])
         ->assertUnauthorized()->assertJsonPath('error', 'invalid_client');
     $this->post('/oauth/token', $exchange)->assertOk();
+})->with(['client_secret', 'client_assertion', 'client_assertion_type']);
+
+it('rejects a grant type outside the protocol before checking its resource', function (): void {
+    $this->post('/oauth/token', ['grant_type' => 'client_credentials'])
+        ->assertBadRequest()->assertJsonPath('error', 'unsupported_grant_type');
 });
 
 it('returns 503 at the token endpoint while a known metadata client is unavailable', function (): void {
