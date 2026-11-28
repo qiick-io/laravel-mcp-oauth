@@ -83,9 +83,9 @@ it('uses shipped public metadata with CIMD fetching disabled and supplies the ex
     expect(app(AccessTokenAuthenticator::class)->authenticate($bearer))->not->toBeInstanceOf(GrantRecord::class);
 });
 
-it('reserves a disabled first-party identifier from outbound and DCR', function (): void {
+it('reserves a disabled first-party identifier from outbound and DCR', function (array $companionConfig): void {
     $this->enableOAuth();
-    config()->set('mcp-oauth.companion.enabled', false);
+    config()->set('mcp-oauth.companion', $companionConfig);
     config()->set('mcp-oauth.cimd.enabled', true);
     $this->mock(ClientMetadataDocumentFetcherContract::class)->shouldReceive('fetch')->never();
     $client = registerPinnedCompanion();
@@ -101,7 +101,7 @@ it('reserves a disabled first-party identifier from outbound and DCR', function 
         'token_endpoint_auth_method' => 'none',
     ])->assertBadRequest()->assertJsonPath('error', 'invalid_client_metadata');
     expect(OAuthClientMetadata::query()->exists())->toBeFalse();
-});
+})->with(['older published configuration' => [[]], 'explicitly disabled' => [['enabled' => false]]]);
 
 it('does not accept a fetched document claiming the reserved identifier', function (): void {
     $this->enableOAuth();
