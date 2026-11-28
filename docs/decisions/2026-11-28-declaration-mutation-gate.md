@@ -1,4 +1,4 @@
-# Whole-source mutation gate
+# 2026-11-28: Whole-source mutation gate
 
 The package measures executable code with Pest and PCOV at a minimum of 95%
 per source path. The source inventory includes erasure and shipped test fakes.
