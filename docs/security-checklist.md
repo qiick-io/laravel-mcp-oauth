@@ -128,6 +128,12 @@ and issuer equality on approval and denial. It exercises DTO validation,
 the shipped callback list under the instance host blocklist and the deploy
 check for a missing definition or unavailable host policy.
 
+## Published configuration (F1)
+
+`Feature/PublishedConfigBootTest` loads older sections with missing nested
+keys and checks the shipped defaults and existing overrides. It exercises
+invalid sections, switches and adapter values at boot.
+
 ## Open items
 
 None.

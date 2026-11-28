@@ -16,7 +16,7 @@ return [
      * Deployment safety gate (MCP_OAUTH_ENABLED). Default off: OAuth routes
      * answer 404 until this flag, the AdminSwitch and mcp_enabled are all true.
      */
-    'enabled' => (bool) env('MCP_OAUTH_ENABLED', false),
+    'enabled' => env('MCP_OAUTH_ENABLED', false),
 
     /*
      * Product MCP flag (gate 3). Config key string or closure bound by the
@@ -77,8 +77,7 @@ return [
     /*
      * RFC 7009 revocation at POST oauth/revoke, advertised as
      * `revocation_endpoint`. A boolean, unlike the integer keys below:
-     * `true`, `1`, `on` or `yes` keeps both on; anything else (`false`, `0`,
-     * a typo) turns both off.
+     * `true`, `1`, `on` or `yes` keeps both on. Invalid values fail boot.
      */
     'revocation_enabled' => env('MCP_OAUTH_REVOCATION_ENABLED', true),
 
@@ -133,10 +132,6 @@ return [
     'user_model' => null,
 
     /*
-     * When true (default), the provider loadMigrationsFrom the core side
-     * tables. Set false when the app publishes and owns the migration files.
-     */
-    /*
      * The package schedules its retention commands itself (fleet convention
      * F9), on one server and never overlapping, while `enabled` is on:
      * prune-unused-clients hourly, purge-revoked and prune-auth-code-exchanges
@@ -148,8 +143,12 @@ return [
         'schedule' => env('MCP_OAUTH_RETENTION_SCHEDULE', true),
     ],
 
+    /*
+     * When true (default), the provider loads the core side table migrations.
+     * Set false when the app publishes and owns the migration files.
+     */
     'migrations' => [
-        'load' => (bool) env('MCP_OAUTH_LOAD_MIGRATIONS', true),
+        'load' => env('MCP_OAUTH_LOAD_MIGRATIONS', true),
     ],
 
 ];

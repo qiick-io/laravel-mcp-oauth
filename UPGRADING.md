@@ -38,6 +38,12 @@ the same identifier moves to the shipped callback policy on authorize and its
 existing credentials are revoked. The consent client props can carry a trusted
 `operatorName` for a first-party registration.
 
+Older published or cached configuration copies inherit newly shipped nested
+keys. Present invalid values fail application boot with the configured key in
+the error. If your published file casts `MCP_OAUTH_ENABLED` or
+`MCP_OAUTH_LOAD_MIGRATIONS` to bool, copy the shipped entries before
+regenerating the configuration cache. This lets boot validate the raw values.
+
 ## 1.0.0-beta.1
 
 The first release. A first install follows the README (*Install*):

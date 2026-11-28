@@ -13,6 +13,11 @@ use InvalidArgumentException;
  */
 final class InvalidMcpOAuthConfigException extends InvalidArgumentException
 {
+    public static function invalidSection(string $configKey): self
+    {
+        return new self("Config [{$configKey}] must be an array.");
+    }
+
     public static function invalidInteger(string $configKey, int $maximum): self
     {
         return new self(
