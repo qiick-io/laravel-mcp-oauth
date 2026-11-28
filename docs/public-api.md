@@ -136,10 +136,11 @@ registered identifier as its second argument at the product endpoint.
 Register a first-party Companion identity during product boot using
 `McpOAuthServer::registerCompanionClient(CompanionClientDefinitionData)`.
 The server reserves its exact CIMD identifier for the shipped name,
-operator and claimed HTTPS callbacks. The pinned client is public and uses
-authorization code with PKCE and refresh. Turning off
-`companion.enabled` refuses authorize, token and bearer requests for the
-identity. The shipped definition remains reserved.
+operator and claimed HTTPS callbacks. The constructor rejects invalid shipped
+metadata. Its exact callback list is subject to the instance host blocklist.
+The pinned client is public and uses authorization code with PKCE and
+refresh. Turning off `companion.enabled` refuses authorize, token and bearer
+requests for the identity. The shipped definition remains reserved.
 
 An enrolled per-install client sends its random `install_id` as a UUIDv4 and
 `companion_jkt` as the 43-character base64url SHA-256 JWK thumbprint. The
@@ -197,10 +198,11 @@ with the variable that sets it where there is one:
 
 ## Commands
 
-- `mcp-oauth:check`: reports the switch, issuer, resource, keys and routes. It
-  exits 1 beside a foreign Passport route or one of laravel/mcp's OAuth routes,
-  whatever the switch, and when OAuth is on but not ready or not served at the
-  origin; with OAuth off it exits 0 otherwise.
+- `mcp-oauth:check` reports the switch, issuer, resource, keys and routes. It
+  exits 1 beside a foreign Passport or laravel/mcp OAuth route, or when
+  enabled OAuth is unready or unavailable at the origin. With Companion
+  enabled, it exits 1 and warns when a shipped definition is missing,
+  blocked by a host rule or its host policy cannot be read.
 - `mcp-oauth:prune-auth-code-exchanges {--dry-run}`
 - `mcp-oauth:prune-unused-clients {--dry-run}`
 - `mcp-oauth:purge-revoked {--dry-run}`

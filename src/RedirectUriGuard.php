@@ -223,6 +223,16 @@ final class RedirectUriGuard
         /** @var array<mixed> $redirectUris Passport's redirectUris accessor always returns an array */
         $redirectUris = $client->getAttribute('redirect_uris');
 
+        return $this->hasBlockedRedirectHost($redirectUris);
+    }
+
+    /**
+     * @internal
+     *
+     * @param  array<mixed>  $redirectUris
+     */
+    public function hasBlockedRedirectHost(array $redirectUris): bool
+    {
         foreach ($redirectUris as $redirectUri) {
             if (! is_string($redirectUri)) {
                 continue;

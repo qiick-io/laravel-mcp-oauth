@@ -38,25 +38,8 @@ final class McpOAuthServer
     /** Reserves a first-party identifier without accessing storage or the network. */
     public function registerCompanionClient(CompanionClientDefinitionData $definition): void
     {
-        $uriGuard = new RedirectUriGuard;
-
-        if (isset($this->companionClients[$definition->identifier]) || $definition->identifier === $this->resourceIdentifier()
-            || $uriGuard->parseClientIdentifierUrl($definition->identifier) === null) {
-            throw new InvalidArgumentException('Companion client requires a unique HTTPS client identifier URL with a path.');
-        }
-
-        if (trim($definition->name) === '' || strlen($definition->name) > 255 || trim($definition->operatorName) === '') {
-            throw new InvalidArgumentException('Companion client requires a name and an operator.');
-        }
-
-        if ($definition->redirectUris === []) {
-            throw new InvalidArgumentException('Companion client requires at least one HTTPS callback URI.');
-        }
-
-        foreach ($definition->redirectUris as $redirectUri) {
-            if (strlen($redirectUri) > 1024 || $uriGuard->parseCanonical($redirectUri)->scheme !== 'https') {
-                throw new InvalidArgumentException('Companion client requires exact HTTPS callback URIs.');
-            }
+        if (isset($this->companionClients[$definition->identifier]) || $definition->identifier === $this->resourceIdentifier()) {
+            throw new InvalidArgumentException('Companion client requires an identifier distinct from existing clients and the MCP resource.');
         }
 
         $this->companionClients[$definition->identifier] = $definition;
@@ -66,6 +49,16 @@ final class McpOAuthServer
     public function companionClientFor(string $identifier): ?CompanionClientDefinitionData
     {
         return $this->companionClients[$identifier] ?? null;
+    }
+
+    /**
+     * @internal
+     *
+     * @return array<string, CompanionClientDefinitionData> Definitions keyed by client identifier.
+     */
+    public function companionClientDefinitions(): array
+    {
+        return $this->companionClients;
     }
 
     /** @internal Applies only to first-party Companion identities. */

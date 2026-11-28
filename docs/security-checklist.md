@@ -124,8 +124,9 @@ changing its decision between HTTP requests.
 
 `Isolated/PreRegisteredCompanionClientTest` proves the shipped callback policy,
 reservation from dynamic and fetched registrations, refusal while disabled,
-and issuer equality on approval and denial. The fixture requires no network
-access for the reserved identifier.
+and issuer equality on approval and denial. It exercises DTO validation,
+the shipped callback list under the instance host blocklist and the deploy
+check for a missing definition or unavailable host policy.
 
 ## Open items
 

@@ -8,6 +8,7 @@ use DateTimeInterface;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Container\Container;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
@@ -152,10 +153,44 @@ final class ClientMetadataRegistryService
         return $metadata?->getAttribute('registration_source') === 'companion' ? null : $this->findActiveClient($metadata);
     }
 
+    /** @return list<string> */
+    public function companionConfigurationProblems(): array
+    {
+        if (! $this->server->isCompanionClientEnabled()) {
+            return [];
+        }
+
+        $definitions = $this->server->companionClientDefinitions();
+
+        if ($definitions === []) {
+            return ['mcp-oauth.companion.enabled requires a shipped Companion client definition.'];
+        }
+
+        $problems = [];
+
+        try {
+            foreach ($definitions as $definition) {
+                if (! $this->isCompanionDefinitionAllowed($definition)) {
+                    $problems[] = 'Shipped Companion client '.$definition->identifier.' is blocked by the instance host policy.';
+                }
+            }
+        } catch (QueryException) {
+            $problems[] = 'The instance host policy for shipped Companion clients could not be read.';
+        }
+
+        return $problems;
+    }
+
+    private function isCompanionDefinitionAllowed(CompanionClientDefinitionData $definition): bool
+    {
+        // Shipped callbacks have their own exact list. The instance host
+        // blocklist applies to both the identifier and its callbacks.
+        return $this->isIdentifierAllowed($definition->identifier) && ! $this->redirectUriGuard->hasBlockedRedirectHost($definition->redirectUris);
+    }
+
     private function resolveCompanionClient(CompanionClientDefinitionData $definition, bool $canRegister): ?Client
     {
-        if (! $this->server->isCompanionClientEnabled() || ! $this->isIdentifierAllowed($definition->identifier)
-            || ! $this->hasAllowedRedirects($definition->redirectUris)) {
+        if (! $this->server->isCompanionClientEnabled() || ! $this->isCompanionDefinitionAllowed($definition)) {
             return null;
         }
 

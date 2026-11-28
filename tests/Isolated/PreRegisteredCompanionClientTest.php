@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\AccessTokenAuthenticator;
@@ -13,6 +14,7 @@ use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Enums\ClientMetadataFetchStatusEnum;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\McpOAuthServer;
+use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Services\ClientMetadataRegistryService;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
@@ -34,11 +36,17 @@ function registerPinnedCompanion(): Client
 it('uses shipped public metadata with CIMD fetching disabled and supplies the exact issuer', function (): void {
     $this->enableOAuth();
     config()->set('mcp-oauth.companion.enabled', true);
+    config()->set('mcp.redirect_domains', ['https://other.example']);
     $this->mock(ClientMetadataDocumentFetcherContract::class)->shouldReceive('fetch')->never();
     $client = registerPinnedCompanion();
     McpOAuthRoutes::register();
 
     $issuer = app(McpOAuthServer::class)->issuer();
+    $this->artisan('mcp-oauth:check')->assertSuccessful();
+    $this->postJson('/oauth/register', [
+        'client_name' => 'Dynamic client',
+        'redirect_uris' => [PINNED_COMPANION_CALLBACK],
+    ])->assertBadRequest()->assertJsonPath('error', 'invalid_redirect_uri');
     $this->get('/.well-known/oauth-authorization-server')->assertOk()
         ->assertJsonPath('issuer', $issuer)
         ->assertJsonPath('authorization_response_iss_parameter_supported', true);
@@ -147,23 +155,72 @@ it('refuses outbound re-enrollment for a stored companion whose definition was r
         ->and(Passport::client()->newQuery()->count())->toBe(1);
 });
 
-it('rejects incomplete metadata declarations before registering the first-party identifier', function (string $identifier, string $name, array $redirectUris, string $operator): void {
-    $definition = new CompanionClientDefinitionData($identifier, $name, $redirectUris, $operator);
-
-    expect(fn () => app(McpOAuthServer::class)->registerCompanionClient($definition))
+it('rejects invalid shipped metadata when constructing the definition', function (string $identifier, string $name, array $redirectUris, string $operator): void {
+    expect(fn () => new CompanionClientDefinitionData($identifier, $name, $redirectUris, $operator))
         ->toThrow(InvalidArgumentException::class);
-    expect(OAuthClientMetadata::query()->exists())->toBeFalse();
 })->with([
     'identifier without path' => ['https://companion.qiick.io', 'qiick Companion', [PINNED_COMPANION_CALLBACK], 'qiick'],
+    'identifier with only the root path' => ['https://companion.qiick.io/', 'qiick Companion', [PINNED_COMPANION_CALLBACK], 'qiick'],
     'identifier with query' => [PINNED_COMPANION_IDENTIFIER.'?other=one', 'qiick Companion', [PINNED_COMPANION_CALLBACK], 'qiick'],
+    'identifier with a fragment' => [PINNED_COMPANION_IDENTIFIER.'#metadata', 'qiick Companion', [PINNED_COMPANION_CALLBACK], 'qiick'],
+    'identifier with leading space' => [' '.PINNED_COMPANION_IDENTIFIER, 'qiick Companion', [PINNED_COMPANION_CALLBACK], 'qiick'],
+    'insecure identifier' => ['http://companion.qiick.io/oauth/client-metadata.json', 'qiick Companion', [PINNED_COMPANION_CALLBACK], 'qiick'],
+    'oversized identifier' => [PINNED_COMPANION_IDENTIFIER.str_repeat('i', 2049 - strlen(PINNED_COMPANION_IDENTIFIER)), 'qiick Companion', [PINNED_COMPANION_CALLBACK], 'qiick'],
     'blank name' => [PINNED_COMPANION_IDENTIFIER, ' ', [PINNED_COMPANION_CALLBACK], 'qiick'],
     'oversized name' => [PINNED_COMPANION_IDENTIFIER, str_repeat('n', 256), [PINNED_COMPANION_CALLBACK], 'qiick'],
     'blank operator' => [PINNED_COMPANION_IDENTIFIER, 'qiick Companion', [PINNED_COMPANION_CALLBACK], ' '],
     'missing callbacks' => [PINNED_COMPANION_IDENTIFIER, 'qiick Companion', [], 'qiick'],
+    'named callback' => [PINNED_COMPANION_IDENTIFIER, 'qiick Companion', ['primary' => PINNED_COMPANION_CALLBACK], 'qiick'],
+    'non-string callback' => [PINNED_COMPANION_IDENTIFIER, 'qiick Companion', [null], 'qiick'],
     'loopback callback' => [PINNED_COMPANION_IDENTIFIER, 'qiick Companion', ['http://127.0.0.1/callback'], 'qiick'],
+    'unspecified callback host' => [PINNED_COMPANION_IDENTIFIER, 'qiick Companion', ['https://0.0.0.0/callback'], 'qiick'],
     'custom-scheme callback' => [PINNED_COMPANION_IDENTIFIER, 'qiick Companion', ['io.qiick.companion:/callback'], 'qiick'],
     'oversized HTTPS callback' => [PINNED_COMPANION_IDENTIFIER, 'qiick Companion', [PINNED_COMPANION_CALLBACK.str_repeat('r', 1025 - strlen(PINNED_COMPANION_CALLBACK))], 'qiick'],
 ]);
+
+it('reports when companion is enabled without a shipped definition', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+
+    $this->artisan('mcp-oauth:check')->assertSuccessful();
+
+    config()->set('mcp-oauth.companion.enabled', true);
+    $this->artisan('mcp-oauth:check')
+        ->expectsOutput('mcp-oauth.companion.enabled requires a shipped Companion client definition.')
+        ->assertExitCode(1);
+});
+
+it('reports blocked hosts in a shipped definition and refuses authorization', function (string $blockedHost): void {
+    $this->enableOAuth();
+    config()->set('mcp-oauth.companion.enabled', true);
+    $this->mock(ClientMetadataDocumentFetcherContract::class)->shouldReceive('fetch')->never();
+    $callback = 'https://return.example/callback';
+    app(McpOAuthServer::class)->registerCompanionClient(new CompanionClientDefinitionData(
+        PINNED_COMPANION_IDENTIFIER, 'qiick Companion', [$callback], 'qiick',
+    ));
+    McpOAuthRoutes::register();
+    OAuthBlockedRedirectHost::query()->create(['host' => $blockedHost, 'match_mode' => 'exact']);
+
+    $this->artisan('mcp-oauth:check')
+        ->expectsOutput('Shipped Companion client '.PINNED_COMPANION_IDENTIFIER.' is blocked by the instance host policy.')
+        ->assertExitCode(1);
+    $client = (new Client)->forceFill(['id' => PINNED_COMPANION_IDENTIFIER]);
+    $this->get($this->authorizeUrl($client, ['redirect_uri' => $callback]))
+        ->assertBadRequest()->assertJsonPath('error', 'invalid_client')->assertHeaderMissing('Location');
+    expect(OAuthClientMetadata::query()->exists())->toBeFalse();
+})->with(['client identifier' => 'companion.qiick.io', 'callback' => 'return.example']);
+
+it('reports an unreadable host policy for a shipped definition', function (): void {
+    $this->enableOAuth();
+    config()->set('mcp-oauth.companion.enabled', true);
+    registerPinnedCompanion();
+    McpOAuthRoutes::register();
+    Schema::drop('oauth_blocked_redirect_hosts');
+
+    $this->artisan('mcp-oauth:check')
+        ->expectsOutput('The instance host policy for shipped Companion clients could not be read.')
+        ->assertExitCode(1);
+});
 
 it('reserves distinct companion identifiers at the declared size limits without creating clients', function (): void {
     $server = app(McpOAuthServer::class);
@@ -185,6 +242,7 @@ it('reserves distinct companion identifiers at the declared size limits without 
 it('replies to denial with the exact issuer and refuses callbacks outside the shipped list', function (): void {
     $this->enableOAuth();
     config()->set('mcp-oauth.companion.enabled', true);
+    config()->set('mcp.redirect_domains', ['https://other.example']);
     $client = registerPinnedCompanion();
     McpOAuthRoutes::register();
     $this->actingAs($this->createUser());
