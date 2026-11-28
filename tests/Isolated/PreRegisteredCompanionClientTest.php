@@ -195,15 +195,31 @@ it('replaces a previously fetched registration with the shipped definition and r
     McpOAuthRoutes::register();
 
     $previousClient = $this->createClient();
-    ['code' => $previousCode] = $this->obtainAuthorizationCode($previousClient);
+    ['code' => $previousCode, 'user' => $user] = $this->obtainAuthorizationCode($previousClient);
     $previousTokens = $this->post('/oauth/token', $this->codeExchange($previousClient, $previousCode))->assertOk();
+    $unexchangedCode = Passport::authCode()->forceFill([
+        'id' => str_repeat('a', 80),
+        'user_id' => $user->getAuthIdentifier(),
+        'client_id' => $previousClient->getKey(),
+        'scopes' => json_encode(['mcp:use'], JSON_THROW_ON_ERROR),
+        'revoked' => false,
+        'expires_at' => now()->addMinutes(5),
+    ]);
+    $unexchangedCode->save();
     $previousMetadata = OAuthClientMetadata::query()->sole();
     $previousMetadata->update([
         'registration_source' => 'cimd',
+        'spec_revision' => 'legacy',
+        'application_type' => 'web',
+        'token_endpoint_auth_method' => null,
         'metadata_document_url' => PINNED_COMPANION_IDENTIFIER,
         'metadata_document_url_sha256' => hash('sha256', PINNED_COMPANION_IDENTIFIER),
+        'metadata_document' => ['client_id' => PINNED_COMPANION_IDENTIFIER],
+        'metadata_document_sha256' => hash('sha256', PINNED_COMPANION_IDENTIFIER),
         'metadata_document_status' => 'valid',
+        'metadata_document_error' => 'previous error',
         'metadata_document_etag' => '"previous-metadata"',
+        'metadata_document_fetched_at' => now()->subHour(),
         'metadata_document_expires_at' => now()->addHour(),
     ]);
     $bearer = Request::create('/mcp', server: ['HTTP_AUTHORIZATION' => 'Bearer '.$previousTokens->json('access_token')]);
@@ -215,9 +231,24 @@ it('replaces a previously fetched registration with the shipped definition and r
     $this->get($this->authorizeUrl($pinnedClient, ['redirect_uri' => AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI]))
         ->assertBadRequest()->assertJsonPath('error', 'invalid_request')->assertHeaderMissing('Location');
 
-    expect(OAuthClientMetadata::query()->sole()->getAttribute('registration_source'))->toBe('companion')
-        ->and($previousMetadata->fresh()->getAttribute('metadata_document_etag'))->toBeNull()
-        ->and(Passport::client()->newQuery()->sole()->getAttribute('redirect_uris'))->toBe([PINNED_COMPANION_CALLBACK])
+    $pinnedMetadata = OAuthClientMetadata::query()->sole();
+    $storedClient = Passport::client()->newQuery()->sole();
+    expect($pinnedMetadata->getKey())->toBe($previousMetadata->getKey())
+        ->and($pinnedMetadata->getAttribute('registration_source'))->toBe('companion')
+        ->and($pinnedMetadata->getAttribute('spec_revision'))->toBe(app(McpOAuthServer::class)->specRevision())
+        ->and($pinnedMetadata->getAttribute('application_type'))->toBe('native')
+        ->and($pinnedMetadata->getAttribute('token_endpoint_auth_method'))->toBe('none')
+        ->and($pinnedMetadata->getAttribute('has_per_install_grants'))->toBeTrue()
+        ->and($storedClient->getKey())->toBe($previousClient->getKey())
+        ->and($storedClient->getAttribute('name'))->toBe('qiick Companion')
+        ->and($storedClient->getAttribute('grant_types'))->toBe(['authorization_code', 'refresh_token'])
+        ->and($storedClient->getAttribute('secret'))->toBeNull()
+        ->and($storedClient->getAttribute('redirect_uris'))->toBe([PINNED_COMPANION_CALLBACK])
         ->and(Passport::token()->newQuery()->sole()->getAttribute('revoked'))->toBeTrue()
-        ->and(Passport::refreshToken()->newQuery()->sole()->getAttribute('revoked'))->toBeTrue();
+        ->and(Passport::refreshToken()->newQuery()->sole()->getAttribute('revoked'))->toBeTrue()
+        ->and($unexchangedCode->refresh()->getAttribute('revoked'))->toBeTrue();
+
+    foreach (['document', 'document_sha256', 'document_etag', 'document_fetched_at', 'document_expires_at', 'document_status', 'document_error'] as $field) {
+        expect($pinnedMetadata->getAttribute('metadata_'.$field))->toBeNull();
+    }
 });
