@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth;
 
 use Carbon\CarbonInterval;
+use Closure;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -14,6 +15,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Events\Routing;
 use Illuminate\Support\Facades\RateLimiter;
@@ -56,6 +58,7 @@ use Qiick\McpOAuth\Internal\BlockedHostCatalog;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Internal\ConsumedAuthCodeGrant;
 use Qiick\McpOAuth\Internal\DisabledAdminSwitch;
+use Qiick\McpOAuth\Internal\GrantBindingColumn;
 use Qiick\McpOAuth\Internal\NullAuditLogger;
 use Qiick\McpOAuth\Internal\OutboundClientMetadataDocumentFetcher;
 use Qiick\McpOAuth\Services\ConsentPageService;
@@ -89,7 +92,17 @@ final class McpOAuthServiceProvider extends ServiceProvider
 
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__.'/../config/mcp-oauth.php', 'mcp-oauth');
+        $config = $this->app->make(ConfigRepository::class);
+        $published = $config->get('mcp-oauth', []);
+        $shipped = require __DIR__.'/../config/mcp-oauth.php';
+
+        if (! is_array($published) || ! is_array($shipped)) {
+            throw InvalidMcpOAuthConfigException::invalidSection('mcp-oauth');
+        }
+
+        // A published or cached config from an older release can omit nested
+        // keys. Existing values, including invalid ones, reach validation.
+        $config->set('mcp-oauth', array_replace_recursive($shipped, $published));
 
         // Always: Passport must not register its own /oauth/* (S4).
         Passport::ignoreRoutes();
@@ -229,7 +242,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
      */
     private static function booleanConfig(mixed $configuredValue, string $configKey): bool
     {
-        $booleanValue = is_bool($configuredValue) || is_int($configuredValue) || (is_string($configuredValue) && $configuredValue !== '')
+        $booleanValue = is_bool($configuredValue) || is_int($configuredValue) || (is_string($configuredValue) && trim($configuredValue) !== '')
             ? filter_var($configuredValue, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE)
             : null;
 
@@ -242,6 +255,9 @@ final class McpOAuthServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        $this->validateConfigSwitches();
+        $this->validateProductConfig();
+
         // Core side tables load with the package (same pattern as laravel-oidc).
         // Opt out via mcp-oauth.migrations.load when the app owns the files.
         if ($this->app->make('config')->get('mcp-oauth.migrations.load', true)) {
@@ -260,8 +276,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->configureRateLimiters();
         $this->validateRemainingIntegerConfig();
         InstallationGrantLifetimeService::maximumAgeDays($this->app->make(ConfigRepository::class));
-        self::booleanConfig($this->app->make(ConfigRepository::class)->get('mcp-oauth.companion.enabled', false), 'companion.enabled');
-        if (self::booleanConfig($this->app->make(ConfigRepository::class)->get('mcp-oauth.cimd.enabled', false), 'cimd.enabled')) {
+        if ($this->app->make(ConfigRepository::class)->get('mcp-oauth.cimd.enabled')) {
             $this->app->bindIf(ClientMetadataDocumentFetcherContract::class, OutboundClientMetadataDocumentFetcher::class);
         }
 
@@ -296,6 +311,48 @@ final class McpOAuthServiceProvider extends ServiceProvider
                 __DIR__.'/../database/migrations' => database_path('migrations'),
             ], 'mcp-oauth-migrations');
         }
+    }
+
+    private function validateConfigSwitches(): void
+    {
+        $config = $this->app->make(ConfigRepository::class);
+
+        foreach (['companion', 'cimd', 'retention', 'migrations'] as $section) {
+            if (! is_array($config->get('mcp-oauth.'.$section))) {
+                throw InvalidMcpOAuthConfigException::invalidSection('mcp-oauth.'.$section);
+            }
+        }
+
+        foreach (['enabled', 'companion.enabled', 'cimd.enabled', 'revocation_enabled', 'retention.schedule', 'migrations.load'] as $key) {
+            $config->set('mcp-oauth.'.$key, self::booleanConfig($config->get('mcp-oauth.'.$key), $key));
+        }
+    }
+
+    /** Ensures the resource and adapters can read a published config safely. */
+    private function validateProductConfig(): void
+    {
+        $config = $this->app->make(ConfigRepository::class);
+        $resourcePath = $config->get('mcp-oauth.mcp_path');
+
+        if (! is_string($resourcePath) || preg_match('/[[:space:]?#]/', $resourcePath) !== 0 || str_contains($resourcePath, '\\')) {
+            throw new InvalidMcpOAuthConfigException('mcp-oauth config [mcp_path] must be a URL path with no query or fragment.');
+        }
+
+        $mcpEnabled = $config->get('mcp-oauth.mcp_enabled');
+
+        if ($mcpEnabled !== null && ! is_bool($mcpEnabled)
+            && ! ($mcpEnabled instanceof Closure) && (! is_string($mcpEnabled) || trim($mcpEnabled) === '')) {
+            throw new InvalidMcpOAuthConfigException('mcp-oauth config [mcp_enabled] must be a boolean, config key, closure or null.');
+        }
+
+        $userModel = $config->get('mcp-oauth.user_model');
+
+        if ($userModel !== null && (! is_string($userModel) || ! is_a($userModel, Model::class, true))) {
+            throw new InvalidMcpOAuthConfigException('mcp-oauth config [user_model] must be an Eloquent model class or null.');
+        }
+
+        GrantBindingColumn::from($config);
+        $this->app->make(McpOAuthServer::class)->specRevision();
     }
 
     /**
@@ -560,6 +617,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
             'registrations_global_cap' => BoundedPositiveInt::REGISTRATIONS_GLOBAL_CAP_MAX,
             'unused_client_retention_hours' => BoundedPositiveInt::UNUSED_CLIENT_RETENTION_HOURS_MAX,
             'revoked_retention_days' => BoundedPositiveInt::REVOKED_RETENTION_DAYS_MAX,
+            'host_block_chunk_size' => BoundedPositiveInt::HOST_BLOCK_CHUNK_SIZE_MAX,
             'cimd.max_document_bytes' => BoundedPositiveInt::CIMD_MAX_DOCUMENT_BYTES_MAX,
             'cimd.timeout_seconds' => BoundedPositiveInt::CIMD_TIMEOUT_SECONDS_MAX,
             'cimd.cache_min_seconds' => BoundedPositiveInt::CIMD_CACHE_SECONDS_MAX,

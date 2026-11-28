@@ -163,6 +163,9 @@ Return that stored reason on reads of revoked installation grants.
 Every key of `config/mcp-oauth.php` (published with the `mcp-oauth-config` tag),
 with the variable that sets it where there is one:
 
+Older published copies inherit missing keys, including inside nested sections.
+A present invalid value stops boot with an error naming the key.
+
 | Key | Variable |
 | --- | --- |
 | `enabled` | `MCP_OAUTH_ENABLED` |
