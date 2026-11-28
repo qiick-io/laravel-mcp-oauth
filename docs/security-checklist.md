@@ -138,6 +138,16 @@ invalid sections, switches and adapter values at boot.
 
 None.
 
+## Pre-stable schema and API verification
+
+| Issue | Contract | Evidence |
+| --- | --- | --- |
+| [#23](https://github.com/qiick-io/laravel-mcp-oauth/issues/23) | Retain through day 90, then purge in chunks. Provide dry runs, a readiness command and single-server scheduling. | `Isolated/RetentionCommandsTest`, `Isolated/RetentionScheduleTest` |
+| [#24](https://github.com/qiick-io/laravel-mcp-oauth/issues/24) | The 201 response gives epoch seconds and the validated public registration fields. Native clients can register loopback and private-use callbacks. | `Isolated/DcrRegisterRouteTest` |
+| [#25](https://github.com/qiick-io/laravel-mcp-oauth/issues/25) | Auth-code exchanges keep the Passport code as their key with nullable JSON metadata and schema version 1. | `Feature/Schema/PackageMigrationsTest` on SQLite, PostgreSQL, MySQL and MariaDB |
+| [#26](https://github.com/qiick-io/laravel-mcp-oauth/issues/26) | Discovery goes through the public server builders and the configured issuer. | `Unit/McpOAuthServerTest`, `Unit/McpOAuthRoutesTest`, `Http/RealHttpFlowTest` |
+| [#27](https://github.com/qiick-io/laravel-mcp-oauth/issues/27) | Product permission gates client administration. Actions emit their events and the consent client props identify loopback returns. | `Isolated/AdminBlockActionsTest`, `Isolated/ConnectedAppsTest`, `Isolated/AuthorizeConsentRouteTest` |
+
 ## Closed since the first pass
 
 - **First approval against the unused-client prune (from the review of #45): closed.** The approval now holds the client's metadata row lock, the one the prune takes before deleting: a prune that commits first leaves the approval refused, and an approval that commits first keeps the client. `Isolated/FirstApprovalPruneRaceTest` covers both orders with two database sessions on PostgreSQL, MySQL and MariaDB.

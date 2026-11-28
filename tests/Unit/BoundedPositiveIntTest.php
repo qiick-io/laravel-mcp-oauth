@@ -49,6 +49,14 @@ it('rejects float, scientific, signed, blank and out-of-range values', function 
     ))->toThrow(InvalidMcpOAuthConfigException::class);
 })->with('rejected_ttl_values');
 
+it('reports the key and accepted range for an out-of-range setting', function (): void {
+    expect(fn () => BoundedPositiveInt::require(92_864, 'access_token_ttl_minutes', 1_440))
+        ->toThrow(function (InvalidMcpOAuthConfigException $exception): void {
+            expect($exception->getMessage())
+                ->toBe('mcp-oauth config [access_token_ttl_minutes] is outside the allowed range 1..1440.');
+        });
+});
+
 it('rejects env-like float and scientific strings that (int) would coerce', function (): void {
     expect((int) '1.5')->toBe(1)
         ->and((int) '1e2')->toBe(100);

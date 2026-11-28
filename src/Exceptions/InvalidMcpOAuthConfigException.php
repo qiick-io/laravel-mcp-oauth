@@ -30,10 +30,11 @@ final class InvalidMcpOAuthConfigException extends InvalidArgumentException
         return new self("mcp-oauth config [{$configKey}] must be true or false.");
     }
 
+    /** Keeps the configured value parameter for existing callers of this factory. */
     public static function outOfRange(string $configKey, int $configuredValue, int $maximum): self
     {
         return new self(
-            "mcp-oauth config [{$configKey}] value {$configuredValue} is outside the allowed range 1..{$maximum}.",
+            "mcp-oauth config [{$configKey}] is outside the allowed range 1..{$maximum}.",
         );
     }
 

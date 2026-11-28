@@ -131,6 +131,19 @@ Products that enable an additional resource persist
 return an empty map. Use `AccessTokenAuthenticator::authenticate()` with the
 registered identifier as its second argument at the product endpoint.
 
+## Server metadata builders
+
+`McpOAuthServer::authorizationServerMetadata()` and
+`McpOAuthServer::protectedResourceMetadata()` build the discovery documents
+served by the package controllers. Their issuer comes from the configured
+`APP_URL`. The protected-resource builder accepts a registered identifier and
+defaults to the MCP resource.
+
+`specRevision()` returns the configured MCP revision stamped on new client
+registrations. `revocationEndpointUrl()` returns the RFC 7009 endpoint while
+enabled and null otherwise. `supportsClientIdMetadataDocuments()` reports
+whether live CIMD discovery is enabled and has a fetcher.
+
 ## Companion installation grants
 
 Register a first-party Companion identity during product boot using
