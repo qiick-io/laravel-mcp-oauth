@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\AccessTokenAuthenticator;
 use Qiick\McpOAuth\Data\GrantRecord;
@@ -15,6 +16,13 @@ use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 uses(AuthorizeFlowTestCase::class);
 
 const COMPANION_RESOURCE = 'https://mcp-oauth.test/companion';
+
+function registerCompanionResource(): void
+{
+    app(McpOAuthServer::class)->registerResource(new ProtectedResourceDefinitionData(
+        COMPANION_RESOURCE, 'companion:device', ['companion'],
+    ));
+}
 
 it('advertises the wire scope and protected resource metadata of a registered audience', function (): void {
     $this->enableOAuth();
@@ -39,6 +47,12 @@ it('advertises the wire scope and protected resource metadata of a registered au
     $this->get('/.well-known/oauth-protected-resource/mcp')
         ->assertOk()
         ->assertJsonPath('scopes_supported', ['mcp:use']);
+
+    expect(McpOAuthRoutes::servingProblems())->toBe([]);
+    Route::get('/.well-known/oauth-protected-resource/companion', static fn (): string => 'foreign metadata');
+    expect(McpOAuthRoutes::servingProblems())->toBe([
+        'GET https://mcp-oauth.test/.well-known/oauth-protected-resource/companion is served by another handler',
+    ]);
 });
 
 it('refuses a resource registration that shadows the MCP audience or another resource', function (): void {
@@ -70,9 +84,7 @@ it('requires the registered resource to use a canonical child path under the iss
 
 it('refuses an untrusted client restricted resources or their wire scopes', function (string $registrationSource): void {
     $this->enableOAuth();
-    app(McpOAuthServer::class)->registerResource(new ProtectedResourceDefinitionData(
-        COMPANION_RESOURCE, 'companion:device', ['companion'],
-    ));
+    registerCompanionResource();
     McpOAuthRoutes::register();
     $client = $this->createClient();
     OAuthClientMetadata::query()->where('client_id', $client->getKey())
@@ -87,11 +99,21 @@ it('refuses an untrusted client restricted resources or their wire scopes', func
         ->assertBadRequest()->assertJsonPath('error', 'invalid_scope');
 })->with(['dcr', 'cimd']);
 
+it('retains the repeated resource indicators across the guest login redirect', function (): void {
+    $this->enableOAuth();
+    registerCompanionResource();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->update(['registration_source' => 'companion']);
+    $authorizationUrl = $this->authorizeUrl($client).'&resource='.rawurlencode(COMPANION_RESOURCE);
+
+    $this->get($authorizationUrl)->assertRedirect(route('login'))
+        ->assertSessionHas('url.intended', app(McpOAuthServer::class)->issuer().$authorizationUrl);
+});
+
 it('records the repeated resource indicators the user approved instead of any posted wire permissions', function (): void {
     $this->enableOAuth();
-    app(McpOAuthServer::class)->registerResource(new ProtectedResourceDefinitionData(
-        COMPANION_RESOURCE, 'companion:device', ['companion'],
-    ));
+    registerCompanionResource();
     McpOAuthRoutes::register();
     $client = $this->createClient();
     OAuthClientMetadata::query()->where('client_id', $client->getKey())
@@ -118,11 +140,30 @@ it('records the repeated resource indicators the user approved instead of any po
     expect($grant?->resourceScopes)->toBe($expected);
 });
 
+it('refuses a pending approval when the client class can no longer obtain one of its resources', function (): void {
+    $this->enableOAuth();
+    registerCompanionResource();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    $metadata = OAuthClientMetadata::query()->where('client_id', $client->getKey())->sole();
+    $metadata->update(['registration_source' => 'companion']);
+    $page = $this->actingAs($this->createUser())
+        ->get($this->authorizeUrl($client).'&resource='.rawurlencode(COMPANION_RESOURCE), ['X-Inertia' => 'true'])
+        ->assertOk();
+    $metadata->update(['registration_source' => 'dcr']);
+
+    $this->post('/oauth/authorize', [
+        'auth_token' => $page->json('props.authToken'),
+        'scopes' => ['mcp:read'],
+        'role' => 'editor',
+        'resources' => ['news'],
+    ])->assertForbidden()->assertHeaderMissing('Location');
+    expect($this->grantStore()->replacedDecisions)->toBeEmpty();
+});
+
 it('rejects unknown, repeated and array-shaped resources before consent', function (string $additionalParameter): void {
     $this->enableOAuth();
-    app(McpOAuthServer::class)->registerResource(new ProtectedResourceDefinitionData(
-        COMPANION_RESOURCE, 'companion:device', ['companion'],
-    ));
+    registerCompanionResource();
     McpOAuthRoutes::register();
 
     $this->get($this->authorizeUrl($this->createClient()).$additionalParameter)
@@ -136,9 +177,7 @@ it('rejects unknown, repeated and array-shaped resources before consent', functi
 
 it('exchanges a one-shot code for exactly one audience and refreshes the other without retiring it', function (): void {
     $this->enableOAuth();
-    app(McpOAuthServer::class)->registerResource(new ProtectedResourceDefinitionData(
-        COMPANION_RESOURCE, 'companion:device', ['companion'],
-    ));
+    registerCompanionResource();
     McpOAuthRoutes::register();
     $client = $this->createClient();
     OAuthClientMetadata::query()->where('client_id', $client->getKey())
@@ -195,14 +234,16 @@ it('exchanges a one-shot code for exactly one audience and refreshes the other w
 
 it('cannot refresh into another resource unless the user approved the corresponding pair', function (): void {
     $this->enableOAuth();
-    app(McpOAuthServer::class)->registerResource(new ProtectedResourceDefinitionData(
-        COMPANION_RESOURCE, 'companion:device', ['companion'],
-    ));
+    registerCompanionResource();
     McpOAuthRoutes::register();
     $client = $this->createClient();
     OAuthClientMetadata::query()->where('client_id', $client->getKey())
         ->update(['registration_source' => 'companion']);
     ['code' => $code] = $this->obtainAuthorizationCode($client);
+    $this->post('/oauth/token', $this->codeExchange($client, $code, ['resource' => 'https://unknown.example']))
+        ->assertBadRequest()->assertJsonPath('error', 'invalid_target');
+    $this->post('/oauth/token', $this->codeExchange($client, $code, ['scope' => 'companion:device']))
+        ->assertBadRequest()->assertJsonPath('error', 'invalid_scope');
     $tokens = $this->post('/oauth/token', $this->codeExchange($client, $code))->assertOk();
     $refresh = [
         'grant_type' => 'refresh_token',
