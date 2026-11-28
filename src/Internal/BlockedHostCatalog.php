@@ -40,16 +40,21 @@ final class BlockedHostCatalog
             );
         }
 
-        return array_values(OAuthBlockedRedirectHost::query()
+        $blockedHostRows = OAuthBlockedRedirectHost::query()
             ->where(static function ($hostQuery): void {
                 $hostQuery->whereNull('expires_at')
                     ->orWhere('expires_at', '>', now());
             })
-            ->get(['host', 'match_mode'])
-            ->map(static fn (OAuthBlockedRedirectHost $blockedHostRow): BlockedRedirectHostData => new BlockedRedirectHostData(
+            ->get(['host', 'match_mode']);
+        $blockedHosts = [];
+
+        foreach ($blockedHostRows as $blockedHostRow) {
+            $blockedHosts[] = new BlockedRedirectHostData(
                 $blockedHostRow->host,
                 $blockedHostRow->match_mode !== OAuthBlockedRedirectHost::MATCH_MODE_EXACT,
-            ))
-            ->all());
+            );
+        }
+
+        return $blockedHosts;
     }
 }

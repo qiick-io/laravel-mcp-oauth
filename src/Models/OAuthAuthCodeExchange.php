@@ -27,8 +27,12 @@ final class OAuthAuthCodeExchange extends Model
 {
     use UsesPassportConnectionTrait;
 
+    // PCOV has no line coverage for a declared property's initializer.
+    // @pest-mutate-ignore: FalseToTrue
     public $timestamps = false;
 
+    // PCOV has no line coverage for a declared property's initializer.
+    // @pest-mutate-ignore: FalseToTrue
     public $incrementing = false;
 
     protected $table = 'oauth_auth_code_exchanges';
@@ -37,6 +41,8 @@ final class OAuthAuthCodeExchange extends Model
 
     protected $keyType = 'string';
 
+    // PCOV has no line coverage for a declared property's initializer.
+    // @pest-mutate-ignore: RemoveArrayItem
     /**
      * @var list<string>
      */

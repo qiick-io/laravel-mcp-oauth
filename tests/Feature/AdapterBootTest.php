@@ -83,7 +83,10 @@ it('fails boot with OAuth on beside laravel/mcp\'s own OAuth routes, whose docum
     Route::getRoutes()->refreshNameLookups();
 
     expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
-        ->toThrow(InvalidMcpOAuthConfigException::class, $routeName);
+        ->toThrow(
+            InvalidMcpOAuthConfigException::class,
+            "mcp-oauth is enabled beside laravel/mcp's own OAuth routes [{$routeName}], whose documents follow the request Host. Remove Mcp::oauthRoutes(): McpOAuthRoutes::register() serves them.",
+        );
 })->with([
     'nested protected resource' => [static fn () => Route::get('.well-known/oauth-protected-resource/{path}', static fn (): string => '')->where('path', '.*')->name('mcp.oauth.protected-resource.nested'), 'mcp.oauth.protected-resource.nested'],
     'nested authorization server' => [static fn () => Route::get('.well-known/oauth-authorization-server/{path}', static fn (): string => '')->where('path', '.*')->name('mcp.oauth.authorization-server.nested'), 'mcp.oauth.authorization-server.nested'],

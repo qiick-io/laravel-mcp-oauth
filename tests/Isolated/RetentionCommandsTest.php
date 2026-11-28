@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Config\Repository;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -15,9 +16,12 @@ use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
 use Qiick\McpOAuth\Events\McpRevokedRecordsPurgedEvent;
 use Qiick\McpOAuth\Events\McpUnusedClientsPrunedEvent;
+use Qiick\McpOAuth\McpOAuthReadiness;
 use Qiick\McpOAuth\McpOAuthRoutes;
+use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
+use Qiick\McpOAuth\Testing\FakeAdminSwitch;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 use Qiick\McpOAuth\Tests\Support\HookedGrantStore;
 
@@ -410,6 +414,16 @@ it('reports OAuth off as a healthy state', function (): void {
         ->assertSuccessful();
 });
 
+it('reports usable Passport keys even with OAuth off', function (): void {
+    $this->enableOAuth();
+    config()->set('mcp-oauth.enabled', false);
+
+    $this->artisan('mcp-oauth:check')
+        ->expectsOutputToContain('OAuth: off')
+        ->expectsOutputToContain('Passport keys: env, usable')
+        ->assertSuccessful();
+});
+
 it('reports a ready server with its issuer, resource and key source', function (): void {
     $this->enableOAuth();
     McpOAuthRoutes::register();
@@ -423,6 +437,20 @@ it('reports a ready server with its issuer, resource and key source', function (
         ->expectsOutputToContain('laravel/mcp OAuth routes: none')
         ->expectsOutputToContain('Package routes: served at the origin')
         ->assertSuccessful();
+});
+
+it('uses the shared readiness probe to report the Passport key status', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $probeConfig = new Repository(config()->all());
+    $probeConfig->set('passport.private_key', '');
+    $probeServer = new McpOAuthServer($probeConfig, new FakeAdminSwitch(isEnabled: true));
+    $this->app->instance(McpOAuthReadiness::class, new McpOAuthReadiness($probeServer));
+
+    $this->artisan('mcp-oauth:check')
+        ->expectsOutputToContain('OAuth: on')
+        ->expectsOutputToContain('Passport keys: env, missing or unusable')
+        ->assertFailed();
 });
 
 it('fails when OAuth is on but the package routes are not served at the origin (Codex review of #62)', function (): void {

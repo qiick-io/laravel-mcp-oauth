@@ -22,6 +22,8 @@ final class OAuthClientMetadata extends Model
 
     protected $table = 'oauth_client_metadata';
 
+    // PCOV has no line coverage for a declared property's initializer.
+    // @pest-mutate-ignore: RemoveArrayItem
     /**
      * @var list<string>
      */

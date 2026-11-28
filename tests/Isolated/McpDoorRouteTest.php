@@ -164,7 +164,9 @@ it('with OAuth off keeps the plain challenge and the API-key door (S5, S6)', fun
     if ($status === 401) {
         $response->assertHeader('WWW-Authenticate', OFF_CHALLENGE);
     } else {
-        expect($binder->boundApiKeys)->toHaveCount(1);
+        expect($binder->boundApiKeys)->toHaveCount(1)
+            ->and($binder->boundApiKeys[0]->apiKey)->toBe($bearer)
+            ->and(request()->attributes->get('mcp_credential'))->toBe($binder->boundApiKeys[0]);
     }
 })->with([
     'no credentials' => [null, 401],

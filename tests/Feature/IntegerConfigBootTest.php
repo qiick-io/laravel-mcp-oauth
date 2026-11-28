@@ -72,6 +72,29 @@ it('boots with the documented maximum of every integer key', function (): void {
     expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())->not->toThrow(InvalidMcpOAuthConfigException::class);
 });
 
+it('enforces the published upper limit for every integer policy', function (string $key, int $maximum): void {
+    $configKey = 'mcp-oauth.'.$key;
+    config()->set($configKey, $maximum);
+    $provider = new McpOAuthServiceProvider($this->app);
+    $provider->boot();
+
+    config()->set($configKey, $maximum + 1);
+    expect(fn () => $provider->boot())->toThrow(InvalidMcpOAuthConfigException::class, $key);
+})->with([
+    'access token minutes' => ['access_token_ttl_minutes', 1_440],
+    'refresh token days' => ['refresh_token_ttl_days', 365],
+    'authorization code minutes' => ['auth_code_ttl_minutes', 10],
+    'host block batch size' => ['host_block_chunk_size', 1_000],
+    'installation grant age' => ['companion.grant_max_age_days', 3_650],
+    'registrations per minute' => ['registrations_per_minute', 10_000],
+    'registered client limit' => ['registrations_global_cap', 100_000],
+    'revoked client retention' => ['revoked_retention_days', 3_650],
+    'unused client retention' => ['unused_client_retention_hours', 8_760],
+    'CIMD bytes' => ['cimd.max_document_bytes', 1_048_576],
+    'CIMD timeout' => ['cimd.timeout_seconds', 30],
+    'CIMD cache age' => ['cimd.cache_max_seconds', 604_800],
+]);
+
 it('rejects a CIMD cache minimum above the cache maximum at boot', function (): void {
     config([
         'mcp-oauth.cimd.cache_min_seconds' => '600',
@@ -79,7 +102,10 @@ it('rejects a CIMD cache minimum above the cache maximum at boot', function (): 
     ]);
 
     expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())
-        ->toThrow(InvalidMcpOAuthConfigException::class, 'cimd.cache_min_seconds');
+        ->toThrow(function (InvalidMcpOAuthConfigException $exception): void {
+            expect($exception->getMessage())
+                ->toBe('mcp-oauth config [cimd.cache_min_seconds] must not exceed [cimd.cache_max_seconds].');
+        });
 });
 
 it('boots when the CIMD cache minimum equals the maximum', function (): void {

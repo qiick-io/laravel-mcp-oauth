@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Laravel\Passport\Client;
 use LogicException;
 use Qiick\McpOAuth\Models\OAuthAuthCodeExchange;
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
@@ -90,6 +91,10 @@ it('M3: PAR and DPoP per-client flags default to false', function (): void {
     expect($row->require_pushed_authorization_requests)->toBeFalse()
         ->and($row->dpop_bound_access_tokens)->toBeFalse()
         ->and($row->schema_version)->toBe(1);
+
+    $passportClient = (new Client)->forceFill(['id' => $row->client_id]);
+    expect(OAuthClientMetadata::isRegisteredClient($passportClient))->toBeTrue()
+        ->and(OAuthClientMetadata::isRegisteredClient($row->client_id))->toBeTrue();
 });
 
 it('M6: oauth_blocked_redirect_hosts has public_id, match_mode, expiry and schema_version', function (): void {
@@ -109,12 +114,23 @@ it('M6: oauth_blocked_redirect_hosts has public_id, match_mode, expiry and schem
     $host = OAuthBlockedRedirectHost::query()->create([
         'host' => 'evil.example',
     ]);
+    expect($host->public_id)->toBeString();
     $host->refresh();
 
     expect($host->public_id)->toBeString()->not->toBeEmpty()
         ->and($host->match_mode)->toBe('host_and_subdomains')
         ->and($host->schema_version)->toBe(1)
         ->and($host->getRouteKeyName())->toBe('public_id');
+});
+
+it('preserves a supplied redirect block UUID and normalizes an empty one before insert', function (): void {
+    $explicitId = (string) Str::uuid7();
+    $explicit = OAuthBlockedRedirectHost::query()->create(['host' => 'explicit.example', 'public_id' => $explicitId]);
+    $generated = OAuthBlockedRedirectHost::query()->create(['host' => 'empty.example', 'public_id' => '']);
+
+    expect($explicit->public_id)->toBe($explicitId)
+        ->and($generated->public_id)->toBeString()
+        ->and(Str::isUuid($generated->public_id))->toBeTrue();
 });
 
 it('M7: package UUID tables mint UUID v7 ids and carry metadata plus schema_version', function (): void {
@@ -170,6 +186,75 @@ it('records the grant each authorization code was consumed under', function (): 
     expect(Schema::hasTable('oauth_auth_code_exchanges'))->toBeTrue()
         ->and(Schema::getColumnListing('oauth_auth_code_exchanges'))->toEqualCanonicalizing(['auth_code_id', 'grant_id', 'expires_at', 'user_identifier', 'metadata', 'schema_version', 'created_at']);
 });
+
+it('keeps package model insert fields and key behavior aligned with the create migrations', function (
+    string $modelClass,
+    array $generatedColumns,
+    string $keyName,
+    bool $isIncrementing,
+    bool $hasManagedTimestamps,
+): void {
+    $model = new $modelClass;
+    $expectedInsertFields = array_values(array_diff(Schema::getColumnListing($model->getTable()), $generatedColumns));
+
+    expect($model->getFillable())->toEqualCanonicalizing($expectedInsertFields)
+        ->and($model->getKeyName())->toBe($keyName)
+        ->and($model->getIncrementing())->toBe($isIncrementing)
+        ->and($model->usesTimestamps())->toBe($hasManagedTimestamps);
+})->with([
+    'client metadata' => [OAuthClientMetadata::class, ['id', 'created_at', 'updated_at'], 'id', false, true],
+    'blocked redirect hosts' => [OAuthBlockedRedirectHost::class, ['id', 'created_at', 'updated_at'], 'id', true, true],
+    'consent evidence' => [OAuthConsentRecord::class, ['id'], 'id', false, false],
+    'consumed authorization codes' => [OAuthAuthCodeExchange::class, ['created_at', 'schema_version'], 'auth_code_id', false, false],
+]);
+
+it('hydrates package records with the documented types across database drivers', function (
+    string $modelClass,
+    array $jsonColumns,
+    array $dateColumns,
+    array $booleanColumns,
+): void {
+    $model = new $modelClass;
+    $date = '2026-11-27 08:09:10';
+    $model->setRawAttributes(
+        array_fill_keys($jsonColumns, '{"example":"retained"}')
+        + array_fill_keys($dateColumns, $date)
+        + array_fill_keys($booleanColumns, '1')
+        + ['schema_version' => '2'],
+    );
+
+    foreach ($jsonColumns as $column) {
+        expect($model->getAttribute($column))->toBe(['example' => 'retained']);
+    }
+
+    foreach ($dateColumns as $column) {
+        $attribute = $model->getAttribute($column);
+        expect($attribute)->toBeInstanceOf(DateTimeInterface::class)
+            ->and($attribute->format('Y-m-d H:i:s'))->toBe($date);
+    }
+
+    foreach ($booleanColumns as $column) {
+        expect($model->getAttribute($column))->toBeTrue();
+    }
+
+    expect($model->getAttribute('schema_version'))->toBe(2);
+})->with([
+    'client metadata' => [
+        OAuthClientMetadata::class,
+        ['contacts', 'jwks', 'metadata_document', 'metadata'],
+        ['client_id_issued_at', 'first_authorized_at', 'client_secret_expires_at', 'registration_access_token_expires_at',
+            'metadata_document_fetched_at', 'metadata_document_expires_at', 'revoked_at', 'retention_until'],
+        ['require_pushed_authorization_requests', 'dpop_bound_access_tokens', 'has_per_install_grants'],
+    ],
+    'blocked redirect hosts' => [OAuthBlockedRedirectHost::class, ['metadata'], ['expires_at'], []],
+    'consent evidence' => [
+        OAuthConsentRecord::class,
+        ['requested_scopes', 'granted_scopes', 'resource_scopes', 'resources', 'attributes', 'metadata'],
+        ['retention_until', 'created_at'],
+        ['all_resources'],
+    ],
+    'consumed authorization codes' => [OAuthAuthCodeExchange::class, ['metadata'], ['expires_at'], []],
+]);
 
 it('M7: an auth-code exchange carries metadata and schema_version 1, keyed by the code id instead of a UUID', function (): void {
     OAuthAuthCodeExchange::query()->create(['auth_code_id' => 'code-1', 'grant_id' => (string) Str::uuid7()]);
@@ -306,9 +391,11 @@ it('S9: no package table name collides with any Passport 13 table', function ():
 });
 
 it('S4: oauth_consent_records Eloquent model refuses update and delete', function (): void {
+    $grantId = (string) Str::uuid7();
     $consent = OAuthConsentRecord::query()->create([
         'client_id' => (string) Str::uuid7(),
         'user_identifier' => (string) Str::uuid7(),
+        'grant_id' => $grantId,
         'decision' => 'approved',
         'redirect_uri' => 'https://app.example/cb',
         'redirect_host' => 'app.example',
@@ -316,7 +403,8 @@ it('S4: oauth_consent_records Eloquent model refuses update and delete', functio
         'created_at' => now(),
     ]);
 
-    expect(fn () => $consent->update(['decision' => 'denied']))
+    expect(OAuthConsentRecord::redirectHostOfGrant($grantId))->toBe('app.example')
+        ->and(fn () => $consent->update(['decision' => 'denied']))
         ->toThrow(LogicException::class)
         ->and(fn () => $consent->delete())
         ->toThrow(LogicException::class);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Laravel\Passport\Client;
 use Qiick\McpOAuth\Data\BlockedRedirectHostData;
 use Qiick\McpOAuth\Internal\BlockedHostCatalog;
+use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
 use Qiick\McpOAuth\RedirectUriGuard;
 
 it('refuses fragments and dangerous schemes even when listed as custom', function (): void {
@@ -189,3 +190,19 @@ it('tells a loopback http redirect from any other', function (string $redirectUr
     'a private-use scheme' => ['cursor://callback', false],
     'unparseable' => ['http://127.0.0.1/callback#fragment', false],
 ]);
+
+it('reads only host blocks whose expiry is still in the future or unset', function (): void {
+    $this->freezeSecond();
+    OAuthBlockedRedirectHost::query()->create(['host' => 'permanent.example']);
+    OAuthBlockedRedirectHost::query()->create([
+        'host' => 'active.example',
+        'match_mode' => OAuthBlockedRedirectHost::MATCH_MODE_EXACT,
+        'expires_at' => now()->addSecond(),
+    ]);
+    OAuthBlockedRedirectHost::query()->create(['host' => 'expired.example', 'expires_at' => now()]);
+    $blockedHosts = array_column((new BlockedHostCatalog)->all(), 'shouldMatchSubdomains', 'host');
+
+    expect($blockedHosts)->toHaveCount(2)
+        ->and($blockedHosts['permanent.example'])->toBeTrue()
+        ->and($blockedHosts['active.example'])->toBeFalse();
+});

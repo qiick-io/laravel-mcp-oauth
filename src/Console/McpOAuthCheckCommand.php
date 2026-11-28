@@ -6,6 +6,7 @@ namespace Qiick\McpOAuth\Console;
 
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Qiick\McpOAuth\McpOAuthReadiness;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Services\ClientMetadataRegistryService;
@@ -19,9 +20,8 @@ use Qiick\McpOAuth\Services\ClientMetadataRegistryService;
  * OAuth route, when OAuth is on but not ready or not served, or when the
  * enabled Companion client has an unusable definition.
  *
- * It reads McpOAuthServer directly rather than McpOAuthReadiness: that probe
- * reports only `passport_keys` for a product's /up endpoint, while an
- * operator here needs the reason (which source, which route).
+ * The Passport key check comes from the same readiness probe products use.
+ * The command supplements it with issuer, route and key source diagnostics.
  *
  * @internal
  */
@@ -31,9 +31,18 @@ final class McpOAuthCheckCommand extends Command
 
     protected $description = 'Report whether MCP OAuth is on and ready';
 
-    public function handle(McpOAuthServer $mcpOAuthServer, ConfigRepository $config, ClientMetadataRegistryService $clientMetadata): int
-    {
-        $isEnabled = $mcpOAuthServer->isEnabled();
+    public function handle(
+        McpOAuthServer $mcpOAuthServer,
+        McpOAuthReadiness $readiness,
+        ConfigRepository $config,
+        ClientMetadataRegistryService $clientMetadata,
+    ): int {
+        $checks = $readiness->checks();
+        $isEnabled = $checks !== [];
+        // Operators can inspect the key source and status before enabling OAuth.
+        $hasUsableKeys = isset($checks['passport_keys'])
+            ? $checks['passport_keys'] === 'ok'
+            : $mcpOAuthServer->hasPassportKeys();
         // McpOAuthServer::hasPassportKeys() reads the env pair first, then the key files.
         $hasEnvKeys = self::isFilled($config->get('passport.private_key')) || self::isFilled($config->get('passport.public_key'));
         $foreignRouteNames = McpOAuthRoutes::foreignPassportRouteNames();
@@ -43,7 +52,7 @@ final class McpOAuthCheckCommand extends Command
         $this->line('OAuth: '.($isEnabled ? 'on' : 'off'));
         $this->line('Issuer: '.$mcpOAuthServer->issuer());
         $this->line('Resource: '.$mcpOAuthServer->resourceIdentifier());
-        $this->line('Passport keys: '.($hasEnvKeys ? 'env' : 'file').', '.($mcpOAuthServer->hasPassportKeys() ? 'usable' : 'missing or unusable'));
+        $this->line('Passport keys: '.($hasEnvKeys ? 'env' : 'file').', '.($hasUsableKeys ? 'usable' : 'missing or unusable'));
         $this->line('Foreign Passport routes: '.($foreignRouteNames === [] ? 'none' : implode(', ', $foreignRouteNames)));
         $this->line('laravel/mcp OAuth routes: '.($laravelMcpRouteNames === [] ? 'none' : implode(', ', $laravelMcpRouteNames)));
         $this->line('Package routes: '.($servingProblems === [] ? 'served at the origin' : implode('; ', $servingProblems)));
@@ -55,7 +64,7 @@ final class McpOAuthCheckCommand extends Command
         }
 
         $isHealthy = $foreignRouteNames === [] && $laravelMcpRouteNames === [] && $companionProblems === []
-            && (! $isEnabled || ($mcpOAuthServer->isReady() && $servingProblems === []));
+            && (! $isEnabled || ($hasUsableKeys && $mcpOAuthServer->hasAbsoluteIssuer() && $servingProblems === []));
 
         return $isHealthy ? self::SUCCESS : self::FAILURE;
     }

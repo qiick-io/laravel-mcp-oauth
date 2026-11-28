@@ -27,6 +27,13 @@ it('is off unless config, admin switch and product MCP flag are all true', funct
         ->and(makeServer(true, true, null)->isEnabled())->toBeFalse();
 });
 
+it('stays off when the product has no admin switch adapter', function (): void {
+    config()->set('mcp-oauth.enabled', true);
+    config()->set('mcp-oauth.mcp_enabled', true);
+
+    expect(app(McpOAuthServer::class)->isEnabled())->toBeFalse();
+});
+
 it('treats an unreadable admin switch store as off', function (): void {
     config()->set('mcp-oauth.enabled', true);
     config()->set('mcp-oauth.mcp_enabled', true);
