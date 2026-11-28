@@ -16,22 +16,23 @@ use Qiick\McpOAuth\Contracts\GrantAuthorizer;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\AuthorizationDecision;
 use Qiick\McpOAuth\Data\GrantRecord;
+use Qiick\McpOAuth\Data\ProtectedResourceDefinitionData;
 use Qiick\McpOAuth\Internal\GrantBindingColumn;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Symfony\Bridge\PsrHttpMessage\Factory\PsrHttpFactory;
 
 /**
- * The use-time checks on an OAuth access token at `/mcp` (design §8.5), in
+ * The use-time checks on an OAuth access token at a protected resource, in
  * order, with nothing cached, so a revocation takes effect on the next call:
  *
  * 1. signature, expiry and token row (Passport's ResourceServer);
- * 2. the row exists and its audience is this MCP resource (RFC 8707);
+ * 2. the row exists and its audience is the requested resource (RFC 8707);
  * 3. the client exists, is not revoked (a fresh query) and was registered by
  *    the package. A CIMD client also needs its feature on and its last
  *    validation must not have failed on trust or document policy;
  * 4. none of the client's redirect hosts is blocked;
  * 5. the client and user have an active grant, and the token is bound to it;
- * 6. the wire scopes are exactly `mcp:use`;
+ * 6. the scope is the one approved for that audience;
  * 7. the product's GrantAuthorizer allows.
  *
  * A refusal is `invalid_token` with one of three descriptions (S60): expired,
@@ -61,10 +62,18 @@ final class AccessTokenAuthenticator
      * Checks the Bearer of `$request` itself, converted the way Passport's
      * TokenGuard converts it, never the container's current request: a
      * product calling this with a request of its own gets that request's
-     * token checked.
+     * token checked. Omit the resource identifier to check the MCP endpoint.
      */
-    public function authenticate(Request $request): GrantRecord|AuthorizationDecision
+    public function authenticate(Request $request, ?string $resource = null): GrantRecord|AuthorizationDecision
     {
+        $mcpResource = $this->mcpOAuthServer->resourceIdentifier();
+        $resource ??= $mcpResource;
+        $definition = $this->mcpOAuthServer->registeredResources()[$resource] ?? null;
+
+        if ($resource !== $mcpResource && $definition === null) {
+            return AuthorizationDecision::invalidToken(self::NOT_VALID);
+        }
+
         try {
             $validatedRequest = $this->resourceServer->validateAuthenticatedRequest(
                 (new PsrHttpFactory)->createRequest($request),
@@ -78,10 +87,10 @@ final class AccessTokenAuthenticator
         /** @var Token|null $accessToken */
         $accessToken = Passport::token()->newQuery()
             ->whereKey($validatedRequest->getAttribute('oauth_access_token_id'))
-            ->where('audience', $this->mcpOAuthServer->resourceIdentifier())
+            ->where('audience', $resource)
             ->first();
 
-        if ($accessToken === null) {
+        if ($accessToken === null || $accessToken->getAttribute('audience') !== $resource) {
             return AuthorizationDecision::invalidToken(self::NOT_VALID);
         }
 
@@ -92,14 +101,14 @@ final class AccessTokenAuthenticator
             ->first();
 
         if ($client === null
-            || ! $this->hasUsableClientMetadata($client)
+            || ! $this->hasUsableClientMetadata($client, $definition)
             || $this->redirectUriGuard->clientHasBlockedRedirectHost($client)) {
             return AuthorizationDecision::invalidToken(self::REVOKED);
         }
 
         /** @var array{client_id: string, user_id: int|string} $owner Passport writes both on every token */
         $owner = $accessToken->only(['client_id', 'user_id']);
-        $grant = $this->grantStore->activeFor($owner['client_id'], (string) $owner['user_id']);
+        $grant = $this->grantFor($accessToken, $owner['client_id'], (string) $owner['user_id']);
 
         if ($grant === null) {
             return AuthorizationDecision::invalidToken(self::REVOKED);
@@ -109,7 +118,13 @@ final class AccessTokenAuthenticator
         // signed with the server key may carry none, or null.
         $scopes = $validatedRequest->getAttribute('oauth_scopes');
 
-        if (! $this->isBoundTo($accessToken, $grant) || ! self::carriesOnlyTheWireScope($scopes)) {
+        $scope = $definition->scope ?? McpOAuthServer::WIRE_SCOPE;
+        $isLegacyGrant = $grant->resourceScopes === [] && $definition === null;
+        $hasApprovedScope = $isLegacyGrant
+            ? self::carriesOnlyTheWireScope($scopes)
+            : $scopes === [$scope] && ($grant->resourceScopes[$resource] ?? null) === $scope;
+
+        if (! $this->isBoundTo($accessToken, $grant) || ! $hasApprovedScope) {
             return AuthorizationDecision::invalidToken(self::NOT_VALID);
         }
 
@@ -118,12 +133,28 @@ final class AccessTokenAuthenticator
         return $decision->isAllowed ? $grant : $decision;
     }
 
-    private function hasUsableClientMetadata(Client $client): bool
+    private function hasUsableClientMetadata(Client $client, ?ProtectedResourceDefinitionData $resource): bool
     {
         $metadata = OAuthClientMetadata::query()->where('client_id', $client->getKey())->first();
 
-        return $metadata !== null && ($metadata->getAttribute('metadata_document_url') === null
-            || ($this->mcpOAuthServer->supportsClientIdMetadataDocuments() && $metadata->getAttribute('metadata_document_status') !== 'invalid'));
+        return $metadata !== null
+            && ($resource === null || in_array($metadata->getAttribute('registration_source'), $resource->allowedClientClasses, true))
+            && ($metadata->getAttribute('metadata_document_url') === null
+                || ($this->mcpOAuthServer->supportsClientIdMetadataDocuments() && $metadata->getAttribute('metadata_document_status') !== 'invalid'));
+    }
+
+    private function grantFor(Token $accessToken, string $clientId, string $userIdentifier): ?GrantRecord
+    {
+        if ($this->mcpOAuthServer->registeredResources() === []) {
+            return $this->grantStore->activeFor($clientId, $userIdentifier);
+        }
+
+        $binding = $accessToken->getAttribute(GrantBindingColumn::from($this->config));
+        $grant = is_string($binding) || is_int($binding) ? $this->grantStore->find((string) $binding) : null;
+
+        return $grant !== null && ! $grant->revoked && $grant->clientId === $clientId && $grant->userIdentifier === $userIdentifier
+            ? $grant
+            : null;
     }
 
     /**

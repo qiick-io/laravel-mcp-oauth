@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Qiick\McpOAuth\Tests\Support;
 
+use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Http;
@@ -33,6 +34,21 @@ abstract class PackageTestCase extends TestCase
         Process::preventStrayProcesses();
     }
 
+    protected function tearDown(): void
+    {
+        $database = $this->app?->resolved('db') === true ? $this->app->make(DatabaseManager::class) : null;
+
+        try {
+            parent::tearDown();
+        } finally {
+            // Testbench applications can keep one another alive through event
+            // and reconnection closures until the cycle collector runs.
+            foreach ($database?->getConnections() ?? [] as $connection) {
+                $connection->disconnect();
+            }
+        }
+    }
+
     /**
      * @param  Application  $app
      * @return list<class-string>
@@ -50,6 +66,9 @@ abstract class PackageTestCase extends TestCase
         $app['config']->set('app.key', 'base64:'.base64_encode(random_bytes(32)));
         $app['config']->set('app.url', 'https://mcp-oauth.test');
         $app['config']->set('app.timezone', 'UTC');
+        // The Testbench schema only contains the package's tables.
+        $app['config']->set('cache.default', 'array');
+        $app['config']->set('session.driver', 'array');
         // Off by default: missing product adapters must not fail boot.
         $app['config']->set('mcp-oauth.enabled', false);
 

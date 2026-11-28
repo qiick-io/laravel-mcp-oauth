@@ -14,6 +14,7 @@ final readonly class McpConsentApprovedEvent
     /**
      * @param  list<string>  $scopes
      * @param  list<string>  $resources
+     * @param  array<string, string>  $resourceScopes  protocol audiences and their approved wire scopes
      */
     public function __construct(
         public string $clientId,
@@ -23,5 +24,6 @@ final readonly class McpConsentApprovedEvent
         public array $scopes,
         public array $resources,
         public ?string $resource = null,
+        public array $resourceScopes = [],
     ) {}
 }

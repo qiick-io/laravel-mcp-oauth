@@ -8,6 +8,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\GrantRecord;
+use Qiick\McpOAuth\Data\TokenResourceSelectionData;
 use Qiick\McpOAuth\Internal\ConsumedAuthCodeGrant;
 use Qiick\McpOAuth\Internal\GrantBindingColumn;
 use Qiick\McpOAuth\McpOAuthServer;
@@ -25,9 +26,8 @@ use Qiick\McpOAuth\Models\OAuthClientMetadata;
  * code exchange ({@see ConsumedAuthCodeGrant}), else
  * {@see GrantStore::activeFor()} of the token's client and user; its
  * {@see GrantStore::bindingKey()} goes into the configured binding
- * column. The audience is this server's MCP resource identifier: the token
- * endpoint refuses any other `resource`, so every token it mints is for
- * `/mcp`, and `/mcp` refuses a token that names anything else.
+ * column. The audience is the validated RFC 8707 resource selected at the
+ * token endpoint, or the MCP identifier for the MCP-only flow.
  *
  * A token with no user or no active grant (revoked between consent and the
  * exchange, S54, or by a concurrent replay of its code) is revoked at once:
@@ -55,7 +55,8 @@ final class BindAccessTokenAction
             return;
         }
 
-        $grant = $this->grantFor($clientId, $userIdentifier);
+        $selection = TokenResourceSelectionData::from(request());
+        $grant = $this->grantFor($clientId, $userIdentifier, $selection?->grantId);
         $accessTokenQuery = Passport::token()->newQuery()->whereKey($accessTokenId);
 
         if ($grant === null || $grant->revoked) {
@@ -66,7 +67,7 @@ final class BindAccessTokenAction
 
         $accessTokenQuery->update([
             GrantBindingColumn::from($this->config) => $this->grantStore->bindingKey($grant),
-            'audience' => $this->mcpOAuthServer->resourceIdentifier(),
+            'audience' => $selection->identifier ?? $this->mcpOAuthServer->resourceIdentifier(),
         ]);
 
         // Bound first, then the grant read again: a concurrent replay of the
@@ -82,13 +83,17 @@ final class BindAccessTokenAction
      * no grant was active then); a refresh binds to the active grant, which
      * S59 already requires.
      */
-    private function grantFor(string $clientId, ?string $userIdentifier): ?GrantRecord
+    private function grantFor(string $clientId, ?string $userIdentifier, ?string $selectedGrantId): ?GrantRecord
     {
         if ($this->consumedAuthCodeGrant->isRecorded()) {
             $consumedGrantId = $this->consumedAuthCodeGrant->take();
 
             // Consumed with no active grant: nothing may be bound, not even a later consent.
             return $consumedGrantId === null ? null : $this->grantStore->find($consumedGrantId);
+        }
+
+        if ($selectedGrantId !== null) {
+            return $this->grantStore->find($selectedGrantId);
         }
 
         return $userIdentifier === null ? null : $this->grantStore->activeFor($clientId, $userIdentifier);

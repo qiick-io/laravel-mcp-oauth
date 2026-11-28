@@ -49,6 +49,7 @@ final class HttpFlowSchema
             $table->boolean('revoked')->default(false);
             $table->string('revocation_reason', 32)->nullable();
             $table->json('scopes');
+            $table->json('resource_scopes');
             $table->timestamp('authorized_at');
             $table->timestamp('revoked_at')->nullable();
         });

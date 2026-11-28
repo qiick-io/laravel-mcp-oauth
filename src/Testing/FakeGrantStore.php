@@ -76,6 +76,7 @@ final class FakeGrantStore implements GrantStore
             authorizedAt: new DateTimeImmutable,
             lastUsedAt: null,
             display: ['role' => $decision->role, 'resources' => $decision->resources],
+            resourceScopes: $decision->resourceScopes,
         );
         $this->grantsById[$grant->id] = $grant;
 
@@ -111,6 +112,7 @@ final class FakeGrantStore implements GrantStore
             revokedAt: $revokedAt,
             revocationReason: $reason,
             metadata: $existingGrant->metadata,
+            resourceScopes: $existingGrant->resourceScopes,
         );
     }
 

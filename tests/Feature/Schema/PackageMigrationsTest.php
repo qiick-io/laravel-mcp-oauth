@@ -152,7 +152,7 @@ it('S4: oauth_consent_records is append-only evidence with every consent column'
         'id', 'client_id', 'user_identifier', 'grant_id', 'decision',
         'redirect_uri', 'redirect_host', 'resource', 'requested_scopes',
         'granted_scopes', 'role', 'resources', 'all_resources', 'attributes',
-        'consent_version', 'locale', 'ip_address', 'user_agent', 'correlation_id',
+        'consent_version', 'locale', 'ip_address', 'user_agent', 'correlation_id', 'resource_scopes',
         'retention_until', 'metadata', 'schema_version', 'created_at',
     ];
 

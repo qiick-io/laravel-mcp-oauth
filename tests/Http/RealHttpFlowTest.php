@@ -138,35 +138,56 @@ function registerHttpFlowClient(HttpClient $client, string $redirectUri = HTTP_F
 }
 
 /**
- * Authorize → login → consent → approve → token, as a browser and an MCP
- * client do it.
- *
- * @return array{access_token: string, refresh_token: string, client_id: string}
+ * @param  list<string>  $additionalResources  Further resource indicators sent as separate query fields.
  */
-function obtainHttpFlowTokens(string $baseUrl, string $redirectUri = HTTP_FLOW_REDIRECT_URI, ?string $clientId = null): array
+function httpFlowAuthorizeUrl(string $baseUrl, string $clientId, string $redirectUri, array $additionalResources = [], string $scope = 'mcp:use'): string
 {
-    $client = httpFlowClient($baseUrl);
-    $clientId ??= registerHttpFlowClient($client, $redirectUri);
     $authorizeUrl = '/oauth/authorize?'.http_build_query([
         'response_type' => 'code',
         'client_id' => $clientId,
         'redirect_uri' => $redirectUri,
         'state' => 'state-1234',
-        'scope' => 'mcp:use',
+        'scope' => $scope,
         'code_challenge' => AuthorizeFlowTestCase::CODE_CHALLENGE,
         'code_challenge_method' => 'S256',
         'resource' => "{$baseUrl}/mcp",
     ]);
 
+    foreach ($additionalResources as $resource) {
+        $authorizeUrl .= '&resource='.rawurlencode($resource);
+    }
+
+    return $authorizeUrl;
+}
+
+/**
+ * Authorize → login → consent → approve → token, as a browser and an MCP
+ * client do it.
+ *
+ * @param  list<string>  $additionalResources
+ * @return array{access_token: string, refresh_token: string, client_id: string, scope: string}
+ */
+function obtainHttpFlowTokens(string $baseUrl, string $redirectUri = HTTP_FLOW_REDIRECT_URI, ?string $clientId = null, array $additionalResources = []): array
+{
+    $client = httpFlowClient($baseUrl);
+    $clientId ??= registerHttpFlowClient($client, $redirectUri);
+    $authorizeUrl = httpFlowAuthorizeUrl($baseUrl, $clientId, $redirectUri, $additionalResources);
+
     expect($client->get($authorizeUrl)->getHeaderLine('Location'))->toEndWith('/login');
 
     $loginCsrfToken = preg_replace('/^.*name="_token" value="([^"]+)".*$/s', '$1', (string) $client->get('/login')->getBody());
-    $client->post('/login', ['form_params' => ['_token' => $loginCsrfToken, 'user_id' => 1]]);
+    $login = $client->post('/login', ['form_params' => ['_token' => $loginCsrfToken, 'user_id' => 1]]);
 
-    $consentPage = (string) $client->get($authorizeUrl)->getBody();
+    $consentResponse = $client->get($login->getHeaderLine('Location'));
+    expect($consentResponse->getStatusCode())->toBe(200);
+    $consentPage = (string) $consentResponse->getBody();
     preg_match('/name="_token" value="([^"]+)".*name="auth_token" value="([^"]+)"/s', $consentPage, $tokens);
 
     expect($tokens)->toHaveCount(3);
+
+    foreach ($additionalResources as $resource) {
+        expect($consentPage)->toContain($resource)->toContain("{$baseUrl}/mcp");
+    }
 
     $approval = $client->post('/oauth/authorize', ['form_params' => [
         '_token' => $tokens[1],
@@ -192,7 +213,7 @@ function obtainHttpFlowTokens(string $baseUrl, string $redirectUri = HTTP_FLOW_R
 
     expect($tokenResponse->getStatusCode())->toBe(200);
 
-    /** @var array{access_token: string, refresh_token: string} $tokenPair */
+    /** @var array{access_token: string, refresh_token: string, scope: string} $tokenPair */
     $tokenPair = jsonOf($tokenResponse);
 
     return [...$tokenPair, 'client_id' => $clientId];
@@ -206,13 +227,13 @@ function listMcpTools(string $baseUrl, string $accessToken): ResponseInterface
     ]);
 }
 
-function refreshHttpFlowTokens(HttpClient $client, string $baseUrl, string $clientId, string $refreshToken): ResponseInterface
+function refreshHttpFlowTokens(HttpClient $client, string $baseUrl, string $clientId, string $refreshToken, ?string $resource = null): ResponseInterface
 {
     return $client->post('/oauth/token', ['form_params' => [
         'grant_type' => 'refresh_token',
         'client_id' => $clientId,
         'refresh_token' => $refreshToken,
-        'resource' => "{$baseUrl}/mcp",
+        'resource' => $resource ?? "{$baseUrl}/mcp",
     ]]);
 }
 
@@ -340,10 +361,150 @@ it('runs consent, token exchange, refresh and the bearer check using a CIMD URL 
 /**
  * @param  array{environment: array<string, string>}  $httpFlowServer
  */
-function runHttpFlowCommand(array $httpFlowServer, string $action, string $host): void
+function runHttpFlowCommand(array $httpFlowServer, string $action, string $subject): void
 {
-    (new Process([PHP_BINARY, 'tests/Http/Server/command.php', $action, $host], dirname(__DIR__, 2), $httpFlowServer['environment']))->mustRun();
+    (new Process([PHP_BINARY, 'tests/Http/Server/command.php', $action, $subject], dirname(__DIR__, 2), $httpFlowServer['environment']))->mustRun();
 }
+
+function requestCompanion(HttpClient $client, string $accessToken): ResponseInterface
+{
+    return $client->get('/companion', ['headers' => ['Authorization' => "Bearer {$accessToken}"]]);
+}
+
+it('CMP3: consents to both resources and rotates only the selected audience', function () use (&$httpFlowServer): void {
+    $baseUrl = $httpFlowServer['baseUrl'];
+    $resource = "{$baseUrl}/companion";
+
+    withHttpFlowFlags($httpFlowServer['storage'], [HttpFlowServiceProvider::COMPANION_ENABLED_FLAG], function () use ($httpFlowServer, $baseUrl, $resource): void {
+        $client = httpFlowClient($baseUrl);
+        $clientId = registerHttpFlowClient($client);
+        runHttpFlowCommand($httpFlowServer, 'classify-companion', $clientId);
+        $mcp = obtainHttpFlowTokens($baseUrl, clientId: $clientId, additionalResources: [$resource]);
+
+        $duplicateResource = $client->post('/oauth/token', [
+            'headers' => ['Content-Type' => 'application/x-www-form-urlencoded'],
+            'body' => http_build_query([
+                'grant_type' => 'refresh_token', 'client_id' => $clientId, 'refresh_token' => $mcp['refresh_token'], 'resource' => $resource,
+            ]).'&resource='.rawurlencode("{$baseUrl}/mcp"),
+        ]);
+        expect($duplicateResource->getStatusCode())->toBe(400)
+            ->and(jsonOf($duplicateResource)['error'])->toBe('invalid_target');
+
+        $duplicateScope = $client->post('/oauth/token', [
+            'headers' => ['Content-Type' => 'application/x-www-form-urlencoded'],
+            'body' => http_build_query([
+                'grant_type' => 'refresh_token', 'client_id' => $clientId, 'refresh_token' => $mcp['refresh_token'],
+                'resource' => $resource, 'scope' => 'mcp:use',
+            ]).'&scope=companion%3Adevice',
+        ]);
+        expect($duplicateScope->getStatusCode())->toBe(400)
+            ->and(jsonOf($duplicateScope)['error'])->toBe('invalid_scope');
+
+        $companion = refreshHttpFlowTokens($client, $baseUrl, $clientId, $mcp['refresh_token'], $resource);
+        expect($companion->getStatusCode())->toBe(200);
+        $companion = jsonOf($companion);
+        expect($mcp['scope'])->toBe('mcp:use')
+            ->and($companion['scope'])->toBe('companion:device')
+            ->and(listMcpTools($baseUrl, $mcp['access_token'])->getStatusCode())->toBe(200)
+            ->and(requestCompanion($client, $companion['access_token'])->getStatusCode())->toBe(200)
+            ->and(listMcpTools($baseUrl, $companion['access_token'])->getStatusCode())->toBe(401)
+            ->and(requestCompanion($client, $mcp['access_token'])->getStatusCode())->toBe(401);
+
+        $rotatedMcp = refreshHttpFlowTokens($client, $baseUrl, $clientId, $companion['refresh_token']);
+        expect($rotatedMcp->getStatusCode())->toBe(200)
+            ->and(listMcpTools($baseUrl, $mcp['access_token'])->getStatusCode())->toBe(401)
+            ->and(requestCompanion($client, $companion['access_token'])->getStatusCode())->toBe(200);
+
+        withHttpFlowFlags($httpFlowServer['storage'], [HttpFlowServiceProvider::GRANT_DENIED_FLAG], static function () use ($client, $baseUrl, $companion, $rotatedMcp): void {
+            expect(requestCompanion($client, $companion['access_token'])->getStatusCode())->toBe(403)
+                ->and(listMcpTools($baseUrl, jsonOf($rotatedMcp)['access_token'])->getStatusCode())->toBe(403);
+        });
+
+        expect(refreshHttpFlowTokens($client, $baseUrl, $clientId, $mcp['refresh_token'], $resource)->getStatusCode())->toBe(400)
+            ->and(requestCompanion($client, $companion['access_token'])->getStatusCode())->toBe(401)
+            ->and(listMcpTools($baseUrl, jsonOf($rotatedMcp)['access_token'])->getStatusCode())->toBe(401);
+    });
+});
+
+it('CMP4: refuses the restricted resource to DCR and fetched CIMD clients, API keys and a web session', function () use (&$httpFlowServer): void {
+    $baseUrl = $httpFlowServer['baseUrl'];
+    $resource = "{$baseUrl}/companion";
+
+    withHttpFlowFlags($httpFlowServer['storage'], [HttpFlowServiceProvider::COMPANION_ENABLED_FLAG, HttpFlowServiceProvider::CIMD_ENABLED_FLAG], static function () use ($baseUrl, $resource): void {
+        $client = httpFlowClient($baseUrl);
+
+        foreach ([registerHttpFlowClient($client), HttpFlowServiceProvider::CIMD_CLIENT_IDENTIFIER] as $clientId) {
+            $authorize = $client->get(httpFlowAuthorizeUrl($baseUrl, $clientId, HTTP_FLOW_REDIRECT_URI, [$resource]));
+            $scope = $client->get(httpFlowAuthorizeUrl($baseUrl, $clientId, HTTP_FLOW_REDIRECT_URI, scope: 'companion:device'));
+            $token = refreshHttpFlowTokens($client, $baseUrl, $clientId, 'unused', $resource);
+            expect($authorize->getStatusCode())->toBe(400)
+                ->and(jsonOf($authorize)['error'])->toBe('invalid_target')
+                ->and($scope->getStatusCode())->toBe(400)
+                ->and(jsonOf($scope)['error'])->toBe('invalid_scope')
+                ->and($token->getStatusCode())->toBe(400)
+                ->and(jsonOf($token)['error'])->toBe('invalid_target');
+        }
+
+        $metadataClientTokens = obtainHttpFlowTokens($baseUrl, clientId: HttpFlowServiceProvider::CIMD_CLIENT_IDENTIFIER);
+        expect($metadataClientTokens['scope'])->toBe('mcp:use')
+            ->and(listMcpTools($baseUrl, $metadataClientTokens['access_token'])->getStatusCode())->toBe(200)
+            ->and(requestCompanion($client, $metadataClientTokens['access_token'])->getStatusCode())->toBe(401);
+
+        $loginCsrfToken = preg_replace('/^.*name="_token" value="([^"]+)".*$/s', '$1', (string) $client->get('/login')->getBody());
+        expect($client->post('/login', ['form_params' => ['_token' => $loginCsrfToken, 'user_id' => 1]])->getStatusCode())->toBe(302)
+            ->and($client->get('/companion')->getStatusCode())->toBe(401)
+            ->and(requestCompanion($client, 'ak_valid')->getStatusCode())->toBe(401);
+    });
+});
+
+it('CMP3: races one refresh on two database connections across both audiences', function () use (&$httpFlowServer): void {
+    $baseUrl = $httpFlowServer['baseUrl'];
+    $storage = $httpFlowServer['storage'];
+    $flags = [HttpFlowServiceProvider::COMPANION_ENABLED_FLAG, HttpFlowServiceProvider::REFRESH_RACE_FLAG];
+
+    withHttpFlowFlags($storage, $flags, static function () use ($httpFlowServer, $baseUrl, $storage): void {
+        $client = httpFlowClient($baseUrl);
+        $clientId = registerHttpFlowClient($client);
+        runHttpFlowCommand($httpFlowServer, 'classify-companion', $clientId);
+        $mcp = obtainHttpFlowTokens($baseUrl, clientId: $clientId, additionalResources: ["{$baseUrl}/companion"]);
+        $refresh = ['grant_type' => 'refresh_token', 'client_id' => $clientId, 'refresh_token' => $mcp['refresh_token']];
+
+        // One curl_multi handler drives both requests. Each server has its own database connection.
+        $responses = Utils::unwrap([
+            $client->postAsync('/oauth/token', [
+                'headers' => ['X-Refresh-Race' => 'mcp'],
+                'form_params' => [...$refresh, 'resource' => "{$baseUrl}/mcp"],
+            ]),
+            $client->postAsync($httpFlowServer['secondBaseUrl'].'/oauth/token', [
+                'headers' => ['X-Refresh-Race' => 'companion'],
+                'form_params' => [...$refresh, 'resource' => "{$baseUrl}/companion"],
+            ]),
+        ]);
+        expect(is_file($storage.'/refresh-arrived-mcp'))->toBeTrue()
+            ->and(is_file($storage.'/refresh-arrived-companion'))->toBeTrue();
+        $issued = [];
+
+        foreach ($responses as $response) {
+            expect($response->getStatusCode())->toBeIn([200, 400]);
+            $result = jsonOf($response);
+
+            if ($response->getStatusCode() === 200) {
+                $issued[] = $result;
+            } else {
+                expect($result['error'])->toBe('invalid_grant');
+            }
+        }
+
+        expect(count($issued))->toBeLessThanOrEqual(1)
+            ->and(listMcpTools($baseUrl, $mcp['access_token'])->getStatusCode())->toBe(401);
+
+        foreach ($issued as $result) {
+            expect(listMcpTools($baseUrl, $result['access_token'])->getStatusCode())->toBe(401)
+                ->and(requestCompanion($client, $result['access_token'])->getStatusCode())->toBe(401)
+                ->and(refreshHttpFlowTokens($client, $baseUrl, $clientId, $result['refresh_token'])->getStatusCode())->toBe(400);
+        }
+    });
+});
 
 it('refuses an existing token once its redirect host is blocked (step 5)', function () use (&$httpFlowServer): void {
     $baseUrl = $httpFlowServer['baseUrl'];

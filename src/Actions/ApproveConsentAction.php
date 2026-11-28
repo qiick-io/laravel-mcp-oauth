@@ -8,6 +8,7 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\Request;
 use Laravel\Passport\Passport;
+use LogicException;
 use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\GrantStore;
@@ -97,6 +98,20 @@ final class ApproveConsentAction
             }
 
             $grant = $this->grantStore->replace($decision);
+
+            if ($decision->resourceScopes !== []) {
+                // JSON storage can reorder object keys. Compare the pairs
+                // strictly without imposing the browser's iteration order.
+                $approvedResourceScopes = $decision->resourceScopes;
+                $storedResourceScopes = $grant->resourceScopes;
+                ksort($approvedResourceScopes);
+                ksort($storedResourceScopes);
+
+                if ($storedResourceScopes !== $approvedResourceScopes) {
+                    throw new LogicException('The GrantStore must preserve the approved resource scopes.');
+                }
+            }
+
             $this->revokeEarlierCredentials($clientInfo->id, $userIdentifier);
             $this->recordConsentDecision->execute($request, $pendingAuthorizationRequest, $redirectUri, $decision, $grant);
             OAuthClientMetadata::query()
@@ -121,11 +136,9 @@ final class ApproveConsentAction
             scopes: $decision->scopes,
             resources: $decision->resources,
             resource: $decision->resource,
+            resourceScopes: $decision->resourceScopes,
         ));
 
-        // The wire scopes are already exactly `mcp:use`: the authorization
-        // request middleware dropped the requested scope, so league applied
-        // Passport's default.
         $authorizationRequest->setAuthorizationApproved(true);
     }
 

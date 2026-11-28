@@ -42,6 +42,7 @@ final class PendingAuthorizationRequestService
     public function __construct(
         private readonly RedirectUriGuard $redirectUriGuard,
         private readonly ClientMetadataRegistryService $metadataClients,
+        private readonly ResourceIndicatorsService $resourceIndicators,
     ) {}
 
     /**
@@ -114,7 +115,15 @@ final class PendingAuthorizationRequestService
             }
         }
 
-        /** @var array{authToken: string, consentVersion: ?string, locale: string, resource: string} $renderedConsent written by ConsentPageService::render() */
+        /** @var array{authToken: string, consentVersion: ?string, locale: string, resource: string, resourceScopes?: array<string, string>} $renderedConsent written by ConsentPageService::render() */
+        $resourceScopes = $renderedConsent['resourceScopes'] ?? [];
+
+        if ($resourceScopes !== [] && $this->resourceIndicators->resolve(
+            array_keys($resourceScopes), $authorizationRequest->getClient()->getIdentifier(),
+        ) !== $resourceScopes) {
+            $this->refuse($request);
+        }
+
         return new PendingAuthorizationRequestData(
             $authorizationRequest,
             $client,
@@ -122,6 +131,7 @@ final class PendingAuthorizationRequestService
             renderedConsentVersion: $renderedConsent['consentVersion'],
             renderedLocale: $renderedConsent['locale'],
             renderedResource: $renderedConsent['resource'],
+            resourceScopes: $resourceScopes,
         );
     }
 

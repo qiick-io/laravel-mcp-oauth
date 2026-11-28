@@ -32,6 +32,9 @@ interface GrantStore
      * In one transaction with a row lock: revoke the active grant for
      * (client, user) in place, then create and return the new one. The package
      * revokes Passport credentials afterwards.
+     *
+     * Products that register extra protected resources persist the decision's
+     * immutable resource-to-scope pairs on the grant and return them on reads.
      */
     public function replace(ConsentDecision $decision): GrantRecord;
 

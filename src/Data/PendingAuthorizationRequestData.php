@@ -19,6 +19,7 @@ use League\OAuth2\Server\RequestTypes\AuthorizationRequestInterface;
  */
 final readonly class PendingAuthorizationRequestData
 {
+    /** @param array<string, string> $resourceScopes */
     public function __construct(
         public AuthorizationRequestInterface $authorizationRequest,
         public Client $client,
@@ -26,5 +27,6 @@ final readonly class PendingAuthorizationRequestData
         public ?string $renderedConsentVersion,
         public string $renderedLocale,
         public string $renderedResource,
+        public array $resourceScopes = [],
     ) {}
 }

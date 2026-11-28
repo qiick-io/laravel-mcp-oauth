@@ -9,10 +9,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
+use Qiick\McpOAuth\Data\TokenResourceSelectionData;
 use Qiick\McpOAuth\Exceptions\ClientMetadataUnavailableException;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\RedirectUriGuard;
 use Qiick\McpOAuth\Services\ClientMetadataRegistryService;
+use Qiick\McpOAuth\Services\ResourceIndicatorsService;
 use Qiick\McpOAuth\Services\TokenErrorResponseService;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -43,6 +45,7 @@ final class ValidateTokenRequestMiddleware
         private readonly RedirectUriGuard $redirectUriGuard,
         private readonly TokenErrorResponseService $tokenErrorResponses,
         private readonly ClientMetadataRegistryService $metadataClients,
+        private readonly ResourceIndicatorsService $resourceIndicators,
     ) {}
 
     /**
@@ -58,7 +61,9 @@ final class ValidateTokenRequestMiddleware
             return $this->tokenErrorResponses->refusal('unsupported_grant_type');
         }
 
-        if (! $this->mcpOAuthServer->acceptsResource($bodyParameters['resource'] ?? null)) {
+        $hasAdditionalResources = $this->mcpOAuthServer->registeredResources() !== [];
+
+        if (! $hasAdditionalResources && ! $this->mcpOAuthServer->acceptsResource($bodyParameters['resource'] ?? null)) {
             return $this->tokenErrorResponses->refusal('invalid_target');
         }
 
@@ -83,11 +88,36 @@ final class ValidateTokenRequestMiddleware
                 return $this->tokenErrorResponses->invalidClient($request);
             }
         } else {
-            $refusal = $this->resolveMetadataClient($request, $clientId, $basicClientId);
+            $resolution = $this->resolveMetadataClient($request, $clientId, $basicClientId);
 
-            if ($refusal !== null) {
-                return $refusal;
+            if ($resolution instanceof Response) {
+                return $resolution;
             }
+
+            $clientId = $resolution;
+        }
+
+        if ($hasAdditionalResources) {
+            $body = $request->getContent();
+            $indicators = $this->resourceIndicators->parse($body, $bodyParameters['resource'] ?? null, 'resource') ?? [];
+            $resourceScopes = count($indicators) === 1 ? $this->resourceIndicators->resolve($indicators, $clientId) : [];
+            $resource = array_key_first($resourceScopes);
+
+            if ($resource === null) {
+                return $this->tokenErrorResponses->refusal('invalid_target');
+            }
+
+            $scope = $resourceScopes[$resource];
+            $requestedScopes = $this->resourceIndicators->parse($body, $bodyParameters['scope'] ?? null, 'scope');
+
+            if ($requestedScopes !== [] && $requestedScopes !== [$scope]) {
+                return $this->tokenErrorResponses->refusal('invalid_scope');
+            }
+
+            $request->attributes->set(
+                TokenResourceSelectionData::REQUEST_ATTRIBUTE,
+                new TokenResourceSelectionData($resource, $scope),
+            );
         }
 
         return $next($request);
@@ -97,7 +127,7 @@ final class ValidateTokenRequestMiddleware
      * Only previously associated public clients can exchange a code or refresh;
      * token requests cannot create a registration or use a client secret.
      */
-    private function resolveMetadataClient(Request $request, string $clientId, ?string $basicClientId): ?Response
+    private function resolveMetadataClient(Request $request, string $clientId, ?string $basicClientId): string|Response
     {
         $parameters = $request->request->all();
 
@@ -129,7 +159,7 @@ final class ValidateTokenRequestMiddleware
 
         $request->request->set('client_id', $resolvedClientId);
 
-        return null;
+        return $resolvedClientId;
     }
 
     private function clientHasBlockedRedirectHost(string $clientId): bool

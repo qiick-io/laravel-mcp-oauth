@@ -14,6 +14,7 @@ use Qiick\McpOAuth\Exceptions\ClientMetadataUnavailableException;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\RedirectUriGuard;
 use Qiick\McpOAuth\Services\ClientMetadataRegistryService;
+use Qiick\McpOAuth\Services\ResourceIndicatorsService;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -38,8 +39,8 @@ use Symfony\Component\HttpFoundation\Response;
  * Refusals are local JSON responses: the redirect URI is not
  * trusted yet, and RFC 6749 §4.1.2.1 forbids redirecting to an unvalidated
  * one. A repeated (array) parameter league reads is refused by league itself
- * as a JSON `invalid_request`. The requested scope is dropped (RFC 6749 §3.3):
- * league then applies Passport's default, `mcp:use`.
+ * as a JSON `invalid_request`. The MCP-only flow drops the requested scope
+ * (RFC 6749 §3.3) and lets Passport apply its default, `mcp:use`.
  *
  * @internal
  */
@@ -49,6 +50,7 @@ final class ValidateAuthorizationRequestMiddleware
         private readonly McpOAuthServer $mcpOAuthServer,
         private readonly RedirectUriGuard $redirectUriGuard,
         private readonly ClientMetadataRegistryService $metadataClients,
+        private readonly ResourceIndicatorsService $resourceIndicators,
     ) {}
 
     /**
@@ -62,12 +64,37 @@ final class ValidateAuthorizationRequestMiddleware
             return $refusal;
         }
 
-        // The token only ever carries `mcp:use`, Passport's default scope, so the
-        // requested scope is dropped instead of echoed or refused (S20).
-        $request->query->remove('scope');
-        $this->dropPromptLogin($request);
+        /** @var array<string, string>|null $resourceScopes set by registeredResourceRefusal for the additional resources */
+        $resourceScopes = $request->attributes->get(ResourceIndicatorsService::REQUEST_ATTRIBUTE);
 
-        return $next($request);
+        if ($resourceScopes !== null) {
+            $request->query->set('scope', implode(' ', $resourceScopes));
+        } else {
+            $request->query->remove('scope');
+        }
+
+        $this->dropPromptLogin($request);
+        $response = $next($request);
+
+        if ($resourceScopes !== null && $response->isRedirect() && $request->hasSession()) {
+            $this->preserveResourceIndicatorsForLogin($request);
+        }
+
+        return $response;
+    }
+
+    /**
+     * Laravel stores the normalized URL on its login redirect. Symfony's
+     * normalization collapses repeated RFC 8707 resource indicators.
+     */
+    private function preserveResourceIndicatorsForLogin(Request $request): void
+    {
+        $query = $request->server->get('QUERY_STRING');
+        $session = $request->session();
+
+        if (is_string($query) && $session->get('url.intended') === $request->fullUrl()) {
+            $session->put('url.intended', $this->mcpOAuthServer->issuer().'/oauth/authorize?'.$query);
+        }
     }
 
     /**
@@ -100,7 +127,9 @@ final class ValidateAuthorizationRequestMiddleware
             return self::oauthError('invalid_request', 'PKCE with code_challenge_method S256 is required.');
         }
 
-        if (! $this->mcpOAuthServer->acceptsResource($request->query->all()['resource'] ?? null)) {
+        $hasAdditionalResources = $this->mcpOAuthServer->registeredResources() !== [];
+
+        if (! $hasAdditionalResources && ! $this->mcpOAuthServer->acceptsResource($request->query->all()['resource'] ?? null)) {
             return self::oauthError('invalid_target', 'The resource parameter is required and must name this MCP endpoint.');
         }
 
@@ -131,6 +160,40 @@ final class ValidateAuthorizationRequestMiddleware
 
         if (! $isUuid) {
             $request->query->set('client_id', $resolvedClientId);
+        }
+
+        if ($hasAdditionalResources) {
+            return $this->registeredResourceRefusal($request, $resolvedClientId);
+        }
+
+        return null;
+    }
+
+    private function registeredResourceRefusal(Request $request, string $clientId): ?JsonResponse
+    {
+        $query = $request->server->get('QUERY_STRING');
+        $query = is_string($query) ? $query : '';
+        $queryParameters = $request->query->all();
+        $indicators = $this->resourceIndicators->parse(
+            $query,
+            $queryParameters['resource'] ?? null,
+            'resource',
+        );
+        $resourceScopes = $this->resourceIndicators->resolve($indicators ?? [], $clientId);
+
+        if ($resourceScopes === []) {
+            return self::oauthError('invalid_target', 'Each resource must be known, unique and available to this client.');
+        }
+
+        $requestedScopes = $this->resourceIndicators->parse($query, $queryParameters['scope'] ?? null, 'scope');
+
+        if ($requestedScopes === null || count($requestedScopes) > 1
+            || ! $this->resourceIndicators->allowsRequestedScope($requestedScopes[0] ?? null, $resourceScopes)) {
+            return self::oauthError('invalid_scope', 'A requested scope is outside the selected resources.');
+        }
+
+        if ($resourceScopes !== [$this->mcpOAuthServer->resourceIdentifier() => McpOAuthServer::WIRE_SCOPE]) {
+            $request->attributes->set(ResourceIndicatorsService::REQUEST_ATTRIBUTE, $resourceScopes);
         }
 
         return null;

@@ -57,6 +57,7 @@ commands are public by name and signature (below), not as PHP classes.
 - `ConsentOptions` (class)
 - `ConsentPage` (class)
 - `GrantRecord` (class)
+- `ProtectedResourceDefinitionData` (class)
 - `RevocationReason` (enum)
 
 ### `Qiick\McpOAuth\Enums`
@@ -107,6 +108,24 @@ commands are public by name and signature (below), not as PHP classes.
 - `FakeGrantAuthorizer` (class)
 - `FakeGrantStore` (class)
 - `FakeMcpCredentialBinder` (class)
+
+## Additional protected resources
+
+Register each `ProtectedResourceDefinitionData` with
+`McpOAuthServer::registerResource()` before `McpOAuthRoutes::register()` or
+the first resolution of Passport's authorization server. Each definition has
+an exact path under the issuer, one distinct wire scope and server-assigned client
+classes. The matching nested RFC 9728 route serves its metadata.
+
+An indicator compares scheme and host case-insensitively, permits one trailing
+slash and preserves path case. Responses and grant records use the canonical
+registered identifier.
+
+Products that enable an additional resource persist
+`ConsentDecision::resourceScopes` unchanged and return it in
+`GrantRecord::resourceScopes` on all reads. Legacy MCP-only grants may
+return an empty map. Use `AccessTokenAuthenticator::authenticate()` with the
+registered identifier as its second argument at the product endpoint.
 
 ## Config keys and environment variables
 

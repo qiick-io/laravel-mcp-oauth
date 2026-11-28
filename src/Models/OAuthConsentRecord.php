@@ -34,6 +34,7 @@ final class OAuthConsentRecord extends Model
         'redirect_uri',
         'redirect_host',
         'resource',
+        'resource_scopes',
         'requested_scopes',
         'granted_scopes',
         'role',
@@ -86,6 +87,7 @@ final class OAuthConsentRecord extends Model
         return [
             'requested_scopes' => 'array',
             'granted_scopes' => 'array',
+            'resource_scopes' => 'array',
             'resources' => 'array',
             'attributes' => 'array',
             'all_resources' => 'boolean',
