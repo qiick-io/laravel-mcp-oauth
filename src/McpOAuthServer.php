@@ -215,6 +215,12 @@ final class McpOAuthServer
             throw new InvalidArgumentException('A protected resource needs a distinct canonical path under the issuer.');
         }
 
+        // The authorization code carries scope identifiers. One scope per
+        // audience keeps its allowlist unambiguous before the token is bound.
+        if (isset($this->scopeDescriptions()[$resource->scope])) {
+            throw new InvalidArgumentException('A protected resource needs a distinct wire scope.');
+        }
+
         $this->registeredResources[$identifier] = $resource;
         Passport::tokensCan($this->scopeDescriptions());
     }
@@ -333,7 +339,7 @@ final class McpOAuthServer
         ];
 
         foreach ($this->registeredResources as $resource) {
-            $descriptions[$resource->scope] ??= 'Use the protected resource with the access the user grants';
+            $descriptions[$resource->scope] = 'Use the protected resource with the access the user grants';
         }
 
         return $descriptions;

@@ -68,14 +68,33 @@ final class ValidateAuthorizationRequestMiddleware
         $resourceScopes = $request->attributes->get(ResourceIndicatorsService::REQUEST_ATTRIBUTE);
 
         if ($resourceScopes !== null) {
-            $request->query->set('scope', implode(' ', array_unique($resourceScopes)));
+            $request->query->set('scope', implode(' ', $resourceScopes));
         } else {
             $request->query->remove('scope');
         }
 
         $this->dropPromptLogin($request);
+        $response = $next($request);
 
-        return $next($request);
+        if ($resourceScopes !== null && $response->isRedirect() && $request->hasSession()) {
+            $this->preserveResourceIndicatorsForLogin($request);
+        }
+
+        return $response;
+    }
+
+    /**
+     * Laravel stores the normalized URL on its login redirect. Symfony's
+     * normalization collapses repeated RFC 8707 resource indicators.
+     */
+    private function preserveResourceIndicatorsForLogin(Request $request): void
+    {
+        $query = $request->server->get('QUERY_STRING');
+        $session = $request->session();
+
+        if (is_string($query) && $session->get('url.intended') === $request->fullUrl()) {
+            $session->put('url.intended', $this->mcpOAuthServer->issuer().'/oauth/authorize?'.$query);
+        }
     }
 
     /**
@@ -153,17 +172,23 @@ final class ValidateAuthorizationRequestMiddleware
     private function registeredResourceRefusal(Request $request, string $clientId): ?JsonResponse
     {
         $query = $request->server->get('QUERY_STRING');
+        $query = is_string($query) ? $query : '';
+        $queryParameters = $request->query->all();
         $indicators = $this->resourceIndicators->parse(
-            is_string($query) ? $query : '',
-            $request->query->all()['resource'] ?? null,
+            $query,
+            $queryParameters['resource'] ?? null,
+            'resource',
         );
-        $resourceScopes = $this->resourceIndicators->resolve($indicators, $clientId);
+        $resourceScopes = $this->resourceIndicators->resolve($indicators ?? [], $clientId);
 
         if ($resourceScopes === []) {
             return self::oauthError('invalid_target', 'Each resource must be known, unique and available to this client.');
         }
 
-        if (! $this->resourceIndicators->allowsRequestedScope($request->query->all()['scope'] ?? null, $resourceScopes)) {
+        $requestedScopes = $this->resourceIndicators->parse($query, $queryParameters['scope'] ?? null, 'scope');
+
+        if ($requestedScopes === null || count($requestedScopes) > 1
+            || ! $this->resourceIndicators->allowsRequestedScope($requestedScopes[0] ?? null, $resourceScopes)) {
             return self::oauthError('invalid_scope', 'A requested scope is outside the selected resources.');
         }
 

@@ -57,7 +57,8 @@ final class ResourceScopeRepository extends ScopeRepository
             $grant = $exchange === null ? null : app(GrantStore::class)->find($exchange->grant_id);
 
             if ($grant === null && $selection->identifier === $this->server->resourceIdentifier()
-                && $finalizedScopes === $scopes && count($scopes) === 1) {
+                && $finalizedScopes === $scopes && count($scopes) === 1
+                && $scopes[0]->getIdentifier() === $selection->scope) {
                 // The legacy bridge issues an immediately revoked token if consent vanished during exchange.
                 return $finalizedScopes;
             }

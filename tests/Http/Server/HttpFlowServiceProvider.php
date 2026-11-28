@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Qiick\McpOAuth\Tests\Http\Server;
 
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -13,6 +14,7 @@ use Illuminate\Support\ServiceProvider;
 use Laravel\Mcp\Facades\Mcp;
 use Laravel\Mcp\Server\Middleware\AddWwwAuthenticateHeader;
 use Laravel\Passport\Passport;
+use Qiick\McpOAuth\AccessTokenAuthenticator;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Contracts\ApiKeyDoor;
 use Qiick\McpOAuth\Contracts\ClientMetadataDocumentFetcherContract;
@@ -21,10 +23,14 @@ use Qiick\McpOAuth\Contracts\ConsentView;
 use Qiick\McpOAuth\Contracts\GrantAuthorizer;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Contracts\McpCredentialBinder;
+use Qiick\McpOAuth\Data\AuthorizationDecision;
+use Qiick\McpOAuth\Data\GrantRecord;
+use Qiick\McpOAuth\Data\ProtectedResourceDefinitionData;
 use Qiick\McpOAuth\Http\Middleware\McpBearerDoorMiddleware;
 use Qiick\McpOAuth\Http\Middleware\McpChallengeMiddleware;
 use Qiick\McpOAuth\Internal\OutboundClientMetadataDocumentFetcher;
 use Qiick\McpOAuth\McpOAuthRoutes;
+use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Testing\FakeAdminSwitch;
 use Qiick\McpOAuth\Testing\FakeApiKeyDoor;
 use Qiick\McpOAuth\Testing\FakeConsentProvider;
@@ -36,6 +42,7 @@ use Qiick\McpOAuth\Tests\Support\TestUser;
 use Qiick\Outbound\Http\OutboundHttpStackData;
 use Qiick\Outbound\Testing\FakeHostResolver;
 use Qiick\Outbound\Testing\FakeOutboundHttpFactory;
+use RuntimeException;
 
 /**
  * The product side of the `http` group: what an adopting app wires (design
@@ -66,6 +73,12 @@ final class HttpFlowServiceProvider extends ServiceProvider
 
     public const string CIMD_CLIENT_IDENTIFIER = 'https://client.example/oauth-client.json';
 
+    public const string COMPANION_ENABLED_FLAG = 'companion-enabled';
+
+    public const string GRANT_DENIED_FLAG = 'grant-denied';
+
+    public const string REFRESH_RACE_FLAG = 'refresh-race';
+
     public function register(): void
     {
         $storagePath = (string) getenv('MCP_HTTP_STORAGE');
@@ -86,6 +99,9 @@ final class HttpFlowServiceProvider extends ServiceProvider
         $config->set('mcp.redirect_domains', ['*']);
         $config->set('mcp-oauth.enabled', ! is_file($storagePath.'/'.self::CONFIG_OFF_FLAG));
         $config->set('mcp-oauth.mcp_enabled', true);
+        // All browser scenarios share loopback and this cache until the group ends.
+        $config->set('mcp-oauth.registrations_per_minute', 60);
+        $config->set('mcp-oauth.authorize_requests_per_minute', 120);
 
         if (is_file($storagePath.'/'.self::CIMD_ENABLED_FLAG)) {
             $factory = FakeOutboundHttpFactory::fake([
@@ -108,7 +124,10 @@ final class HttpFlowServiceProvider extends ServiceProvider
         $this->app->instance(ConsentProvider::class, new FakeConsentProvider(AuthorizeFlowTestCase::defaultConsentOptions()));
         $this->app->bind(ConsentView::class, HtmlConsentView::class);
         $this->app->bind(GrantStore::class, DatabaseGrantStore::class);
-        $this->app->instance(GrantAuthorizer::class, new FakeGrantAuthorizer);
+        $denial = is_file($storagePath.'/'.self::GRANT_DENIED_FLAG)
+            ? AuthorizationDecision::insufficientScope('mcp:read', 'The product no longer permits this grant.')
+            : null;
+        $this->app->instance(GrantAuthorizer::class, new FakeGrantAuthorizer($denial));
         $this->app->instance(ApiKeyDoor::class, new FakeApiKeyDoor(['ak_valid']));
         $this->app->instance(McpCredentialBinder::class, new FakeMcpCredentialBinder);
 
@@ -121,6 +140,23 @@ final class HttpFlowServiceProvider extends ServiceProvider
         // The package has merged its shipped CIMD settings by this point.
         $storagePath = (string) getenv('MCP_HTTP_STORAGE');
         $this->app['config']->set('mcp-oauth.cimd.enabled', is_file($storagePath.'/'.self::CIMD_ENABLED_FLAG));
+
+        if (is_file($storagePath.'/'.self::COMPANION_ENABLED_FLAG)) {
+            $server = $this->app->make(McpOAuthServer::class);
+            $resource = $server->issuer().'/companion';
+            $server->registerResource(new ProtectedResourceDefinitionData($resource, 'companion:device', ['companion']));
+
+            Route::get('/companion', static function (Request $request, AccessTokenAuthenticator $authenticator) use ($resource) {
+                $outcome = $authenticator->authenticate($request, $resource);
+
+                return $outcome instanceof GrantRecord ? response()->json(['grant_id' => $outcome->id])
+                    : response()->json(['error' => $outcome->error], $outcome->error === 'insufficient_scope' ? 403 : 401);
+            });
+        }
+
+        if (is_file($storagePath.'/'.self::REFRESH_RACE_FLAG)) {
+            $this->synchroniseRefreshValidation($storagePath);
+        }
 
         McpOAuthRoutes::register();
 
@@ -140,5 +176,37 @@ final class HttpFlowServiceProvider extends ServiceProvider
         Mcp::web('mcp', HttpFlowMcpServer::class)
             ->withoutMiddleware(AddWwwAuthenticateHeader::class)
             ->middleware([McpChallengeMiddleware::class, McpBearerDoorMiddleware::class]);
+    }
+
+    /**
+     * Park each server after reading the same grant in ResourceRefreshGrant,
+     * after the family repository's initial read and before either CAS.
+     */
+    private function synchroniseRefreshValidation(string $storagePath): void
+    {
+        $grantReads = 0;
+
+        $this->app['events']->listen(QueryExecuted::class, static function (QueryExecuted $query) use ($storagePath, &$grantReads): void {
+            $participant = request()->header('X-Refresh-Race');
+
+            if (! in_array($participant, ['mcp', 'companion'], true) || ! request()->is('oauth/token')
+                || preg_match('/^select \* from ["`]http_flow_grants["`] where /i', $query->sql) !== 1
+                || ++$grantReads !== 2) {
+                return;
+            }
+
+            touch($storagePath.'/refresh-arrived-'.$participant);
+            $peer = $storagePath.'/refresh-arrived-'.($participant === 'mcp' ? 'companion' : 'mcp');
+            $deadline = microtime(true) + 5;
+
+            while (! is_file($peer)) {
+                if (microtime(true) >= $deadline) {
+                    throw new RuntimeException('The second refresh did not reach the grant read before rotation.');
+                }
+
+                usleep(5_000);
+                clearstatcache(true, $peer);
+            }
+        });
     }
 }

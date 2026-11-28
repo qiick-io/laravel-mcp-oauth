@@ -57,12 +57,14 @@ interface OAuthAuthorizePageProps {
     authToken: string;
     /**
      * The Advanced section, closed by default: the client id, registration
-     * source, the resource, the callback this approval returns to, then what
+     * source, the requested protocol resources, the callback this approval returns to, then what
      * the client registered (callbacks, website, terms, privacy policy,
      * contacts, software), each row only when it has a value. The registered
      * fields are the client's own claim.
      */
     advanced: { label: string; value: string }[];
+    /** Present when consent covers an additional RFC 8707 resource. */
+    resourceScopes?: Record<string, string>;
     options: {
         scopes: ConsentOption[];
         /** Empty: the product has no role choice; post no `role` */
@@ -87,6 +89,8 @@ What the page must show:
   host is the fact, the name is not;
 - the scopes, roles, resources and organisations, with non-grantable options
   visible but disabled;
+- each requested protocol resource in `resourceScopes`, which is independent
+  of the product permissions in `options.resources`;
 - every entry of `notices`.
 
 ## Form

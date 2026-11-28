@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Qiick\McpOAuth\Views;
 
+use Illuminate\Http\Request;
 use Inertia\Inertia;
+use Inertia\ResponseFactory;
 use Qiick\McpOAuth\Contracts\ConsentView;
 use Qiick\McpOAuth\Data\ConsentPage;
 use Symfony\Component\HttpFoundation\Response;
@@ -34,6 +36,13 @@ final class InertiaConsentView implements ConsentView
 
         if ($page->resourceScopes !== []) {
             $properties['resourceScopes'] = $page->resourceScopes;
+
+            // Preserve repeated resource indicators on reload without changing
+            // the host application's Inertia resolver.
+            $factory = clone app(ResponseFactory::class);
+            $factory->resolveUrlUsing(static fn (Request $request): string => $request->getRequestUri());
+
+            return $factory->render(self::COMPONENT, $properties)->toResponse($parameters['request']);
         }
 
         return Inertia::render(self::COMPONENT, $properties)->toResponse($parameters['request']);

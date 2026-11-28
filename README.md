@@ -225,6 +225,30 @@ the `@api` DTOs under `Qiick\McpOAuth\Data` and events under
 `Qiick\McpOAuth\Events`. Package records use UUIDs. CIMD clients use their
 document URL as the OAuth wire identifier.
 
+## Additional protected resources
+
+Register each product resource with `McpOAuthServer::registerResource()`
+before registering the OAuth routes or resolving Passport's authorization
+server. A definition pairs a canonical URL under `APP_URL` with one wire
+scope unique to the audience and a list of server-assigned client classes. Each resource has its
+own RFC 9728 metadata document under `/.well-known/oauth-protected-resource/`.
+The existing `/mcp` configuration works without a definition.
+
+An authorization request may repeat `resource` to ask for several
+audiences. The user sees each audience at consent. The product's
+`GrantStore` copies `ConsentDecision::resourceScopes` to the grant and
+returns the same immutable pairs in `GrantRecord::resourceScopes` on reads.
+`POST /oauth/token` takes exactly one resource on both the code exchange
+and refresh. A grant may refresh into another approved audience. Rotation
+retires the selected audience's previous access token, and reuse still
+revokes the whole family.
+
+For an additional endpoint, pass its exact registered identifier to
+`AccessTokenAuthenticator::authenticate($request, $resource)`. It verifies
+the audience and scope before calling the product's `GrantAuthorizer`.
+The authorizer re-checks the principal and the bound organisation using
+current product data on every request.
+
 ## Config
 
 Publishable `config/mcp-oauth.php` (tag `mcp-oauth-config`). Env prefix

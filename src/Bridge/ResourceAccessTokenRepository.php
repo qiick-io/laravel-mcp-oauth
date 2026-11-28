@@ -9,6 +9,7 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Laravel\Passport\Bridge\AccessTokenRepository;
 use Laravel\Passport\Passport;
 use Laravel\Passport\Token;
+use League\OAuth2\Server\Exception\OAuthServerException;
 use Qiick\McpOAuth\Data\TokenResourceSelectionData;
 use Qiick\McpOAuth\Internal\GrantBindingColumn;
 
@@ -36,13 +37,19 @@ final class ResourceAccessTokenRepository extends AccessTokenRepository
             return;
         }
 
-        /** @var Token $sourceToken League already validated it when loading the refresh */
-        $sourceToken = Passport::token()->newQuery()->findOrFail($tokenId);
+        /** @var Token|null $sourceToken League validated it, but the product can remove it concurrently */
+        $sourceToken = Passport::token()->newQuery()->find($tokenId);
         $bindingColumn = GrantBindingColumn::from($this->config);
+        $binding = $sourceToken?->getAttribute($bindingColumn);
+
+        if ($sourceToken === null || (! is_string($binding) && ! is_int($binding))) {
+            throw OAuthServerException::invalidRefreshToken('Token has been revoked');
+        }
+
         $tokens = Passport::token()->newQuery()
             ->where('client_id', $sourceToken->getAttribute('client_id'))
             ->where('user_id', $sourceToken->getAttribute('user_id'))
-            ->where($bindingColumn, $sourceToken->getAttribute($bindingColumn))
+            ->where($bindingColumn, $binding)
             ->where('audience', $selection->identifier)
             ->where('revoked', false)
             ->get(['id', 'audience']);

@@ -18,10 +18,17 @@ final class HtmlConsentView implements ConsentView
 {
     public function render(array $parameters, ConsentPage $page): SymfonyResponse
     {
+        $resourceRows = '';
+
+        foreach ($page->resourceScopes as $identifier => $scope) {
+            $resourceRows .= '<li>'.e($identifier).' ('.e($scope).')</li>';
+        }
+
         return new Response(sprintf(
-            '<form method="post" action="/oauth/authorize"><input name="_token" value="%s"><input name="auth_token" value="%s"></form>',
+            '<form method="post" action="/oauth/authorize"><input name="_token" value="%s"><input name="auth_token" value="%s"><ul>%s</ul></form>',
             e(csrf_token()),
             e($page->authToken),
+            $resourceRows,
         ));
     }
 }

@@ -98,7 +98,8 @@ final class ValidateTokenRequestMiddleware
         }
 
         if ($hasAdditionalResources) {
-            $indicators = $this->resourceIndicators->parse($request->getContent(), $bodyParameters['resource'] ?? null);
+            $body = $request->getContent();
+            $indicators = $this->resourceIndicators->parse($body, $bodyParameters['resource'] ?? null, 'resource') ?? [];
             $resourceScopes = count($indicators) === 1 ? $this->resourceIndicators->resolve($indicators, $clientId) : [];
             $resource = array_key_first($resourceScopes);
 
@@ -107,8 +108,9 @@ final class ValidateTokenRequestMiddleware
             }
 
             $scope = $resourceScopes[$resource];
+            $requestedScopes = $this->resourceIndicators->parse($body, $bodyParameters['scope'] ?? null, 'scope');
 
-            if (isset($bodyParameters['scope']) && $bodyParameters['scope'] !== $scope) {
+            if ($requestedScopes !== [] && $requestedScopes !== [$scope]) {
                 return $this->tokenErrorResponses->refusal('invalid_scope');
             }
 

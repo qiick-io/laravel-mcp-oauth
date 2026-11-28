@@ -24,28 +24,40 @@ final readonly class ResourceIndicatorsService
      * PHP collapses repeated query and form fields. Read the wire representation
      * before the request bag, which is sufficient for a synthesized request.
      *
-     * @return list<string> Empty for absent or ambiguous indicators.
+     * @return list<string>|null Empty for an absent field, null for an ambiguous field.
      */
-    public function parse(string $encodedParameters, mixed $parsedResource): array
+    public function parse(string $encodedParameters, mixed $parsedValue, string $field): ?array
     {
         if ($encodedParameters === '') {
-            return is_string($parsedResource) ? [$parsedResource] : [];
+            return match (true) {
+                $parsedValue === null => [],
+                is_string($parsedValue) => [$parsedValue],
+                default => null,
+            };
         }
 
-        $indicators = [];
+        $values = [];
 
         foreach (explode('&', $encodedParameters) as $parameter) {
             [$encodedName, $encodedValue] = array_pad(explode('=', $parameter, 2), 2, '');
             $name = urldecode($encodedName);
 
-            if ($name === 'resource') {
-                $indicators[] = urldecode($encodedValue);
-            } elseif (str_starts_with(ltrim($name, ' '), 'resource[') || ltrim($name, ' ') === 'resource') {
-                return [];
+            if ($name === $field) {
+                $values[] = urldecode($encodedValue);
+
+                continue;
+            }
+
+            // PHP discards a leading space, truncates at a NUL and treats
+            // brackets as an array. None is a literal protocol field.
+            $phpName = explode("\0", ltrim($name, ' '), 2)[0];
+
+            if ($phpName === $field || str_starts_with($phpName, $field.'[')) {
+                return null;
             }
         }
 
-        return $indicators;
+        return $values;
     }
 
     /**
@@ -86,14 +98,10 @@ final readonly class ResourceIndicatorsService
     /**
      * @param  array<string, string>  $resourceScopes
      */
-    public function allowsRequestedScope(mixed $requestedScope, array $resourceScopes): bool
+    public function allowsRequestedScope(?string $requestedScope, array $resourceScopes): bool
     {
         if ($requestedScope === null) {
             return true;
-        }
-
-        if (! is_string($requestedScope)) {
-            return false;
         }
 
         $isLegacyAudience = $resourceScopes === [$this->server->resourceIdentifier() => McpOAuthServer::WIRE_SCOPE];

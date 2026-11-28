@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Qiick\McpOAuth\Models\OAuthBlockedRedirectHost;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Tests\Http\Server\HttpFlowApplication;
 
 /*
@@ -15,9 +16,11 @@ require __DIR__.'/../../../vendor/autoload.php';
 
 HttpFlowApplication::create();
 
-[, $action, $host] = $argv;
+[, $action, $subject] = $argv;
 
 match ($action) {
-    'block-host' => OAuthBlockedRedirectHost::query()->create(['host' => $host, 'match_mode' => OAuthBlockedRedirectHost::MATCH_MODE_EXACT]),
-    'unblock-host' => OAuthBlockedRedirectHost::query()->where('host', $host)->delete(),
+    'block-host' => OAuthBlockedRedirectHost::query()->create(['host' => $subject, 'match_mode' => OAuthBlockedRedirectHost::MATCH_MODE_EXACT]),
+    'unblock-host' => OAuthBlockedRedirectHost::query()->where('host', $subject)->delete(),
+    // The fixture simulates the trusted enrollment in MO4. No HTTP client can assign this class.
+    'classify-companion' => OAuthClientMetadata::query()->where('client_id', $subject)->sole()->update(['registration_source' => 'companion']),
 };

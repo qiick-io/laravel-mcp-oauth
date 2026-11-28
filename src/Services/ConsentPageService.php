@@ -92,7 +92,11 @@ final class ConsentPageService
             ],
             authToken: $parameters['authToken'],
             options: $consentOptions,
-            advanced: self::advancedRows($clientInfo, $resource, is_string($redirectUri) ? $redirectUri : $clientInfo->redirectUris[0]),
+            advanced: self::advancedRows(
+                $clientInfo,
+                $resourceScopes === [] ? $resource : implode(', ', array_keys($resourceScopes)),
+                is_string($redirectUri) ? $redirectUri : $clientInfo->redirectUris[0],
+            ),
             resourceScopes: $resourceScopes,
         );
 

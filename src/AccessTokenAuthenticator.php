@@ -16,6 +16,7 @@ use Qiick\McpOAuth\Contracts\GrantAuthorizer;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\AuthorizationDecision;
 use Qiick\McpOAuth\Data\GrantRecord;
+use Qiick\McpOAuth\Data\ProtectedResourceDefinitionData;
 use Qiick\McpOAuth\Internal\GrantBindingColumn;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Symfony\Bridge\PsrHttpMessage\Factory\PsrHttpFactory;
@@ -100,16 +101,8 @@ final class AccessTokenAuthenticator
             ->first();
 
         if ($client === null
-            || ! $this->hasUsableClientMetadata($client)
+            || ! $this->hasUsableClientMetadata($client, $definition)
             || $this->redirectUriGuard->clientHasBlockedRedirectHost($client)) {
-            return AuthorizationDecision::invalidToken(self::REVOKED);
-        }
-
-        if ($definition !== null && ! in_array(
-            OAuthClientMetadata::query()->where('client_id', $client->getKey())->value('registration_source'),
-            $definition->allowedClientClasses,
-            true,
-        )) {
             return AuthorizationDecision::invalidToken(self::REVOKED);
         }
 
@@ -140,12 +133,14 @@ final class AccessTokenAuthenticator
         return $decision->isAllowed ? $grant : $decision;
     }
 
-    private function hasUsableClientMetadata(Client $client): bool
+    private function hasUsableClientMetadata(Client $client, ?ProtectedResourceDefinitionData $resource): bool
     {
         $metadata = OAuthClientMetadata::query()->where('client_id', $client->getKey())->first();
 
-        return $metadata !== null && ($metadata->getAttribute('metadata_document_url') === null
-            || ($this->mcpOAuthServer->supportsClientIdMetadataDocuments() && $metadata->getAttribute('metadata_document_status') !== 'invalid'));
+        return $metadata !== null
+            && ($resource === null || in_array($metadata->getAttribute('registration_source'), $resource->allowedClientClasses, true))
+            && ($metadata->getAttribute('metadata_document_url') === null
+                || ($this->mcpOAuthServer->supportsClientIdMetadataDocuments() && $metadata->getAttribute('metadata_document_status') !== 'invalid'));
     }
 
     private function grantFor(Token $accessToken, string $clientId, string $userIdentifier): ?GrantRecord

@@ -58,6 +58,7 @@ final class DatabaseGrantStore implements GrantStore
                 'user_identifier' => $decision->userIdentifier,
                 'revoked' => false,
                 'scopes' => json_encode($decision->scopes),
+                'resource_scopes' => json_encode($decision->resourceScopes, JSON_THROW_ON_ERROR),
                 'authorized_at' => now(),
             ]);
 
@@ -115,9 +116,11 @@ final class DatabaseGrantStore implements GrantStore
 
     private static function recordFrom(object $row): GrantRecord
     {
-        /** @var object{id: string, client_id: string, user_identifier: string, revoked: bool|int|string, scopes: string, authorized_at: string} $row */
+        /** @var object{id: string, client_id: string, user_identifier: string, revoked: bool|int|string, scopes: string, resource_scopes: string, authorized_at: string} $row */
         /** @var list<string> $scopes */
         $scopes = json_decode($row->scopes, true);
+        /** @var array<string, string> $resourceScopes */
+        $resourceScopes = json_decode($row->resource_scopes, true, flags: JSON_THROW_ON_ERROR);
 
         return new GrantRecord(
             id: $row->id,
@@ -127,6 +130,7 @@ final class DatabaseGrantStore implements GrantStore
             scopes: $scopes,
             authorizedAt: new DateTimeImmutable($row->authorized_at),
             lastUsedAt: null,
+            resourceScopes: $resourceScopes,
         );
     }
 }
