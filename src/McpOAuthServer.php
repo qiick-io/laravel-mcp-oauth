@@ -6,10 +6,12 @@ namespace Qiick\McpOAuth;
 
 use DateInterval;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Container\Container;
 use Laravel\Mcp\Server\Registrar;
 use Laravel\Passport\Passport;
 use League\Uri\UriString;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
+use Qiick\McpOAuth\Contracts\ClientMetadataDocumentFetcherContract;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Throwable;
@@ -48,6 +50,7 @@ final class McpOAuthServer
         private readonly ConfigRepository $config,
         private readonly AdminSwitch $adminSwitch,
         private readonly bool $skipUnixKeyModes = PHP_OS_FAMILY === 'Windows',
+        private readonly ?Container $container = null,
     ) {}
 
     public function isEnabled(): bool
@@ -228,18 +231,11 @@ final class McpOAuthServer
         return $this->issuer().'/oauth/revoke';
     }
 
-    /**
-     * Whether `client_id` may be a Client ID Metadata Document URL (S2).
-     *
-     * ponytail: always false until the fetcher lands on qiick/laravel-outbound;
-     * then it reads `mcp-oauth.cimd.enabled` and authorizationServerMetadata()
-     * adds `client_id_metadata_document_supported` when it is true.
-     * Advertising it with no handler would make clients send URLs the server
-     * cannot resolve (M2).
-     */
+    /** Whether this issuer actually has a handler for a CIMD URL client ID (S2). */
     public function supportsClientIdMetadataDocuments(): bool
     {
-        return false;
+        return filter_var($this->config->get('mcp-oauth.cimd.enabled', false), FILTER_VALIDATE_BOOLEAN)
+            && $this->container?->bound(ClientMetadataDocumentFetcherContract::class) === true;
     }
 
     /**
@@ -273,6 +269,10 @@ final class McpOAuthServer
 
         if ($revocationEndpointUrl === null) {
             unset($metadata['revocation_endpoint'], $metadata['revocation_endpoint_auth_methods_supported']);
+        }
+
+        if ($this->supportsClientIdMetadataDocuments()) {
+            $metadata['client_id_metadata_document_supported'] = true;
         }
 
         return $metadata;

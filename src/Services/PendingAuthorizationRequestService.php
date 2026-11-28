@@ -13,9 +13,12 @@ use Laravel\Passport\Passport;
 use League\OAuth2\Server\RequestTypes\AuthorizationRequest;
 use League\OAuth2\Server\RequestTypes\AuthorizationRequestInterface;
 use Qiick\McpOAuth\Data\PendingAuthorizationRequestData;
+use Qiick\McpOAuth\Exceptions\ClientMetadataUnavailableException;
 use Qiick\McpOAuth\Internal\PassportUserIdentifier;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
 
 /**
  * The authorization request the consent page was rendered for, as Passport
@@ -38,6 +41,7 @@ final class PendingAuthorizationRequestService
 
     public function __construct(
         private readonly RedirectUriGuard $redirectUriGuard,
+        private readonly ClientMetadataRegistryService $metadataClients,
     ) {}
 
     /**
@@ -83,14 +87,31 @@ final class PendingAuthorizationRequestService
             $this->refuse($request);
         }
 
-        // Re-read so a revoke or a host block after the consent page takes effect.
+        // Re-read so a revoke, host block or CIMD change takes effect before a redirect.
+        $pendingClient = $authorizationRequest->getClient();
         $client = Passport::client()->newQuery()
-            ->whereKey($authorizationRequest->getClient()->getIdentifier())
+            ->whereKey($pendingClient->getIdentifier())
             ->where('revoked', false)
             ->first();
 
         if (! $client instanceof Client || $this->redirectUriGuard->clientHasBlockedRedirectHost($client)) {
             $this->refuse($request);
+        }
+
+        $metadataUrl = OAuthClientMetadata::query()->where('client_id', $pendingClient->getIdentifier())->value('metadata_document_url');
+
+        if (is_string($metadataUrl)) {
+            try {
+                $client = $this->metadataClients->resolve($metadataUrl);
+            } catch (ClientMetadataUnavailableException) {
+                throw new ServiceUnavailableHttpException(message: 'Client metadata is temporarily unavailable.');
+            }
+
+            if ($client === null || $client->getKey() !== $pendingClient->getIdentifier()
+                || $client->getAttribute('name') !== $pendingClient->getName()
+                || $client->getAttribute('redirect_uris') !== $pendingClient->getRedirectUri()) {
+                $this->refuse($request);
+            }
         }
 
         /** @var array{authToken: string, consentVersion: ?string, locale: string, resource: string} $renderedConsent written by ConsentPageService::render() */

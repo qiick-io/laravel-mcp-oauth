@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
+use Qiick\McpOAuth\Contracts\ClientMetadataDocumentFetcherContract;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
+use Qiick\McpOAuth\Data\ClientMetadataDocumentData;
 use Qiick\McpOAuth\Data\ConsentDecision;
 use Qiick\McpOAuth\Data\ConsentOptions;
 use Qiick\McpOAuth\Data\RevocationReason;
 use Qiick\McpOAuth\Events\McpConsentApprovedEvent;
-use Qiick\McpOAuth\Internal\ClientMetadataDocumentFetcher;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
@@ -122,11 +123,12 @@ it('names security as a revocation reason', function (): void {
     expect(RevocationReason::Security->value)->toBe('security');
 });
 
-it('keeps the CIMD fetcher internal until its runtime proves the seam (Codex review of #59)', function (): void {
-    $fetcher = new ReflectionClass(ClientMetadataDocumentFetcher::class);
+it('publishes the typed CIMD fetcher contract', function (): void {
+    $fetcher = new ReflectionClass(ClientMetadataDocumentFetcherContract::class);
 
     expect($fetcher->isInterface())->toBeTrue()
-        ->and((string) $fetcher->getDocComment())->toContain('@internal')->not->toContain('@api');
+        ->and((string) $fetcher->getDocComment())->toContain('@api')
+        ->and((string) $fetcher->getMethod('fetch')->getReturnType())->toBe(ClientMetadataDocumentData::class);
 });
 
 /**

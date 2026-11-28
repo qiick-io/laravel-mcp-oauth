@@ -10,7 +10,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
-use Qiick\McpOAuth\Models\OAuthClientMetadata;
 
 /**
  * Reads `POST oauth/revoke` (RFC 7009 §2.1): the `token`, and the client that
@@ -33,6 +32,7 @@ final class RevocationRequestService
     public function __construct(
         private readonly Hasher $hasher,
         private readonly TokenErrorResponseService $tokenErrorResponses,
+        private readonly ClientMetadataRegistryService $metadataClients,
     ) {}
 
     /**
@@ -62,13 +62,16 @@ final class RevocationRequestService
         }
 
         // A non-UUID would make PostgreSQL throw on the uuid column.
-        /** @var Client|null $client */
-        $client = Str::isUuid($clientId)
-            ? Passport::client()->newQuery()->whereKey($clientId)->where('revoked', false)->first()
-            : null;
+        if (Str::isUuid($clientId)) {
+            /** @var Client|null $client */
+            $client = $this->metadataClients->isRegisteredWireUuid($clientId)
+                ? Passport::client()->newQuery()->whereKey($clientId)->where('revoked', false)->first()
+                : null;
+        } else {
+            $client = $basicClientId === null && $clientSecret === null ? $this->metadataClients->findForRevocation($clientId) : null;
+        }
 
         if ($client === null
-            || ! OAuthClientMetadata::isRegisteredClient($client)
             || ! $this->presentsItsSecret($client, $clientSecret)) {
             throw new HttpResponseException($this->tokenErrorResponses->invalidClient($request));
         }

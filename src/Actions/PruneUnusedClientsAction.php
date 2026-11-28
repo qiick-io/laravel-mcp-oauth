@@ -16,7 +16,7 @@ use Qiick\McpOAuth\Internal\BoundedPositiveInt;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 
 /**
- * Deletes DCR clients registered more than `unused_client_retention_hours`
+ * Deletes dynamically registered DCR and CIMD clients older than `unused_client_retention_hours`
  * (24) ago that no user ever authorised, in chunks (design §5.4, S31). A
  * client counts as authorised when its metadata row has
  * `first_authorized_at`, which the retention purge never clears, or when the
@@ -47,7 +47,7 @@ final class PruneUnusedClientsAction
         $unusedClientIds = [];
 
         OAuthClientMetadata::query()
-            ->where('registration_source', 'dcr')
+            ->whereIn('registration_source', ['dcr', 'cimd'])
             ->whereNull('revoked_at')
             ->whereNull('first_authorized_at')
             ->chunkById(100, function ($metadataRows) use ($cutoff, &$unusedClientIds): void {

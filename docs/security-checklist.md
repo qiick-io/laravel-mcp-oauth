@@ -95,6 +95,15 @@ Paths are under `tests/`; `Http/RealHttpFlowTest` runs over real HTTP (`php -S`)
 | S80 | No bigint in contracts, events, route keys, props | `Unit/Data/GrantRecordTest`; `Unit/Events/McpEventsCarryUuidsOnlyTest`; admin and settings routes use UUIDs and `public_id` | Covered |
 | S81 | Without Inertia boots; enabled without a `ConsentView` fails clearly | `Feature/AdapterBootTest` | Covered |
 
+## CIMD (standards review S2)
+
+`Isolated/ClientMetadataDocumentsTest` covers truthful discovery, exact URL
+identity, the public client lifecycle, configured callback domains, and
+revalidation before consent. `Unit/OutboundClientMetadataDocumentFetcherTest`
+checks a changed DNS answer, no redirect following and conditional requests.
+`Http/RealHttpFlowTest` exercises the CIMD login and token lifecycle over HTTP
+with a deterministic outbound transport fixture.
+
 ## Open items
 
 None.

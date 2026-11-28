@@ -107,7 +107,7 @@ return [
      * columns ship in oauth_client_metadata regardless.
      */
     'cimd' => [
-        'enabled' => (bool) env('MCP_OAUTH_CIMD_ENABLED', false),
+        'enabled' => env('MCP_OAUTH_CIMD_ENABLED', false),
         'max_document_bytes' => env('MCP_OAUTH_CIMD_MAX_DOCUMENT_BYTES', '65536'),
         'timeout_seconds' => env('MCP_OAUTH_CIMD_TIMEOUT_SECONDS', '5'),
         'cache_min_seconds' => env('MCP_OAUTH_CIMD_CACHE_MIN_SECONDS', '60'),

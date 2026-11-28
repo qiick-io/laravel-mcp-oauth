@@ -1,0 +1,385 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Http\Request;
+use Laravel\Passport\Client;
+use Laravel\Passport\Passport;
+use Qiick\McpOAuth\AccessTokenAuthenticator;
+use Qiick\McpOAuth\Contracts\ClientMetadataDocumentFetcherContract;
+use Qiick\McpOAuth\Data\AuthorizationDecision;
+use Qiick\McpOAuth\Data\ClientMetadataDocumentData;
+use Qiick\McpOAuth\Data\GrantRecord;
+use Qiick\McpOAuth\Enums\ClientMetadataFetchStatusEnum;
+use Qiick\McpOAuth\Http\Middleware\ValidateAuthorizationRequestMiddleware;
+use Qiick\McpOAuth\Http\Middleware\ValidateTokenRequestMiddleware;
+use Qiick\McpOAuth\McpOAuthRoutes;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
+use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
+use Symfony\Component\HttpFoundation\Response;
+
+uses(AuthorizeFlowTestCase::class);
+
+const CIMD_CLIENT_IDENTIFIER = 'https://client.example/oauth-client.json';
+
+function metadataAuthorizeUrl(string $identifier = CIMD_CLIENT_IDENTIFIER, string $redirectUri = AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI): string
+{
+    return '/oauth/authorize?'.http_build_query([
+        'response_type' => 'code',
+        'client_id' => $identifier,
+        'redirect_uri' => $redirectUri,
+        'code_challenge' => AuthorizeFlowTestCase::CODE_CHALLENGE,
+        'code_challenge_method' => 'S256',
+        'resource' => AuthorizeFlowTestCase::RESOURCE,
+    ]);
+}
+
+/** Adds the wire identifier to an existing Passport client fixture. */
+function identifyAsMetadataClient(Client $client, bool $isExpired = false): OAuthClientMetadata
+{
+    $metadata = OAuthClientMetadata::query()->where('client_id', $client->getKey())->firstOrFail();
+    $metadata->update([
+        'registration_source' => 'cimd',
+        'metadata_document_url' => CIMD_CLIENT_IDENTIFIER,
+        'metadata_document_url_sha256' => hash('sha256', CIMD_CLIENT_IDENTIFIER),
+        'metadata_document_status' => 'valid',
+        'metadata_document_expires_at' => now()->addSeconds($isExpired ? -1 : 120),
+    ]);
+
+    return $metadata;
+}
+
+beforeEach(function (): void {
+    McpOAuthRoutes::register();
+    $this->enableOAuth();
+});
+
+it('advertises CIMD only while enabled', function (): void {
+    $this->get('/.well-known/oauth-authorization-server')
+        ->assertOk()
+        ->assertJsonMissingPath('client_id_metadata_document_supported');
+
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $this->mock(ClientMetadataDocumentFetcherContract::class);
+
+    $this->get('/.well-known/oauth-authorization-server')
+        ->assertOk()
+        ->assertJsonPath('client_id_metadata_document_supported', true);
+});
+
+it('registers the exact URL once and accepts it on authorize, exchange, refresh and revoke', function (): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $fetcher = $this->mock(ClientMetadataDocumentFetcherContract::class);
+    $fetcher->shouldReceive('fetch')->once()->with(CIMD_CLIENT_IDENTIFIER, null)->andReturn(
+        new ClientMetadataDocumentData(ClientMetadataFetchStatusEnum::Fetched, [
+            'client_id' => CIMD_CLIENT_IDENTIFIER,
+            'client_name' => 'Document client',
+            'redirect_uris' => [AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI],
+            'grant_types' => ['authorization_code', 'refresh_token'],
+        ], etag: '"version-one"', maxAgeSeconds: 120),
+    );
+
+    $consent = $this->actingAs($this->createUser())
+        ->get(metadataAuthorizeUrl(), ['X-Inertia' => 'true'])
+        ->assertOk()
+        ->assertJsonPath('props.client.name', 'Document client')
+        ->assertJsonPath('props.advanced.0.value', CIMD_CLIENT_IDENTIFIER);
+    $approval = $this->post('/oauth/authorize', [
+        'auth_token' => $consent->json('props.authToken'),
+        'scopes' => ['mcp:read'],
+        'role' => 'editor',
+        'resources' => ['news'],
+    ])->assertRedirect();
+    parse_str((string) parse_url((string) $approval->headers->get('Location'), PHP_URL_QUERY), $redirectParameters);
+    $this->app['auth']->forgetGuards();
+    $this->flushSession();
+
+    $tokens = $this->post('/oauth/token', [
+        'client_id' => CIMD_CLIENT_IDENTIFIER,
+        'grant_type' => 'authorization_code',
+        'code' => $redirectParameters['code'],
+        'code_verifier' => AuthorizeFlowTestCase::CODE_VERIFIER,
+        'redirect_uri' => AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI,
+        'resource' => AuthorizeFlowTestCase::RESOURCE,
+    ])->assertOk();
+    $metadata = OAuthClientMetadata::query()->sole();
+    expect($metadata->getAttribute('registration_source'))->toBe('cimd')
+        ->and($metadata->getAttribute('metadata_document_url'))->toBe(CIMD_CLIENT_IDENTIFIER)
+        ->and($metadata->getAttribute('metadata_document_etag'))->toBe('"version-one"');
+
+    $refresh = [
+        'client_id' => $metadata->getAttribute('client_id'),
+        'grant_type' => 'refresh_token',
+        'refresh_token' => $tokens->json('refresh_token'),
+        'resource' => AuthorizeFlowTestCase::RESOURCE,
+    ];
+    $this->post('/oauth/token', $refresh)->assertUnauthorized()->assertJsonPath('error', 'invalid_client');
+    $refresh['client_id'] = CIMD_CLIENT_IDENTIFIER;
+    $rotated = $this->post('/oauth/token', $refresh)->assertOk();
+
+    $revocation = [
+        'client_id' => CIMD_CLIENT_IDENTIFIER,
+        'token' => $rotated->json('refresh_token'),
+    ];
+    $this->post('/oauth/revoke', [...$revocation, 'client_secret' => 'unsupported'])->assertUnauthorized();
+    $this->post('/oauth/revoke', $revocation)->assertOk();
+});
+
+it('refuses mismatched client ids and transport failures locally without registering or redirecting', function (string $status, int $httpStatus, string $error): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $fetcher = $this->mock(ClientMetadataDocumentFetcherContract::class);
+    $fetcher->shouldReceive('fetch')->once()->with(CIMD_CLIENT_IDENTIFIER, null)->andReturn(
+        new ClientMetadataDocumentData(ClientMetadataFetchStatusEnum::from($status), [
+            'client_id' => 'https://client.example:443/oauth-client.json',
+            'redirect_uris' => [AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI],
+        ]),
+    );
+
+    $result = $this->get(metadataAuthorizeUrl())->assertStatus($httpStatus)->assertJsonPath('error', $error);
+
+    expect($result->headers->has('Location'))->toBeFalse()
+        ->and(OAuthClientMetadata::query()->exists())->toBeFalse();
+
+    $this->get(metadataAuthorizeUrl())->assertStatus($httpStatus)->assertJsonPath('error', $error);
+})->with([
+    'different exact identifier' => ['fetched', 400, 'invalid_client'],
+    'transient transport failure' => ['unavailable', 503, 'temporarily_unavailable'],
+]);
+
+it('compares the metadata callback literally before handing off to Passport', function (): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $this->mock(ClientMetadataDocumentFetcherContract::class)->shouldNotReceive('fetch');
+    $client = $this->createClient();
+    identifyAsMetadataClient($client);
+
+    $this->get(metadataAuthorizeUrl(redirectUri: 'https://APP.EXAMPLE/callback'))
+        ->assertBadRequest()
+        ->assertJsonPath('error', 'invalid_request')
+        ->assertHeader('Cache-Control', 'no-store, private')
+        ->assertHeaderMissing('Location');
+});
+
+it('refuses a metadata client whose Passport model cannot supply a string identifier', function (): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $this->mock(ClientMetadataDocumentFetcherContract::class)->shouldNotReceive('fetch');
+    identifyAsMetadataClient($this->createClient());
+    $clientWithIntegerKey = new class extends Client
+    {
+        protected $table = 'oauth_clients';
+
+        public function getKey(): int
+        {
+            return 1;
+        }
+    };
+    Passport::useClientModel($clientWithIntegerKey::class);
+
+    try {
+        // The vendor may also refuse the rewritten value. Prove that neither
+        // middleware forwards an identifier the package cannot represent.
+        $downstream = static fn (): Response => new Response(status: 204);
+        $authorization = Request::create(metadataAuthorizeUrl());
+        $token = Request::create('/oauth/token', 'POST', [
+            'client_id' => CIMD_CLIENT_IDENTIFIER,
+            'grant_type' => 'refresh_token',
+            'refresh_token' => 'unused',
+            'resource' => AuthorizeFlowTestCase::RESOURCE,
+        ]);
+
+        expect(app(ValidateAuthorizationRequestMiddleware::class)->handle($authorization, $downstream)->getStatusCode())->toBe(400)
+            ->and(app(ValidateTokenRequestMiddleware::class)->handle($token, $downstream)->getStatusCode())->toBe(401);
+    } finally {
+        Passport::useClientModel(Client::class);
+    }
+});
+
+it('keeps the last good document on an outage and revalidates expired data with the ETag', function (): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $fetcher = $this->mock(ClientMetadataDocumentFetcherContract::class);
+    $fetcher->shouldReceive('fetch')->once()->with(CIMD_CLIENT_IDENTIFIER, null)->andReturn(
+        new ClientMetadataDocumentData(ClientMetadataFetchStatusEnum::Fetched, [
+            'client_id' => CIMD_CLIENT_IDENTIFIER,
+            'redirect_uris' => [AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI],
+        ], etag: '"one"', maxAgeSeconds: 2),
+    );
+    $fetcher->shouldReceive('fetch')->twice()->with(CIMD_CLIENT_IDENTIFIER, '"one"')->andReturn(
+        new ClientMetadataDocumentData(ClientMetadataFetchStatusEnum::Unavailable),
+        new ClientMetadataDocumentData(ClientMetadataFetchStatusEnum::NotModified),
+    );
+
+    $this->actingAs($this->createUser())->get(metadataAuthorizeUrl(), ['X-Inertia' => 'true'])->assertOk();
+    $metadata = OAuthClientMetadata::query()->sole();
+    $validated = $metadata->getAttribute('metadata_document');
+    $this->travel(1)->seconds();
+    $this->get(metadataAuthorizeUrl(), ['X-Inertia' => 'true'])->assertOk();
+    $this->travel(61)->seconds();
+    $this->get(metadataAuthorizeUrl())->assertServiceUnavailable();
+    expect($metadata->refresh()->getAttribute('metadata_document'))->toBe($validated)
+        ->and($metadata->getAttribute('metadata_document_status'))->toBe('fetch_failed');
+
+    $this->get(metadataAuthorizeUrl())->assertServiceUnavailable();
+    $this->travel(61)->seconds();
+    $this->get(metadataAuthorizeUrl(), ['X-Inertia' => 'true'])->assertOk();
+    $this->travel(1)->seconds();
+    $this->get(metadataAuthorizeUrl(), ['X-Inertia' => 'true'])->assertOk();
+    expect($metadata->refresh()->getAttribute('metadata_document'))->toBe($validated)
+        ->and($metadata->getAttribute('metadata_document_status'))->toBe('valid');
+});
+
+it('stops approval when the document changes the callback or becomes unavailable', function (string $fetchStatus, int $httpStatus): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $fetcher = $this->mock(ClientMetadataDocumentFetcherContract::class);
+    $fetcher->shouldReceive('fetch')->twice()->with(CIMD_CLIENT_IDENTIFIER, null)->andReturn(
+        new ClientMetadataDocumentData(ClientMetadataFetchStatusEnum::Fetched, [
+            'client_id' => CIMD_CLIENT_IDENTIFIER,
+            'redirect_uris' => [AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI],
+        ], shouldCache: false),
+        new ClientMetadataDocumentData(ClientMetadataFetchStatusEnum::from($fetchStatus), [
+            'client_id' => CIMD_CLIENT_IDENTIFIER,
+            'redirect_uris' => ['https://app.example/new-callback'],
+        ]),
+    );
+
+    $this->actingAs($this->createUser())->get(metadataAuthorizeUrl(), ['X-Inertia' => 'true'])->assertOk();
+    $metadata = OAuthClientMetadata::query()->sole();
+    expect($metadata->getAttribute('metadata_document'))->toBeNull();
+    $consent = $this->get(metadataAuthorizeUrl(), ['X-Inertia' => 'true'])->assertOk();
+    $this->travel(61)->seconds();
+
+    $this->post('/oauth/authorize', [
+        'auth_token' => $consent->json('props.authToken'),
+        'scopes' => ['mcp:read'],
+        'role' => 'editor',
+        'resources' => ['news'],
+    ])->assertStatus($httpStatus)->assertHeaderMissing('Location');
+
+    expect($this->grantStore()->replacedDecisions)->toBeEmpty();
+})->with(['callback replaced' => ['fetched', 403], 'fetch temporarily unavailable' => ['unavailable', 503]]);
+
+it('applies the configured callback domains before associating a client', function (): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    config()->set('mcp.redirect_domains', ['https://other.example']);
+    $fetcher = $this->mock(ClientMetadataDocumentFetcherContract::class);
+    $fetcher->shouldReceive('fetch')->once()->with(CIMD_CLIENT_IDENTIFIER, null)->andReturn(
+        new ClientMetadataDocumentData(ClientMetadataFetchStatusEnum::Fetched, [
+            'client_id' => CIMD_CLIENT_IDENTIFIER,
+            'redirect_uris' => [AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI],
+        ]),
+    );
+
+    $this->get(metadataAuthorizeUrl())->assertBadRequest()->assertJsonPath('error', 'invalid_client');
+    expect(OAuthClientMetadata::query()->exists())->toBeFalse();
+});
+
+it('refuses authentication methods other than none before showing consent', function (array $authentication): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $fetcher = $this->mock(ClientMetadataDocumentFetcherContract::class);
+    $fetcher->shouldReceive('fetch')->once()->andReturn(new ClientMetadataDocumentData(ClientMetadataFetchStatusEnum::Fetched, [
+        'client_id' => CIMD_CLIENT_IDENTIFIER,
+        'redirect_uris' => [AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI],
+        ...$authentication,
+    ]));
+
+    $this->get(metadataAuthorizeUrl())->assertBadRequest()->assertJsonPath('error', 'invalid_client');
+    expect(OAuthClientMetadata::query()->exists())->toBeFalse();
+})->with([
+    'explicit assertion method' => [['token_endpoint_auth_method' => 'private_key_jwt', 'token_endpoint_auth_methods_supported' => ['none', 'private_key_jwt']]],
+    'offers assertion method' => [['token_endpoint_auth_methods_supported' => ['none', 'private_key_jwt']]],
+]);
+
+it('rejects a dot segment before making an HTTP request', function (string $segment): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $this->mock(ClientMetadataDocumentFetcherContract::class)->shouldNotReceive('fetch');
+
+    $this->get(metadataAuthorizeUrl('https://client.example/folder/'.$segment.'/client.json'))->assertBadRequest()->assertJsonPath('error', 'invalid_client');
+})->with(['.', '..', '%2e', '.%2E']);
+
+it('uses the minimum fetch interval for a zero freshness lifetime', function (): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $this->mock(ClientMetadataDocumentFetcherContract::class)->shouldReceive('fetch')->once()->andReturn(
+        new ClientMetadataDocumentData(ClientMetadataFetchStatusEnum::Fetched, [
+            'client_id' => CIMD_CLIENT_IDENTIFIER,
+            'redirect_uris' => [AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI],
+        ], maxAgeSeconds: 0),
+    );
+
+    $this->actingAs($this->createUser())->get(metadataAuthorizeUrl(), ['X-Inertia' => 'true'])->assertOk();
+    $this->travel(30)->seconds();
+    $this->get(metadataAuthorizeUrl(), ['X-Inertia' => 'true'])->assertOk();
+});
+
+it('revokes issued tokens when the refreshed callback policy changes or becomes invalid', function (string $fetchStatus): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $client = $this->createClient();
+    ['code' => $code] = $this->obtainAuthorizationCode($client);
+    $tokens = $this->post('/oauth/token', $this->codeExchange($client, $code))->assertOk();
+
+    $metadata = identifyAsMetadataClient($client, isExpired: true);
+    $bearerRequest = Request::create('/mcp', server: ['HTTP_AUTHORIZATION' => 'Bearer '.$tokens->json('access_token')]);
+    $authenticator = app(AccessTokenAuthenticator::class);
+    $fetcher = $this->mock(ClientMetadataDocumentFetcherContract::class);
+    $fetcher->shouldReceive('fetch')->once()->andReturn(new ClientMetadataDocumentData(ClientMetadataFetchStatusEnum::from($fetchStatus), [
+        'client_id' => CIMD_CLIENT_IDENTIFIER,
+        'redirect_uris' => ['https://app.example/changed-callback'],
+    ]));
+
+    expect($authenticator->authenticate($bearerRequest))->toBeInstanceOf(GrantRecord::class);
+    config()->set('mcp-oauth.cimd.enabled', false);
+    expect($authenticator->authenticate($bearerRequest))->toBeInstanceOf(AuthorizationDecision::class);
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $metadata->update(['metadata_document_status' => 'invalid']);
+    expect($authenticator->authenticate($bearerRequest))->toBeInstanceOf(AuthorizationDecision::class);
+    $metadata->update(['metadata_document_status' => 'valid']);
+
+    $this->get(metadataAuthorizeUrl())->assertBadRequest();
+
+    expect(Passport::token()->newQuery()->sole()->getAttribute('revoked'))->toBeTrue()
+        ->and(Passport::refreshToken()->newQuery()->sole()->getAttribute('revoked'))->toBeTrue()
+        ->and($authenticator->authenticate($bearerRequest))->toBeInstanceOf(AuthorizationDecision::class);
+})->with(['fetched', 'invalid']);
+
+it('refuses client authentication before processing a public metadata client code', function (string $unsupportedParameter): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $this->mock(ClientMetadataDocumentFetcherContract::class)->shouldNotReceive('fetch');
+    $client = $this->createClient();
+    ['code' => $code] = $this->obtainAuthorizationCode($client);
+    identifyAsMetadataClient($client);
+    $exchange = $this->codeExchange($client, $code, ['client_id' => CIMD_CLIENT_IDENTIFIER]);
+
+    $this->post('/oauth/token', [...$exchange, $unsupportedParameter => 'unsupported'])
+        ->assertUnauthorized()->assertJsonPath('error', 'invalid_client');
+    $this->post('/oauth/token', $exchange)->assertOk();
+})->with(['client_secret', 'client_assertion', 'client_assertion_type']);
+
+it('rejects a grant type outside the protocol before checking its resource', function (): void {
+    $this->post('/oauth/token', ['grant_type' => 'client_credentials'])
+        ->assertBadRequest()->assertJsonPath('error', 'unsupported_grant_type');
+});
+
+it('returns 503 at the token endpoint while a known metadata client is unavailable', function (): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $client = $this->createClient();
+    identifyAsMetadataClient($client, isExpired: true);
+    $this->mock(ClientMetadataDocumentFetcherContract::class)->shouldReceive('fetch')->once()
+        ->andReturn(new ClientMetadataDocumentData(ClientMetadataFetchStatusEnum::Unavailable));
+
+    $this->post('/oauth/token', [
+        'client_id' => CIMD_CLIENT_IDENTIFIER,
+        'grant_type' => 'refresh_token',
+        'refresh_token' => 'test-refresh-token',
+        'resource' => AuthorizeFlowTestCase::RESOURCE,
+    ])->assertServiceUnavailable()->assertJsonPath('error', 'temporarily_unavailable');
+});
+
+it('refuses a code exchange against a callback absent from the current document registration', function (): void {
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $this->mock(ClientMetadataDocumentFetcherContract::class)->shouldNotReceive('fetch');
+    $client = $this->createClient();
+    ['code' => $code] = $this->obtainAuthorizationCode($client);
+    identifyAsMetadataClient($client);
+    $client->forceFill(['redirect_uris' => ['https://app.example/new-callback']])->save();
+
+    $this->post('/oauth/token', $this->codeExchange($client, $code, ['client_id' => CIMD_CLIENT_IDENTIFIER]))
+        ->assertBadRequest()->assertJsonPath('error', 'invalid_grant');
+    expect(Passport::token()->newQuery()->exists())->toBeFalse();
+});

@@ -275,10 +275,11 @@ function clientRegisteredHoursAgo(AuthorizeFlowTestCase $testCase, int $hours): 
     return $client;
 }
 
-it('prunes DCR clients never authorised after 24 hours, and nothing else', function (): void {
+it('prunes dynamically registered clients never authorised after 24 hours, and nothing else', function (string $registrationSource): void {
     Event::fake([McpUnusedClientsPrunedEvent::class]);
     $this->enableOAuth();
     $unused = clientRegisteredHoursAgo($this, 25);
+    OAuthClientMetadata::query()->where('client_id', $unused->getKey())->update(['registration_source' => $registrationSource]);
     $fresh = clientRegisteredHoursAgo($this, 23);
     $authorised = clientRegisteredHoursAgo($this, 25);
     $this->grantStore()->seed(new GrantRecord(
@@ -299,7 +300,7 @@ it('prunes DCR clients never authorised after 24 hours, and nothing else', funct
         ->and(Client::query()->whereKey([$fresh->getKey(), $authorised->getKey(), $inRetention->getKey(), $productClient->getKey()])->count())->toBe(4);
     Event::assertDispatched(McpUnusedClientsPrunedEvent::class, static fn (McpUnusedClientsPrunedEvent $event): bool => $event->count === 1
         && $event->cutoffIso8601 === now()->subHours(24)->toIso8601String());
-});
+})->with(['dcr', 'cimd']);
 
 it('keeps a client the boundary has not passed: 23 and 24 hours kept, 25 pruned', function (int $hours, bool $isPruned): void {
     $this->enableOAuth();

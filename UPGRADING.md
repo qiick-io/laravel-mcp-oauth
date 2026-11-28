@@ -12,7 +12,13 @@ Products pin an exact beta (`qiick/laravel-mcp-oauth:1.0.0-beta.1`) until `1.0.0
 
 ## Unreleased
 
-Nothing yet.
+`qiick/laravel-outbound` is now a runtime dependency for Client ID Metadata
+Documents (CIMD). Outbound's auto-discovered provider loads its webhook
+migrations and schedules webhook retention by default. If the application uses
+Outbound only for CIMD, add `qiick/laravel-outbound` to the root Composer
+`extra.laravel.dont-discover` list before running package discovery again. CIMD
+uses the Outbound library factory directly. Applications using Outbound's
+webhook features should keep the provider and follow its own upgrade guide.
 
 ## 1.0.0-beta.1
 

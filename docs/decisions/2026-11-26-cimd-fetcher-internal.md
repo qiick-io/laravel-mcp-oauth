@@ -7,3 +7,9 @@
 **Why.** Its `?array` result cannot carry what the caller needs: the response's cache directives (ETag, expiry) for the bounded cache the standards review requires, and the difference between a failed fetch and an invalid document. Nothing can test that cache contract before the runtime exists, and freezing the shape now would force a break later.
 
 **Consequences.** The interface becomes `@api`, with a typed result, in the release that turns CIMD on (between the beta and 1.0).
+
+**Runtime follow-up (#28).** The contract now lives in `Contracts`, with a
+typed transport result for a fetched document, conditional validation,
+terminal refusal or transient failure. The default uses an isolated Outbound
+stack. CIMD stays off by default. Its stored URL resolves to a Passport UUID,
+and document revalidation never accepts a stale callback or follows a redirect.

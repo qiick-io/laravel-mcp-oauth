@@ -10,6 +10,11 @@
                 "reason": "The check reads only the command file; the retention commands delegate to Actions that delete in chunks (PruneUnusedClientsAction and PurgeRevokedRecordsAction chunkById(100), PruneAuthCodeExchangesAction lazyById). The package schedules all three onOneServer. Remove once qiick-io/app-ui#265 lands.",
                 "decision": "https://github.com/qiick-io/app-ui/issues/265",
                 "review_by": "2027-01-31"
+            },
+            "F13": {
+                "reason": "The 1.0 beta line can integrate CIMD against the frozen Outbound HTTP factory first published in 0.2.0-beta.4. The release candidate and stable 1.0.0 require stable Outbound. The RC release blocker tracks the constraint change and removal of this exception: https://github.com/qiick-io/laravel-mcp-oauth/issues/78.",
+                "decision": "https://github.com/qiick-io/laravel-outbound/milestone/1",
+                "review_by": "2027-01-31"
             }
         }
     }
