@@ -66,6 +66,9 @@ abstract class PackageTestCase extends TestCase
         $app['config']->set('app.key', 'base64:'.base64_encode(random_bytes(32)));
         $app['config']->set('app.url', 'https://mcp-oauth.test');
         $app['config']->set('app.timezone', 'UTC');
+        // The Testbench schema only contains the package's tables.
+        $app['config']->set('cache.default', 'array');
+        $app['config']->set('session.driver', 'array');
         // Off by default: missing product adapters must not fail boot.
         $app['config']->set('mcp-oauth.enabled', false);
 
