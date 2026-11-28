@@ -72,6 +72,13 @@ is nullable with **no** database default (registration writes the value).
 | `schema_version` | unsignedSmallInteger | no | 1 | — |
 | `created_at` / `updated_at` | timestamps | yes | — | — |
 
+Dynamic registration writes the validated client and logo URLs, terms and
+policy URLs, contacts, software ID and version, and the web or native
+`application_type`. It returns `client_id_issued_at` in epoch seconds. The
+public authorization-code profile uses PKCE and token authentication method
+`none`. The `jwks_uri`, `jwks` and `software_statement` columns are reserved
+for profiles with their own validation and trust policy.
+
 ## `oauth_blocked_redirect_hosts` (package, MUST / M6)
 
 | Column | Type | Null | Default | Index |
