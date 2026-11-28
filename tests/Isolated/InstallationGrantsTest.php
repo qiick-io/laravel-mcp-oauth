@@ -2,18 +2,28 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\SQLiteConnection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
+use League\OAuth2\Server\Exception\OAuthServerException;
 use Qiick\McpOAuth\AccessTokenAuthenticator;
 use Qiick\McpOAuth\Actions\PruneAuthCodeExchangesAction;
 use Qiick\McpOAuth\Actions\RevokeAuthCodeTokensAction;
 use Qiick\McpOAuth\Actions\RevokeConnectedAppAction;
+use Qiick\McpOAuth\Bridge\FamilyRevokingRefreshTokenRepository;
 use Qiick\McpOAuth\Contracts\AuditLogger;
+use Qiick\McpOAuth\Contracts\ConsentProvider;
+use Qiick\McpOAuth\Contracts\GrantStore;
+use Qiick\McpOAuth\Contracts\InstallationGrantStoreContract;
+use Qiick\McpOAuth\Data\ConsentDecision;
 use Qiick\McpOAuth\Data\ConsentOption;
 use Qiick\McpOAuth\Data\ConsentOptions;
+use Qiick\McpOAuth\Data\GrantInstallationData;
 use Qiick\McpOAuth\Data\GrantRecord;
+use Qiick\McpOAuth\Data\GrantReplacementData;
 use Qiick\McpOAuth\Erasure\McpOAuthEraser;
 use Qiick\McpOAuth\Events\McpConsentApprovedEvent;
 use Qiick\McpOAuth\Events\McpConsentDeniedEvent;
@@ -24,7 +34,9 @@ use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\Models\OAuthAuthCodeExchange;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Testing\FakeAuditLogger;
+use Qiick\McpOAuth\Testing\FakeConsentProvider;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
+use Qiick\McpOAuth\Tests\Support\HookedGrantStore;
 use Qiick\McpOAuth\Tests\Support\TestUser;
 
 uses(AuthorizeFlowTestCase::class);
@@ -35,17 +47,37 @@ const FIRST_INSTALLATION_THUMBPRINT = '0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2ai4E
 const FIRST_INSTALLATION_ORGANISATION = 'd86c20ee-59a8-4fac-a057-1ad7c6f88857';
 const SECOND_INSTALLATION_ORGANISATION = '3840d961-0846-46de-9668-b077979ee5c5';
 
-function approveInstallation(AuthorizeFlowTestCase $testCase, Client $client, TestUser $user, string $installId, ?string $organisation = null): string
+function createInstallationClient(AuthorizeFlowTestCase $testCase): Client
+{
+    $client = $testCase->createClient();
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->update([
+        'registration_source' => 'companion',
+        'has_per_install_grants' => true,
+    ]);
+
+    return $client;
+}
+
+/** @return array{auth_token: string, scopes: list<string>, role: string, resources: list<string>} */
+function installationApprovalFields(AuthorizeFlowTestCase $testCase, Client $client, TestUser $user, string $installId = FIRST_INSTALLATION): array
 {
     $page = $testCase->actingAs($user)->get($testCase->authorizeUrl($client, [
         'install_id' => $installId,
         'companion_jkt' => FIRST_INSTALLATION_THUMBPRINT,
     ]), ['X-Inertia' => 'true'])->assertOk()->assertJsonPath('props.isInstallationPairing', true);
-    $approval = $testCase->post('/oauth/authorize', [
+
+    return [
         'auth_token' => $page->json('props.authToken'),
         'scopes' => ['mcp:read'],
         'role' => 'editor',
         'resources' => ['news'],
+    ];
+}
+
+function approveInstallation(AuthorizeFlowTestCase $testCase, Client $client, TestUser $user, string $installId, ?string $organisation = null): string
+{
+    $approval = $testCase->post('/oauth/authorize', [
+        ...installationApprovalFields($testCase, $client, $user, $installId),
         'organisation' => $organisation,
         'install_id' => 'discarded-form-value',
         'companion_jkt' => 'discarded-form-value',
@@ -110,6 +142,157 @@ it('requires an installation id and a correctly encoded key thumbprint for flagg
     'padded thumbprint' => [['install_id' => FIRST_INSTALLATION, 'companion_jkt' => FIRST_INSTALLATION_THUMBPRINT.'=']],
     'array' => [['install_id' => [FIRST_INSTALLATION], 'companion_jkt' => FIRST_INSTALLATION_THUMBPRINT]],
 ]);
+
+it('refuses installation approval if the enrollment changes during consent validation', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = createInstallationClient($this);
+    $metadata = OAuthClientMetadata::query()->where('client_id', $client->getKey());
+    app()->instance(ConsentProvider::class, new FakeConsentProvider(
+        AuthorizeFlowTestCase::defaultConsentOptions(),
+        static function () use ($metadata): void {
+            $metadata->update(['has_per_install_grants' => false]);
+        },
+    ));
+    $this->post('/oauth/authorize', installationApprovalFields($this, $client, $this->createUser()))->assertForbidden();
+
+    expect($this->grantStore()->replacedDecisions)->toBe([]);
+});
+
+it('refuses invalid installation replacements from the product before issuing a code', function (string $field, bool $isPreviousGrant): void {
+    $this->enableOAuth();
+    $store = Mockery::mock(InstallationGrantStoreContract::class);
+    $store->shouldReceive('replaceForInstallation')->once()->andReturnUsing(static function (ConsentDecision $decision) use ($field, $isPreviousGrant): GrantReplacementData {
+        $installation = $decision->installation;
+        $fields = [
+            'id' => 'new-grant',
+            'clientId' => $decision->clientId,
+            'userIdentifier' => $decision->userIdentifier,
+            'revoked' => false,
+            'scopes' => $decision->scopes,
+            'authorizedAt' => now()->toDateTimeImmutable(),
+            'lastUsedAt' => null,
+            'installation' => $installation,
+        ];
+        $values = match ($field) {
+            'id' => ['id' => 'new-grant'],
+            'clientId', 'userIdentifier' => [$field => 'different-owner'],
+            'revoked' => ['revoked' => true],
+            'authorizedAt', 'installation' => [$field => null],
+            'installation account' => ['installation' => new GrantInstallationData(SECOND_INSTALLATION, $installation->keyThumbprint)],
+            'thumbprint' => ['installation' => new GrantInstallationData($installation->installId, str_repeat('A', 43))],
+        };
+
+        return $isPreviousGrant
+            ? new GrantReplacementData(new GrantRecord(...$fields), new GrantRecord(...[...$fields, 'id' => 'prior-grant', ...$values]))
+            : new GrantReplacementData(new GrantRecord(...[...$fields, ...$values]));
+    });
+    app()->instance(GrantStore::class, $store);
+    McpOAuthRoutes::register();
+    $approvalFields = installationApprovalFields($this, createInstallationClient($this), $this->createUser());
+    $this->withoutExceptionHandling();
+
+    expect(fn () => $this->post('/oauth/authorize', $approvalFields))
+        ->toThrow(LogicException::class, $isPreviousGrant ? 'distinct previous grant' : 'authorized installation and consent time')
+        ->and(Passport::authCode()->newQuery()->exists())->toBeFalse();
+})->with([
+    'current grant revoked' => ['revoked', false],
+    'current grant client' => ['clientId', false],
+    'current grant user' => ['userIdentifier', false],
+    'current grant consent time' => ['authorizedAt', false],
+    'current grant installation' => ['installation', false],
+    'current grant account' => ['installation account', false],
+    'current grant thumbprint' => ['thumbprint', false],
+    'previous grant identity' => ['id', true],
+    'previous grant client' => ['clientId', true],
+    'previous grant user' => ['userIdentifier', true],
+    'previous grant installation' => ['installation', true],
+    'previous grant account' => ['installation account', true],
+]);
+
+it('requires the installation grant store contract before replacing a grant', function (): void {
+    $this->enableOAuth();
+    app()->instance(GrantStore::class, new HookedGrantStore($this->grantStore()));
+    McpOAuthRoutes::register();
+    $approvalFields = installationApprovalFields($this, createInstallationClient($this), $this->createUser());
+    $this->withoutExceptionHandling();
+
+    expect(fn () => $this->post('/oauth/authorize', $approvalFields))
+        ->toThrow(LogicException::class, 'require InstallationGrantStoreContract');
+});
+
+it('takes the SQLite write lock before reading the installation during approval and revoke', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = createInstallationClient($this);
+    $user = $this->createUser();
+    $connection = OAuthClientMetadata::query()->getConnection();
+    $statementsInTransaction = [];
+    $connection->listen(static function (QueryExecuted $query) use ($connection, &$statementsInTransaction): void {
+        if ($connection->transactionLevel() > 0 && str_contains($query->sql, 'oauth_client')) {
+            $statementsInTransaction[] = $query->sql;
+        }
+    });
+
+    approveInstallation($this, $client, $user, FIRST_INSTALLATION);
+
+    $expectedLockStatement = $connection instanceof SQLiteConnection ? 'update ' : 'select ';
+    expect($statementsInTransaction[0] ?? '')->toStartWith($expectedLockStatement);
+
+    $statementsInTransaction = [];
+    $grant = $this->grantStore()->activeFor((string) $client->getKey(), (string) $user->getAuthIdentifier());
+    app(RevokeConnectedAppAction::class)->execute($grant, $user);
+
+    expect($statementsInTransaction[0] ?? '')->toStartWith($expectedLockStatement)
+        ->and(OAuthClientMetadata::isPerInstallClient((string) $client->getKey()))->toBeTrue()
+        ->and($this->grantStore()->find($grant->id)?->revoked)->toBeTrue();
+});
+
+it('retires only the pending code of the installation replaced by re-consent', function (): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = createInstallationClient($this);
+    $user = $this->createUser();
+    $previousCode = approveInstallation($this, $client, $user, FIRST_INSTALLATION);
+    $previousGrant = $this->grantStore()->activeFor((string) $client->getKey(), (string) $user->getAuthIdentifier());
+    $previousCodeId = OAuthAuthCodeExchange::query()->where('grant_id', $previousGrant->id)->value('auth_code_id');
+    $otherCode = approveInstallation($this, $client, $user, SECOND_INSTALLATION);
+    $newCode = approveInstallation($this, $client, $user, FIRST_INSTALLATION);
+
+    expect(Passport::authCode()->newQuery()->findOrFail($previousCodeId)->getAttribute('revoked'))->toBeTrue();
+    $this->post('/oauth/token', $this->codeExchange($client, $previousCode))->assertBadRequest()->assertJsonPath('error', 'invalid_grant');
+    $this->post('/oauth/token', $this->codeExchange($client, $otherCode))->assertOk();
+    $this->post('/oauth/token', $this->codeExchange($client, $newCode))->assertOk();
+});
+
+it('rolls back an installation refresh revoke until its product grant was written', function (bool $hasWrittenGrant): void {
+    $this->enableOAuth();
+    McpOAuthRoutes::register();
+    $client = createInstallationClient($this);
+    $user = $this->createUser();
+    $firstCode = approveInstallation($this, $client, $user, FIRST_INSTALLATION);
+    $grantStore = $this->grantStore();
+    $firstGrant = $grantStore->activeFor((string) $client->getKey(), (string) $user->getAuthIdentifier());
+    $tokens = $this->post('/oauth/token', $this->codeExchange($client, $firstCode))->assertOk();
+    approveInstallation($this, $client, $user, SECOND_INSTALLATION);
+    $failure = static function (): never {
+        throw new RuntimeException('Installation revoke did not complete.');
+    };
+    $hookedStore = new HookedGrantStore($grantStore);
+
+    if ($hasWrittenGrant) {
+        $hookedStore->afterNextRevoke = $failure;
+    } else {
+        $hookedStore->beforeRevoke = $failure;
+    }
+
+    app()->instance(GrantStore::class, $hookedStore);
+    $response = $this->post('/oauth/revoke', ['client_id' => $client->getKey(), 'token' => $tokens->json('refresh_token')]);
+    $response->assertStatus($hasWrittenGrant ? 200 : 500);
+    expect($grantStore->find($firstGrant->id)?->revoked)->toBe($hasWrittenGrant)
+        ->and(Passport::token()->newQuery()->where('revoked', false)->exists())->toBe(! $hasWrittenGrant)
+        ->and(Passport::refreshToken()->newQuery()->exists())->toBe(! $hasWrittenGrant);
+})->with(['before writing' => false, 'after a separate commit' => true]);
 
 it('pins codes and tokens to the consented installation and organisation', function (): void {
     $audit = new FakeAuditLogger;
@@ -177,7 +360,7 @@ it('pins codes and tokens to the consented installation and organisation', funct
         ->toBe([FIRST_INSTALLATION, SECOND_INSTALLATION, FIRST_INSTALLATION, FIRST_INSTALLATION, SECOND_INSTALLATION, FIRST_INSTALLATION]);
 });
 
-it('revokes the grant at the absolute installation age even after rotation', function (?int $configuredAge, int $age, bool $usesBearerFirst): void {
+it('revokes the grant at the absolute installation age even after rotation', function (?int $configuredAge, int $age, string $attempt): void {
     $audit = new FakeAuditLogger;
     app()->instance(AuditLogger::class, $audit);
     Event::fake([McpGrantRevokedEvent::class, McpRefreshTokenReusedEvent::class]);
@@ -211,8 +394,14 @@ it('revokes the grant at the absolute installation age even after rotation', fun
 
     $bearer = Request::create('/mcp', server: ['HTTP_AUTHORIZATION' => 'Bearer '.$rotated->json('access_token')]);
 
-    if ($usesBearerFirst) {
+    if ($attempt === 'bearer') {
         expect(app(AccessTokenAuthenticator::class)->authenticate($bearer))->not->toBeInstanceOf(GrantRecord::class)
+            ->and($this->grantStore()->find($grant->id)?->revoked)->toBeTrue();
+    } elseif ($attempt === 'rotation') {
+        // Rotation can reach its compare-and-set after the earlier active check.
+        $refreshTokenId = Passport::refreshToken()->newQuery()->where('revoked', false)->sole()->getKey();
+        expect(fn () => app(FamilyRevokingRefreshTokenRepository::class)->revokeRefreshToken($refreshTokenId))
+            ->toThrow(OAuthServerException::class)
             ->and($this->grantStore()->find($grant->id)?->revoked)->toBeTrue();
     }
 
@@ -233,7 +422,11 @@ it('revokes the grant at the absolute installation age even after rotation', fun
         ->assertBadRequest()->assertJsonPath('error', 'invalid_grant');
     Event::assertNotDispatched(McpRefreshTokenReusedEvent::class);
     expect($audit->entries)->toHaveCount(2);
-})->with(['refresh at the shipped default' => [null, 180, false], 'bearer at a configured age' => [7, 7, true]]);
+})->with([
+    'refresh at the shipped default' => [null, 180, 'refresh'],
+    'bearer at a configured age' => [7, 7, 'bearer'],
+    'deadline reached during rotation' => [7, 7, 'rotation'],
+]);
 
 it('revokes only the exchanged installation grant when a credential is replayed', function (bool $usesRefreshToken, int $revokedTokenCount): void {
     Event::fake([McpRefreshTokenReusedEvent::class]);
