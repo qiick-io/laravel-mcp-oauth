@@ -26,6 +26,9 @@ final class BoundedPositiveInt
     /** Refresh tokens may last up to one year. */
     public const int REFRESH_TOKEN_TTL_DAYS_MAX = 365;
 
+    /** The opt-in absolute lifetime still has a finite ceiling. */
+    public const int COMPANION_GRANT_AGE_DAYS_MAX = 3_650;
+
     /**
      * Auth codes match Passport / league’s PT10M default and must not live longer.
      */

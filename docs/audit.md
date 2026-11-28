@@ -29,7 +29,7 @@ before the change's event:
 | --- | --- | --- |
 | Consent approved | the package's connection, with the default one nested | `McpConsentApprovedEvent` |
 | Consent denied | the package's connection | `McpConsentDeniedEvent` |
-| Grant revoked from Connected apps, or by the client (RFC 7009 refresh token) | Passport's | `McpGrantRevokedEvent`, `McpTokenRevokedEvent` |
+| Grant revoked from Connected apps, at the installation deadline, or by the client (RFC 7009 refresh token) | Passport's | `McpGrantRevokedEvent`, `McpTokenRevokedEvent` |
 | Client blocked | Passport's | `McpClientBlockedEvent` |
 | Redirect host blocked, unblocked | the package's | `McpRedirectHostBlockedEvent`, `McpRedirectHostUnblockedEvent` |
 | OAuth switched on or off | the default connection; the entry is written before the product's store | `McpOAuthEnabledEvent`, `McpOAuthDisabledEvent` |
@@ -44,7 +44,7 @@ callback URL, authorization header or request body (S79). The causer is the
 | --- | --- | --- | --- |
 | `oauth_consent_approved` | the user | the new grant | `client_id`, `redirect_host`, `scopes`, `resources` |
 | `oauth_consent_denied` | the user | null | `client_id`, `redirect_host` |
-| `oauth_grant_revoked` | the user (Connected apps) or null (RFC 7009) | the grant | `client_id`, `redirect_host` (from the approval's consent record; null once purged), `reason` (`user` or `client`) |
+| `oauth_grant_revoked` | the user (Connected apps) or null (RFC 7009 or expiry) | the grant | `client_id`, `redirect_host` (from the approval's consent record; null once purged), `reason` (`user`, `client` or `expired`) |
 | `oauth_client_blocked` | the admin | null | `client_id` |
 | `oauth_redirect_host_blocked` | the admin | null | `host`, `match_mode` |
 | `oauth_redirect_host_unblocked` | the admin | null | `host` |
@@ -52,6 +52,10 @@ callback URL, authorization header or request body (S79). The causer is the
 
 An RFC 7009 revoke of an access token leaves the grant in place and writes no
 entry; `McpTokenRevokedEvent` reports it.
+
+When consent or a revocation concerns an installation, the audit entry includes
+its `install_id`. The associated Laravel events expose the same identifier as
+`installId`, including the refresh-reuse event.
 
 ## Keeping the 1.5 activity log
 

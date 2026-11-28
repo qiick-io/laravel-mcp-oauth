@@ -19,5 +19,6 @@ final readonly class McpGrantRevokedEvent
         public string $userIdentifier,
         public ?string $actorIdentifier,
         public RevocationReason $reason,
+        public ?string $installId = null,
     ) {}
 }

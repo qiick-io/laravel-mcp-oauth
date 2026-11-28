@@ -21,5 +21,6 @@ final readonly class McpTokenRevokedEvent
         public ?string $grantId,
         public string $tokenType,
         public int $revokedTokenCount,
+        public ?string $installId = null,
     ) {}
 }

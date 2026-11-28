@@ -22,6 +22,7 @@ use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\RevocationReason;
 use Qiick\McpOAuth\Events\McpTokenRevokedEvent;
 use Qiick\McpOAuth\Internal\GrantBindingColumn;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\Models\OAuthConsentRecord;
 use Throwable;
 
@@ -148,7 +149,7 @@ final class RevokeTokenAction
             // then Passport's transaction failed (its commit): the grant cannot
             // be un-revoked, so its family and its one entry are written again
             // and the revoke completes. Anything else is rethrown untouched.
-            if ($grantBeingRevoked === null || $this->grantStore->activeFor($grantBeingRevoked->clientId, $grantBeingRevoked->userIdentifier)?->id === $grantBeingRevoked->id) {
+            if ($grantBeingRevoked === null || $this->hasActiveGrant($grantBeingRevoked)) {
                 throw $transactionFailure;
             }
 
@@ -199,6 +200,7 @@ final class RevokeTokenAction
             'client_id' => $grant->clientId,
             'redirect_host' => OAuthConsentRecord::redirectHostOfGrant($grant->id),
             'reason' => RevocationReason::Client->value,
+            ...($grant->installation === null ? [] : ['install_id' => $grant->installation->installId]),
         ]);
     }
 
@@ -236,15 +238,26 @@ final class RevokeTokenAction
     private function boundGrantOf(Token $accessToken): ?GrantRecord
     {
         ['client_id' => $clientId, 'user_id' => $userIdentifier] = self::ownerOf($accessToken);
-        $grant = $this->grantStore->activeFor($clientId, $userIdentifier);
+        $bindingColumn = GrantBindingColumn::from($this->config);
+        $binding = $accessToken->getAttribute($bindingColumn);
+        $grant = OAuthClientMetadata::isPerInstallClient($clientId)
+            ? (is_string($binding) || is_int($binding) ? $this->grantStore->find((string) $binding) : null)
+            : $this->grantStore->activeFor($clientId, $userIdentifier);
 
         // The database compares the binding, whatever type the product's key has.
-        $isBoundToGrant = $grant !== null && Passport::token()->newQuery()
-            ->whereKey($accessToken->getKey())
-            ->where(GrantBindingColumn::from($this->config), $this->grantStore->bindingKey($grant))
-            ->exists();
+        $isBoundToGrant = $grant !== null && ! $grant->revoked && $grant->clientId === $clientId && $grant->userIdentifier === $userIdentifier
+            && Passport::token()->newQuery()->whereKey($accessToken->getKey())
+                ->where($bindingColumn, $this->grantStore->bindingKey($grant))
+                ->exists();
 
         return $isBoundToGrant ? $grant : null;
+    }
+
+    private function hasActiveGrant(GrantRecord $grant): bool
+    {
+        return $grant->installation === null
+            ? $this->grantStore->activeFor($grant->clientId, $grant->userIdentifier)?->id === $grant->id
+            : $this->grantStore->find($grant->id)?->revoked === false;
     }
 
     /**
@@ -271,6 +284,7 @@ final class RevokeTokenAction
             grantId: $grant?->id,
             tokenType: $tokenType,
             revokedTokenCount: $revokedTokenCount,
+            installId: $grant?->installation?->installId,
         ));
     }
 

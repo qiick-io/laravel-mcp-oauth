@@ -154,7 +154,8 @@ jobs:
     name: Mutation (shard ${{ matrix.shard }}/9)
     needs: [package-matrix, mutation-plan]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Shared shards run the suite for each class and can exceed 30 minutes.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

@@ -168,7 +168,7 @@ it('S4: oauth_consent_records is append-only evidence with every consent column'
 
 it('records the grant each authorization code was consumed under', function (): void {
     expect(Schema::hasTable('oauth_auth_code_exchanges'))->toBeTrue()
-        ->and(Schema::getColumnListing('oauth_auth_code_exchanges'))->toEqualCanonicalizing(['auth_code_id', 'grant_id', 'user_identifier', 'metadata', 'schema_version', 'created_at']);
+        ->and(Schema::getColumnListing('oauth_auth_code_exchanges'))->toEqualCanonicalizing(['auth_code_id', 'grant_id', 'expires_at', 'user_identifier', 'metadata', 'schema_version', 'created_at']);
 });
 
 it('M7: an auth-code exchange carries metadata and schema_version 1, keyed by the code id instead of a UUID', function (): void {

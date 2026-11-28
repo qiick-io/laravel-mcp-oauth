@@ -8,9 +8,12 @@ use DateTimeImmutable;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Qiick\McpOAuth\Contracts\GrantStore;
+use LogicException;
+use Qiick\McpOAuth\Contracts\InstallationGrantStoreContract;
 use Qiick\McpOAuth\Data\ConsentDecision;
+use Qiick\McpOAuth\Data\GrantInstallationData;
 use Qiick\McpOAuth\Data\GrantRecord;
+use Qiick\McpOAuth\Data\GrantReplacementData;
 use Qiick\McpOAuth\Data\RevocationReason;
 
 /**
@@ -18,7 +21,7 @@ use Qiick\McpOAuth\Data\RevocationReason;
  * workers share nothing but the database, so the in-memory FakeGrantStore
  * cannot serve the `http` group.
  */
-final class DatabaseGrantStore implements GrantStore
+final class DatabaseGrantStore implements InstallationGrantStoreContract
 {
     public const string TABLE = 'http_flow_grants';
 
@@ -51,19 +54,51 @@ final class DatabaseGrantStore implements GrantStore
                 ->lockForUpdate()
                 ->update(['revoked' => true, 'revocation_reason' => RevocationReason::Reconsent->value, 'revoked_at' => now()]);
 
-            $grantId = (string) Str::uuid7();
-            DB::table(self::TABLE)->insert([
-                'id' => $grantId,
-                'client_id' => $decision->clientId,
-                'user_identifier' => $decision->userIdentifier,
-                'revoked' => false,
-                'scopes' => json_encode($decision->scopes),
-                'resource_scopes' => json_encode($decision->resourceScopes, JSON_THROW_ON_ERROR),
-                'authorized_at' => now(),
-            ]);
-
-            return $this->find($grantId) ?? throw new \LogicException('The grant just written is missing.');
+            return $this->insertDecision($decision);
         });
+    }
+
+    public function replaceForInstallation(ConsentDecision $decision): GrantReplacementData
+    {
+        $installation = $decision->installation ?? throw new LogicException('The decision requires an installation.');
+
+        return DB::transaction(function () use ($decision, $installation): GrantReplacementData {
+            // Approval already holds the client's metadata lock, including when no grant exists yet.
+            $previousRow = DB::table(self::TABLE)
+                ->where('client_id', $decision->clientId)
+                ->where('user_identifier', $decision->userIdentifier)
+                ->where('organisation_id', $installation->organisationId)
+                ->where('install_id', $installation->installId)
+                ->where('revoked', false)
+                ->lockForUpdate()
+                ->first();
+            $previousGrant = $previousRow === null ? null : self::recordFrom($previousRow);
+
+            if ($previousGrant !== null) {
+                $this->revoke($previousGrant->id, $decision->userIdentifier, RevocationReason::Reconsent);
+            }
+
+            return new GrantReplacementData($this->insertDecision($decision), $previousGrant);
+        });
+    }
+
+    private function insertDecision(ConsentDecision $decision): GrantRecord
+    {
+        $grantId = (string) Str::uuid7();
+        DB::table(self::TABLE)->insert([
+            'id' => $grantId,
+            'client_id' => $decision->clientId,
+            'user_identifier' => $decision->userIdentifier,
+            'revoked' => false,
+            'scopes' => json_encode($decision->scopes, JSON_THROW_ON_ERROR),
+            'resource_scopes' => json_encode($decision->resourceScopes, JSON_THROW_ON_ERROR),
+            'authorized_at' => now(),
+            'organisation_id' => $decision->installation?->organisationId,
+            'install_id' => $decision->installation?->installId,
+            'companion_jkt' => $decision->installation?->keyThumbprint,
+        ]);
+
+        return $this->find($grantId) ?? throw new LogicException('The grant just written is missing.');
     }
 
     public function revoke(string $grantId, ?string $actorIdentifier, RevocationReason $reason): void
@@ -116,7 +151,7 @@ final class DatabaseGrantStore implements GrantStore
 
     private static function recordFrom(object $row): GrantRecord
     {
-        /** @var object{id: string, client_id: string, user_identifier: string, revoked: bool|int|string, scopes: string, resource_scopes: string, authorized_at: string} $row */
+        /** @var object{id: string, client_id: string, user_identifier: string, revoked: bool|int|string, scopes: string, resource_scopes: string, authorized_at: string, organisation_id: ?string, install_id: ?string, companion_jkt: string, revocation_reason: ?string} $row */
         /** @var list<string> $scopes */
         $scopes = json_decode($row->scopes, true);
         /** @var array<string, string> $resourceScopes */
@@ -132,7 +167,9 @@ final class DatabaseGrantStore implements GrantStore
             scopes: $scopes,
             authorizedAt: new DateTimeImmutable($row->authorized_at),
             lastUsedAt: null,
+            revocationReason: $row->revocation_reason === null ? null : RevocationReason::from($row->revocation_reason),
             resourceScopes: $resourceScopes,
+            installation: $row->install_id === null ? null : new GrantInstallationData($row->install_id, $row->companion_jkt, $row->organisation_id),
         );
     }
 }

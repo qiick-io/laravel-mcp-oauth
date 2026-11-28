@@ -79,6 +79,8 @@ final class HttpFlowServiceProvider extends ServiceProvider
 
     public const string REFRESH_RACE_FLAG = 'refresh-race';
 
+    public const string CONSENT_RACE_FLAG = 'consent-race';
+
     public function register(): void
     {
         $storagePath = (string) getenv('MCP_HTTP_STORAGE');
@@ -158,6 +160,10 @@ final class HttpFlowServiceProvider extends ServiceProvider
             $this->synchroniseRefreshValidation($storagePath);
         }
 
+        if (is_file($storagePath.'/'.self::CONSENT_RACE_FLAG)) {
+            $this->synchroniseConsentValidation($storagePath);
+        }
+
         McpOAuthRoutes::register();
 
         Route::middleware('web')->group(static function (): void {
@@ -195,18 +201,45 @@ final class HttpFlowServiceProvider extends ServiceProvider
                 return;
             }
 
-            touch($storagePath.'/refresh-arrived-'.$participant);
-            $peer = $storagePath.'/refresh-arrived-'.($participant === 'mcp' ? 'companion' : 'mcp');
-            $deadline = microtime(true) + 5;
-
-            while (! is_file($peer)) {
-                if (microtime(true) >= $deadline) {
-                    throw new RuntimeException('The second refresh did not reach the grant read before rotation.');
-                }
-
-                usleep(5_000);
-                clearstatcache(true, $peer);
-            }
+            self::waitForRacePeer($storagePath.'/refresh-arrived-', $participant, $participant === 'mcp' ? 'companion' : 'mcp');
         });
+    }
+
+    /**
+     * Stop both consent requests after reading the pending client and before
+     * approval takes its metadata row lock, then release them together.
+     */
+    private function synchroniseConsentValidation(string $storagePath): void
+    {
+        $hasArrived = false;
+
+        $this->app['events']->listen(QueryExecuted::class, static function (QueryExecuted $query) use ($storagePath, &$hasArrived): void {
+            $participant = request()->header('X-Consent-Race');
+
+            if ($hasArrived || ! in_array($participant, ['first', 'second'], true)
+                || ! request()->isMethod('POST') || ! request()->is('oauth/authorize')
+                || preg_match('/^select \* from ["`]oauth_clients["`] where /i', $query->sql) !== 1) {
+                return;
+            }
+
+            $hasArrived = true;
+            self::waitForRacePeer($storagePath.'/consent-arrived-', $participant, $participant === 'first' ? 'second' : 'first');
+        });
+    }
+
+    private static function waitForRacePeer(string $prefix, string $participant, string $peer): void
+    {
+        touch($prefix.$participant);
+        $peerMarker = $prefix.$peer;
+        $deadline = microtime(true) + 5;
+
+        while (! is_file($peerMarker)) {
+            if (microtime(true) >= $deadline) {
+                throw new RuntimeException('Both HTTP workers must reach the database race barrier.');
+            }
+
+            usleep(5_000);
+            clearstatcache(true, $peerMarker);
+        }
     }
 }

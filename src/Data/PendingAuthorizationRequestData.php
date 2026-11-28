@@ -28,5 +28,6 @@ final readonly class PendingAuthorizationRequestData
         public string $renderedLocale,
         public string $renderedResource,
         public array $resourceScopes = [],
+        public ?GrantInstallationData $installation = null,
     ) {}
 }

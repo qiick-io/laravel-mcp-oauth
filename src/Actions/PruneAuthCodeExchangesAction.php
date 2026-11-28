@@ -8,11 +8,10 @@ use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Models\OAuthAuthCodeExchange;
 
 /**
- * Deletes the `oauth_auth_code_exchanges` rows whose grant is revoked or
- * gone. Such a grant's tokens are refused at use (design §8.5), so a code
- * presented again has nothing left to revoke. A row of an active grant stays
- * however old it is: refresh rotation keeps that grant's tokens alive past
- * any fixed window.
+ * Drops unconsumed code bindings when the code expires. An exchange remains
+ * until its grant is revoked or gone, when a replay has no credentials left
+ * to revoke. Refresh rotation may keep the grant active beyond the code's
+ * original expiry.
  *
  * @internal
  */
@@ -33,7 +32,11 @@ final class PruneAuthCodeExchangesAction
         $prunedCount = 0;
 
         foreach (OAuthAuthCodeExchange::query()->lazyById(column: 'auth_code_id') as $exchange) {
-            if ($this->grantStore->find($exchange->grant_id)?->revoked === false) {
+            $shouldKeep = $exchange->expires_at !== null
+                ? $exchange->expires_at->isFuture()
+                : $this->grantStore->find($exchange->grant_id)?->revoked === false;
+
+            if ($shouldKeep) {
                 continue;
             }
 

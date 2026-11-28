@@ -22,10 +22,10 @@ use Qiick\McpOAuth\Models\OAuthClientMetadata;
  *
  * Only tokens of MCP clients (those with an `oauth_client_metadata` row, which
  * DCR writes) are bound; the product's own Passport clients, personal access
- * or not, are left alone. The grant is the one the code was consumed under for a
- * code exchange ({@see ConsumedAuthCodeGrant}), else
- * {@see GrantStore::activeFor()} of the token's client and user; its
- * {@see GrantStore::bindingKey()} goes into the configured binding
+ * or not, are left alone. The code exchange or installation refresh supplies
+ * the exact grant, and legacy refresh can use {@see GrantStore::activeFor()}
+ * for the token's client and user. The grant's {@see GrantStore::bindingKey()}
+ * goes into the configured binding
  * column. The audience is the validated RFC 8707 resource selected at the
  * token endpoint, or the MCP identifier for the MCP-only flow.
  *
@@ -79,9 +79,8 @@ final class BindAccessTokenAction
     }
 
     /**
-     * A code exchange binds to the grant its code was consumed under (none if
-     * no grant was active then); a refresh binds to the active grant, which
-     * S59 already requires.
+     * A code exchange or refresh of a bound credential keeps its exact grant.
+     * A legacy refresh without an explicit selection uses the active grant.
      */
     private function grantFor(string $clientId, ?string $userIdentifier, ?string $selectedGrantId): ?GrantRecord
     {

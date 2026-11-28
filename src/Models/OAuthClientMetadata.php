@@ -57,6 +57,7 @@ final class OAuthClientMetadata extends Model
         'metadata_document_error',
         'require_pushed_authorization_requests',
         'dpop_bound_access_tokens',
+        'has_per_install_grants',
         'revoked_at',
         'revocation_reason',
         'retention_until',
@@ -74,6 +75,16 @@ final class OAuthClientMetadata extends Model
         $clientId = $client instanceof Client ? $client->getKey() : $client;
 
         return self::query()->where('client_id', $clientId)->exists();
+    }
+
+    /** The flag belongs to trusted enrollment and is unavailable to DCR or fetched CIMD. */
+    public static function isPerInstallClient(string $clientId): bool
+    {
+        return self::query()
+            ->where('client_id', $clientId)
+            ->where('registration_source', 'companion')
+            ->where('has_per_install_grants', true)
+            ->exists();
     }
 
     /**
@@ -94,6 +105,7 @@ final class OAuthClientMetadata extends Model
             'metadata_document_expires_at' => 'datetime',
             'require_pushed_authorization_requests' => 'boolean',
             'dpop_bound_access_tokens' => 'boolean',
+            'has_per_install_grants' => 'boolean',
             'revoked_at' => 'datetime',
             'retention_until' => 'datetime',
             'schema_version' => 'integer',

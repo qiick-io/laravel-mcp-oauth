@@ -8,9 +8,12 @@ use DateTimeImmutable;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Str;
+use LogicException;
 use Qiick\McpOAuth\Contracts\GrantStore;
+use Qiick\McpOAuth\Contracts\InstallationGrantStoreContract;
 use Qiick\McpOAuth\Data\ConsentDecision;
 use Qiick\McpOAuth\Data\GrantRecord;
+use Qiick\McpOAuth\Data\GrantReplacementData;
 use Qiick\McpOAuth\Data\RevocationReason;
 
 /**
@@ -18,7 +21,7 @@ use Qiick\McpOAuth\Data\RevocationReason;
  *
  * @api
  */
-final class FakeGrantStore implements GrantStore
+final class FakeGrantStore implements InstallationGrantStoreContract
 {
     /** @var array<string, GrantRecord> */
     private array $grantsById = [];
@@ -60,8 +63,32 @@ final class FakeGrantStore implements GrantStore
      */
     public function replace(ConsentDecision $decision): GrantRecord
     {
-        $this->replacedDecisions[] = $decision;
         $earlierGrant = $this->activeFor($decision->clientId, $decision->userIdentifier);
+
+        return $this->storeReplacement($decision, $earlierGrant);
+    }
+
+    public function replaceForInstallation(ConsentDecision $decision): GrantReplacementData
+    {
+        $installation = $decision->installation ?? throw new LogicException('The decision is missing an installation.');
+        $priorGrant = null;
+
+        foreach ($this->grantsById as $grant) {
+            if (! $grant->revoked && $grant->clientId === $decision->clientId && $grant->userIdentifier === $decision->userIdentifier
+                && $grant->installation?->installId === $installation->installId
+                && $grant->installation->organisationId === $installation->organisationId) {
+                $priorGrant = $grant;
+
+                break;
+            }
+        }
+
+        return new GrantReplacementData($this->storeReplacement($decision, $priorGrant), $priorGrant);
+    }
+
+    private function storeReplacement(ConsentDecision $decision, ?GrantRecord $earlierGrant): GrantRecord
+    {
+        $this->replacedDecisions[] = $decision;
 
         if ($earlierGrant !== null) {
             $this->revoke($earlierGrant->id, $decision->userIdentifier, RevocationReason::Reconsent);
@@ -73,10 +100,11 @@ final class FakeGrantStore implements GrantStore
             userIdentifier: $decision->userIdentifier,
             revoked: false,
             scopes: $decision->scopes,
-            authorizedAt: new DateTimeImmutable,
+            authorizedAt: Date::now()->toDateTimeImmutable(),
             lastUsedAt: null,
             display: ['role' => $decision->role, 'resources' => $decision->resources],
             resourceScopes: $decision->resourceScopes,
+            installation: $decision->installation,
         );
         $this->grantsById[$grant->id] = $grant;
 
@@ -113,6 +141,7 @@ final class FakeGrantStore implements GrantStore
             revocationReason: $reason,
             metadata: $existingGrant->metadata,
             resourceScopes: $existingGrant->resourceScopes,
+            installation: $existingGrant->installation,
         );
     }
 

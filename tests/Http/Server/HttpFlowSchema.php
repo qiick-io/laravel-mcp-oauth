@@ -50,6 +50,10 @@ final class HttpFlowSchema
             $table->string('revocation_reason', 32)->nullable();
             $table->json('scopes');
             $table->json('resource_scopes');
+            $table->uuid('organisation_id')->nullable();
+            $table->uuid('install_id')->nullable();
+            $table->char('companion_jkt', 43)->nullable();
+            $table->index(['client_id', 'user_identifier', 'organisation_id', 'install_id'], 'http_flow_grants_install_idx');
             $table->timestamp('authorized_at');
             $table->timestamp('revoked_at')->nullable();
         });

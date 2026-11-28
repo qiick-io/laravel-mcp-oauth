@@ -20,6 +20,9 @@ enum RevocationReason: string
     /** The client revoked its refresh token (RFC 7009). */
     case Client = 'client';
 
+    /** The installation reached its absolute grant age. */
+    case Expired = 'expired';
+
     /** An automatic revocation for a security reason other than reuse. */
     case Security = 'security';
 }

@@ -25,6 +25,13 @@ The `create_oauth_consent_records` migration adds the nullable JSON
 register extra protected resources also persist the approved map in their own
 grant table, as described in [the reference schema](docs/reference-schema.md).
 
+The client metadata and auth-code exchange `create_` migrations also add
+`has_per_install_grants` and `expires_at` for Companion. An existing
+`GrantStore` stays compatible. Products enabling per-install grants implement
+`InstallationGrantStoreContract`, persist the installation and consent time
+with the grant and include those grants in erasure. The new
+`companion.grant_max_age_days` setting defaults to 180 for older config copies.
+
 ## 1.0.0-beta.1
 
 The first release. A first install follows the README (*Install*):

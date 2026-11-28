@@ -12,6 +12,7 @@ use Laravel\Passport\Token;
 use Lcobucci\JWT\Validation\RequiredConstraintsViolated;
 use League\OAuth2\Server\Exception\OAuthServerException;
 use League\OAuth2\Server\ResourceServer;
+use Qiick\McpOAuth\Actions\RevokeConnectedAppAction;
 use Qiick\McpOAuth\Contracts\GrantAuthorizer;
 use Qiick\McpOAuth\Contracts\GrantStore;
 use Qiick\McpOAuth\Data\AuthorizationDecision;
@@ -19,6 +20,7 @@ use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\ProtectedResourceDefinitionData;
 use Qiick\McpOAuth\Internal\GrantBindingColumn;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
+use Qiick\McpOAuth\Services\InstallationGrantLifetimeService;
 use Symfony\Bridge\PsrHttpMessage\Factory\PsrHttpFactory;
 
 /**
@@ -128,6 +130,12 @@ final class AccessTokenAuthenticator
             return AuthorizationDecision::invalidToken(self::NOT_VALID);
         }
 
+        if (InstallationGrantLifetimeService::hasExpired($grant, $this->config)) {
+            app(RevokeConnectedAppAction::class)->expire($grant);
+
+            return AuthorizationDecision::invalidToken(self::REVOKED);
+        }
+
         $decision = $this->grantAuthorizer->authorize($request, $grant);
 
         return $decision->isAllowed ? $grant : $decision;
@@ -145,7 +153,7 @@ final class AccessTokenAuthenticator
 
     private function grantFor(Token $accessToken, string $clientId, string $userIdentifier): ?GrantRecord
     {
-        if ($this->mcpOAuthServer->registeredResources() === []) {
+        if ($this->mcpOAuthServer->registeredResources() === [] && ! OAuthClientMetadata::isPerInstallClient($clientId)) {
             return $this->grantStore->activeFor($clientId, $userIdentifier);
         }
 

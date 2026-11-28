@@ -6,12 +6,16 @@ namespace Qiick\McpOAuth\Actions;
 
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\SQLiteConnection;
 use Illuminate\Http\Request;
 use Laravel\Passport\Passport;
 use LogicException;
 use Qiick\McpOAuth\Contracts\AuditLogger;
 use Qiick\McpOAuth\Contracts\ConsentProvider;
 use Qiick\McpOAuth\Contracts\GrantStore;
+use Qiick\McpOAuth\Contracts\InstallationGrantStoreContract;
+use Qiick\McpOAuth\Data\ConsentDecision;
+use Qiick\McpOAuth\Data\GrantInstallationData;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\PendingAuthorizationRequestData;
 use Qiick\McpOAuth\Events\McpConsentApprovedEvent;
@@ -34,14 +38,17 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
  *    options, then by ConsentProvider::validate();
  * 4. in one transaction, holding the client's metadata row lock (a client
  *    pruned meanwhile is refused): GrantStore::replace() (the earlier grant is revoked
- *    by the product), every earlier auth code, access token and refresh token
- *    of this client and user is revoked, so an unexchanged old code cannot be
- *    bound to the new grant, the consent record is written, and the client
+ *    by the product), the earlier auth codes, access tokens and refresh tokens
+ *    are revoked, the consent record is written, and the client
  *    is marked authorised the first time (`first_authorized_at`, which
  *    keeps mcp-oauth:prune-unused-clients off it after the grant is purged);
  * 5. McpConsentApprovedEvent is dispatched after the commit;
  * 6. the request is marked approved, ready for
  *    AuthorizationResponseService::complete().
+ *
+ * For installation grants, replacement and credential revocation are scoped
+ * to the exact installation and organisation. The code carries that binding
+ * when Passport persists it.
  *
  * @internal
  */
@@ -53,6 +60,7 @@ final class ApproveConsentAction
         private readonly ConsentProvider $consentProvider,
         private readonly GrantStore $grantStore,
         private readonly RecordConsentDecisionAction $recordConsentDecision,
+        private readonly RevokeGrantTokensAction $revokeGrantTokens,
         private readonly ConnectionInterface $database,
         private readonly Dispatcher $events,
         private readonly AuditLogger $auditLogger,
@@ -91,13 +99,21 @@ final class ApproveConsentAction
         // connection the inner transaction is a savepoint.
         /** @var GrantRecord $grant Laravel 12 types transaction() as mixed */
         $grant = OAuthClientMetadata::query()->getConnection()->transaction(fn (): mixed => $this->database->transaction(function () use ($request, $pendingAuthorizationRequest, $redirectUri, $decision, $clientInfo, $userIdentifier, $user): GrantRecord {
-            $isStillRegistered = OAuthClientMetadata::query()->where('client_id', $clientInfo->id)->lockForUpdate()->exists();
+            $metadata = OAuthClientMetadata::query()->where('client_id', $clientInfo->id);
+
+            if ($decision->installation !== null && $metadata->getConnection() instanceof SQLiteConnection) {
+                // SQLite ignores FOR UPDATE. Acquire its write lock before reading,
+                // so two deferred transactions cannot both read then try to upgrade.
+                (clone $metadata)->where('has_per_install_grants', true)->toBase()->update(['has_per_install_grants' => true]);
+            }
+
+            $isStillRegistered = $metadata->lockForUpdate()->exists();
 
             if (! $isStillRegistered) {
                 throw new AccessDeniedHttpException('This client is no longer registered.');
             }
 
-            $grant = $this->grantStore->replace($decision);
+            $grant = $decision->installation === null ? $this->grantStore->replace($decision) : $this->replaceInstallation($decision);
 
             if ($decision->resourceScopes !== []) {
                 // JSON storage can reorder object keys. Compare the pairs
@@ -112,7 +128,9 @@ final class ApproveConsentAction
                 }
             }
 
-            $this->revokeEarlierCredentials($clientInfo->id, $userIdentifier);
+            if ($decision->installation === null) {
+                $this->revokeEarlierCredentials($clientInfo->id, $userIdentifier);
+            }
             $this->recordConsentDecision->execute($request, $pendingAuthorizationRequest, $redirectUri, $decision, $grant);
             OAuthClientMetadata::query()
                 ->where('client_id', $clientInfo->id)
@@ -123,6 +141,7 @@ final class ApproveConsentAction
                 'redirect_host' => $clientInfo->redirectHost,
                 'scopes' => $decision->scopes,
                 'resources' => $decision->resources,
+                ...($grant->installation === null ? [] : ['install_id' => $grant->installation->installId]),
             ]);
 
             return $grant;
@@ -137,9 +156,50 @@ final class ApproveConsentAction
             resources: $decision->resources,
             resource: $decision->resource,
             resourceScopes: $decision->resourceScopes,
+            installId: $grant->installation?->installId,
         ));
 
+        if ($decision->installation !== null) {
+            $request->attributes->set(GrantInstallationData::APPROVED_GRANT_ATTRIBUTE, $grant);
+        }
+
         $authorizationRequest->setAuthorizationApproved(true);
+    }
+
+    private function replaceInstallation(ConsentDecision $decision): GrantRecord
+    {
+        $installation = $decision->installation;
+
+        if ($installation === null || ! OAuthClientMetadata::isPerInstallClient($decision->clientId)) {
+            throw new AccessDeniedHttpException('This client can no longer authorize an installation.');
+        }
+
+        if (! $this->grantStore instanceof InstallationGrantStoreContract) {
+            throw new LogicException('Per-install grants require InstallationGrantStoreContract.');
+        }
+
+        $replacement = $this->grantStore->replaceForInstallation($decision);
+        $grant = $replacement->grant;
+
+        if ($grant->revoked || $grant->clientId !== $decision->clientId || $grant->userIdentifier !== $decision->userIdentifier
+            || $grant->authorizedAt === null || $grant->installation === null
+            || ! $grant->installation->hasSameAccountAs($installation)
+            || $grant->installation->keyThumbprint !== $installation->keyThumbprint) {
+            throw new LogicException('The GrantStore must preserve the authorized installation and consent time.');
+        }
+
+        $priorGrant = $replacement->previousGrant;
+
+        if ($priorGrant !== null) {
+            if ($priorGrant->id === $grant->id || $priorGrant->clientId !== $decision->clientId || $priorGrant->userIdentifier !== $decision->userIdentifier
+                || $priorGrant->installation === null || ! $priorGrant->installation->hasSameAccountAs($installation)) {
+                throw new LogicException('The GrantStore must return the distinct previous grant for this account.');
+            }
+
+            $this->revokeGrantTokens->execute($priorGrant);
+        }
+
+        return $grant;
     }
 
     private function revokeEarlierCredentials(string $clientId, string $userIdentifier): void

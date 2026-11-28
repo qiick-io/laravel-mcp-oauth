@@ -5,12 +5,11 @@ declare(strict_types=1);
 namespace Qiick\McpOAuth\Internal;
 
 /**
- * The grant an authorization code was just consumed under, handed from
- * OneShotAuthCodeRepository to BindAccessTokenAction within one token
- * request, so the token is bound to that grant even if a newer consent lands
- * in between. A code consumed with no active grant is recorded too: its token
- * is revoked, never bound to a consent that appears afterwards. Bound as a
- * scoped instance: it never outlives the request.
+ * Carries the grant selected by an authorization code exchange or installation
+ * refresh to BindAccessTokenAction. A concurrent consent cannot switch the
+ * token to another grant. A code consumed with no active grant is recorded too,
+ * so its token is revoked even if consent appears afterwards. The instance is
+ * scoped to one request.
  *
  * @internal
  */

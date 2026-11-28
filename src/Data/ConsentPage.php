@@ -22,5 +22,6 @@ final readonly class ConsentPage
         public ConsentOptions $options,
         public array $advanced = [],
         public array $resourceScopes = [],
+        public bool $isInstallationPairing = false,
     ) {}
 }

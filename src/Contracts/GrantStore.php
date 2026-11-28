@@ -75,8 +75,9 @@ interface GrantStore
     public function activeForUser(Authenticatable $user): array;
 
     /**
-     * Internal key written to the token binding column (may be the product PK;
-     * never leaves the DB).
+     * Internal key written to the token binding column (may be the product PK
+     * and never leaves the database). Its string value also resolves the
+     * grant through find(), so an existing token retains its exact grant.
      */
     public function bindingKey(GrantRecord $grant): string|int;
 }

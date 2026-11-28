@@ -44,6 +44,7 @@ commands are public by name and signature (below), not as PHP classes.
 - `ConsentView` (interface)
 - `GrantAuthorizer` (interface)
 - `GrantStore` (interface)
+- `InstallationGrantStoreContract` (interface)
 - `McpCredentialBinder` (interface)
 - `OAuthUserResolver` (interface)
 
@@ -56,7 +57,9 @@ commands are public by name and signature (below), not as PHP classes.
 - `ConsentOption` (class)
 - `ConsentOptions` (class)
 - `ConsentPage` (class)
+- `GrantInstallationData` (class)
 - `GrantRecord` (class)
+- `GrantReplacementData` (class)
 - `ProtectedResourceDefinitionData` (class)
 - `RevocationReason` (enum)
 
@@ -127,6 +130,24 @@ Products that enable an additional resource persist
 return an empty map. Use `AccessTokenAuthenticator::authenticate()` with the
 registered identifier as its second argument at the product endpoint.
 
+## Companion installation grants
+
+An enrolled per-install client sends its random `install_id` as a UUIDv4 and
+`companion_jkt` as the 43-character base64url SHA-256 JWK thumbprint. The
+package normalizes the UUID to lowercase. After consent,
+`ConsentDecision::installation` includes the organisation chosen by the user.
+
+Products opt in by binding an `InstallationGrantStoreContract` as their
+`GrantStore`. Its replacement method atomically re-consents the exact
+client, user, organisation and installation tuple. The new grant carries
+the same installation and the consent time. Return the prior grant when
+present so the package can retire its credentials. Ordinary clients keep
+the existing `GrantStore::replace()` contract.
+
+After the absolute grant deadline, the first attempted bearer or refresh use
+revokes the installation grant and its credentials with `RevocationReason::Expired`.
+Return that stored reason on reads of revoked installation grants.
+
 ## Config keys and environment variables
 
 Every key of `config/mcp-oauth.php` (published with the `mcp-oauth-config` tag),
@@ -140,6 +161,7 @@ with the variable that sets it where there is one:
 | `access_token_ttl_minutes` | `MCP_OAUTH_ACCESS_TOKEN_TTL_MINUTES` |
 | `refresh_token_ttl_days` | `MCP_OAUTH_REFRESH_TOKEN_TTL_DAYS` |
 | `auth_code_ttl_minutes` | `MCP_OAUTH_AUTH_CODE_TTL_MINUTES` |
+| `companion.grant_max_age_days` | `MCP_OAUTH_COMPANION_GRANT_MAX_AGE_DAYS` (180 by default, 1–3650) |
 | `registrations_per_minute` | `MCP_OAUTH_REGISTRATIONS_PER_MINUTE` |
 | `authorize_requests_per_minute` | `MCP_OAUTH_AUTHORIZE_REQUESTS_PER_MINUTE` |
 | `authorize_requests_per_client_per_minute` | `MCP_OAUTH_AUTHORIZE_REQUESTS_PER_CLIENT_PER_MINUTE` |

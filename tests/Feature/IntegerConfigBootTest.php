@@ -19,6 +19,7 @@ dataset('integer_config_keys_and_env_names', [
     'CIMD timeout' => ['cimd.timeout_seconds', 'MCP_OAUTH_CIMD_TIMEOUT_SECONDS'],
     'CIMD cache minimum' => ['cimd.cache_min_seconds', 'MCP_OAUTH_CIMD_CACHE_MIN_SECONDS'],
     'CIMD cache maximum' => ['cimd.cache_max_seconds', 'MCP_OAUTH_CIMD_CACHE_MAX_SECONDS'],
+    'Companion grant absolute age' => ['companion.grant_max_age_days', 'MCP_OAUTH_COMPANION_GRANT_MAX_AGE_DAYS'],
 ]);
 
 it('hands the raw env string to boot validation instead of casting it', function (string $configKey, string $envName): void {
@@ -45,6 +46,7 @@ it('rejects a scientific, non-numeric, zero or oversized integer at boot', funct
         'cimd.timeout_seconds' => BoundedPositiveInt::CIMD_TIMEOUT_SECONDS_MAX,
         'cimd.cache_min_seconds' => BoundedPositiveInt::CIMD_CACHE_SECONDS_MAX,
         'cimd.cache_max_seconds' => BoundedPositiveInt::CIMD_CACHE_SECONDS_MAX,
+        'companion.grant_max_age_days' => BoundedPositiveInt::COMPANION_GRANT_AGE_DAYS_MAX,
     ];
 
     foreach (['1e3', 'abc', '1.5', 0, $maximumsByConfigKey[$configKey] + 1] as $invalidValue) {
@@ -64,6 +66,7 @@ it('boots with the documented maximum of every integer key', function (): void {
         'mcp-oauth.cimd.timeout_seconds' => (string) BoundedPositiveInt::CIMD_TIMEOUT_SECONDS_MAX,
         'mcp-oauth.cimd.cache_min_seconds' => (string) BoundedPositiveInt::CIMD_CACHE_SECONDS_MAX,
         'mcp-oauth.cimd.cache_max_seconds' => (string) BoundedPositiveInt::CIMD_CACHE_SECONDS_MAX,
+        'mcp-oauth.companion.grant_max_age_days' => (string) BoundedPositiveInt::COMPANION_GRANT_AGE_DAYS_MAX,
     ]);
 
     expect(fn () => (new McpOAuthServiceProvider($this->app))->boot())->not->toThrow(InvalidMcpOAuthConfigException::class);

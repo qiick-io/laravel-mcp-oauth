@@ -59,6 +59,7 @@ use Qiick\McpOAuth\Internal\DisabledAdminSwitch;
 use Qiick\McpOAuth\Internal\NullAuditLogger;
 use Qiick\McpOAuth\Internal\OutboundClientMetadataDocumentFetcher;
 use Qiick\McpOAuth\Services\ConsentPageService;
+use Qiick\McpOAuth\Services\InstallationGrantLifetimeService;
 use Qiick\McpOAuth\Services\ResourceIndicatorsService;
 use Qiick\McpOAuth\Views\InertiaConsentView;
 use ReflectionProperty;
@@ -258,6 +259,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
         });
         $this->configureRateLimiters();
         $this->validateRemainingIntegerConfig();
+        InstallationGrantLifetimeService::maximumAgeDays($this->app->make(ConfigRepository::class));
         if (self::booleanConfig($this->app->make(ConfigRepository::class)->get('mcp-oauth.cimd.enabled', false), 'cimd.enabled')) {
             $this->app->bindIf(ClientMetadataDocumentFetcherContract::class, OutboundClientMetadataDocumentFetcher::class);
         }

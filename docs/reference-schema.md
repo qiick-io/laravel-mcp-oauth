@@ -64,6 +64,7 @@ is nullable with **no** database default (registration writes the value).
 | `metadata_document_error` | string(512) | yes | null | — |
 | `require_pushed_authorization_requests` | boolean | no | false | — |
 | `dpop_bound_access_tokens` | boolean | no | false | — |
+| `has_per_install_grants` | boolean | no | false | Trusted Companion enrollment flag |
 | `revoked_at` | timestamp | yes | null | index |
 | `revocation_reason` | string(32) | yes | null | — |
 | `retention_until` | dateTime | yes | null | index |
@@ -122,9 +123,10 @@ no `updated_at`.
 
 ## `oauth_auth_code_exchanges` (package, MUST / RFC 9700 §4.5)
 
-The grant an authorization code was consumed under, written once when the
-code is first presented. A code presented again (before or after it expired)
-revokes that grant and every token bound to it. Passport does not link tokens
+The grant an authorization code was issued for (per-install clients) or
+consumed under (other clients). An installed client's pending row keeps the
+code's expiry until consumption. A consumed code presented again (before or
+after it expired) revokes that grant and every token bound to it. Passport does not link tokens
 to their code and its tables are never altered, hence this side table.
 
 **M7 exception:** no UUID `id`. The row is keyed by Passport's code id; it is
@@ -136,6 +138,7 @@ and `schema_version` like every package table.
 | --- | --- | --- | --- | --- |
 | `auth_code_id` | string(100) | no | — | PK (Passport `oauth_auth_codes.id`) |
 | `grant_id` | uuid | no | — | index |
+| `expires_at` | dateTime | yes | null | index, pending code expiry, cleared at consumption |
 | `user_identifier` | string(64) | yes | null | index, preserves erasure lookup after the original code expires |
 | `metadata` | json | yes | null | — |
 | `schema_version` | unsignedSmallInteger | no | 1 | — |
@@ -156,6 +159,12 @@ Products that register additional protected resources also store
 canonical resource identifiers and their wire scopes. Return it in
 `GrantRecord::resourceScopes` on every read and preserve the pairs for the
 lifetime of the grant. A grant for the default MCP resource may omit the map.
+
+Per-install stores persist the selected `organisation_id` (nullable UUID),
+the `install_id` (UUIDv4), the `companion_jkt` (43 base64url characters) and
+the UTC consent time. They keep one active grant per
+`(client_id, user_identifier, organisation_id, install_id)`, including the
+single-tenant case where the organisation is null.
 
 ## Passport base tables
 

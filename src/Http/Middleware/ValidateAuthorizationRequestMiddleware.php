@@ -10,8 +10,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
+use Qiick\McpOAuth\Data\GrantInstallationData;
 use Qiick\McpOAuth\Exceptions\ClientMetadataUnavailableException;
 use Qiick\McpOAuth\McpOAuthServer;
+use Qiick\McpOAuth\Models\OAuthClientMetadata;
 use Qiick\McpOAuth\RedirectUriGuard;
 use Qiick\McpOAuth\Services\ClientMetadataRegistryService;
 use Qiick\McpOAuth\Services\ResourceIndicatorsService;
@@ -158,6 +160,12 @@ final class ValidateAuthorizationRequestMiddleware
             return self::oauthError('invalid_request', 'The redirect_uri is not registered for this client.');
         }
 
+        $installationRefusal = $this->installationRefusal($request, $resolvedClientId);
+
+        if ($installationRefusal !== null) {
+            return $installationRefusal;
+        }
+
         if (! $isUuid) {
             $request->query->set('client_id', $resolvedClientId);
         }
@@ -165,6 +173,33 @@ final class ValidateAuthorizationRequestMiddleware
         if ($hasAdditionalResources) {
             return $this->registeredResourceRefusal($request, $resolvedClientId);
         }
+
+        return null;
+    }
+
+    private function installationRefusal(Request $request, string $clientId): ?JsonResponse
+    {
+        $wireQuery = $request->server->get('QUERY_STRING');
+        $wireQuery = is_string($wireQuery) ? $wireQuery : '';
+        $parameters = $request->query->all();
+        $installIds = $this->resourceIndicators->parse($wireQuery, $parameters['install_id'] ?? null, 'install_id');
+        $keyThumbprints = $this->resourceIndicators->parse($wireQuery, $parameters['companion_jkt'] ?? null, 'companion_jkt');
+
+        if (! OAuthClientMetadata::isPerInstallClient($clientId)) {
+            return $installIds === [] && $keyThumbprints === []
+                ? null
+                : self::oauthError('invalid_request', 'This client does not accept installation parameters.');
+        }
+
+        $installId = $installIds[0] ?? '';
+        $keyThumbprint = $keyThumbprints[0] ?? '';
+
+        if ($installIds === null || count($installIds) !== 1 || ! Str::isUuid($installId, 4)
+            || $keyThumbprints === null || count($keyThumbprints) !== 1 || preg_match('/\A[A-Za-z0-9_-]{43}\z/', $keyThumbprint) !== 1) {
+            return self::oauthError('invalid_request', 'A random UUIDv4 installation id and SHA-256 key thumbprint are required.');
+        }
+
+        $request->attributes->set(GrantInstallationData::REQUEST_ATTRIBUTE, new GrantInstallationData(strtolower($installId), $keyThumbprint));
 
         return null;
     }

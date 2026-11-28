@@ -32,5 +32,6 @@ final readonly class GrantRecord
         public ?RevocationReason $revocationReason = null,
         public array $metadata = [],
         public array $resourceScopes = [],
+        public ?GrantInstallationData $installation = null,
     ) {}
 }

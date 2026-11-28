@@ -59,6 +59,8 @@ return new class extends Migration
             $table->string('metadata_document_error', 512)->nullable();
             $table->boolean('require_pushed_authorization_requests')->default(false);
             $table->boolean('dpop_bound_access_tokens')->default(false);
+            // Only trusted Companion enrollment sets this flag.
+            $table->boolean('has_per_install_grants')->default(false);
             $table->timestamp('revoked_at')->nullable()->index();
             $table->string('revocation_reason', 32)->nullable();
             $table->dateTime('retention_until')->nullable()->index();
