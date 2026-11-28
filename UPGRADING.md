@@ -8,35 +8,63 @@ tables (`php artisan migrate:fresh` on a development database). Every break is
 recorded here before its tag. From `1.0.0` on, the API and the migrations follow
 Semantic Versioning and the deprecation policy.
 
-Products pin an exact beta (`qiick/laravel-mcp-oauth:1.0.0-beta.1`) until `1.0.0`.
+Products pin an exact beta (`qiick/laravel-mcp-oauth:1.0.0-beta.2`) until `1.0.0`.
 
 ## Unreleased
 
+Nothing yet.
+
+## 1.0.0-beta.2
+
+Update an existing beta installation with:
+
+```bash
+composer require qiick/laravel-mcp-oauth:1.0.0-beta.2 'qiick/laravel-outbound:@beta'
+```
+
+Keep any existing compatible Outbound constraint and omit the Outbound
+argument in that case. For an Outbound beta, the root `@beta` allowance lets
+Composer resolve it without changing the application's minimum stability.
+
+Compare any published migration copies with the three revised package
+`create_…` migrations below. Bring the copies up to date and test them on a
+fresh development database. Check the configured database before using
+`migrate:fresh`. Use the vendor migrations for Passport tables.
+
 `qiick/laravel-outbound` is now a runtime dependency for Client ID Metadata
-Documents (CIMD). Outbound's auto-discovered provider loads its webhook
-migrations and schedules webhook retention by default. If the application uses
-Outbound only for CIMD, add `qiick/laravel-outbound` to the root Composer
-`extra.laravel.dont-discover` list before running package discovery again. CIMD
-uses the Outbound library factory directly. Applications using Outbound's
-webhook features should keep the provider and follow its own upgrade guide.
+Documents (CIMD). This beta accepts `^0.2.0-beta.4 || ^1.0`. The first release
+candidate and stable `1.0.0` require Outbound `^1.0`
+([#78](https://github.com/qiick-io/laravel-mcp-oauth/issues/78)). Outbound's
+auto-discovered provider loads its webhook migrations and schedules webhook
+retention by default. If the application uses Outbound only for CIMD, add
+`qiick/laravel-outbound` to the root Composer `extra.laravel.dont-discover`
+list before running package discovery again. CIMD uses the Outbound library
+factory directly. Applications using Outbound's webhook features should keep
+the provider and follow its own upgrade guide.
+
+CIMD defaults to off. Enable `MCP_OAUTH_CIMD_ENABLED` for public clients
+using HTTPS identifiers and authorization code with PKCE. Register each
+callback URI exactly as used by the client, within the redirect policy.
 
 The `create_oauth_consent_records` migration adds the nullable JSON
-`resource_scopes` column. Republish copies from an earlier beta. Products that
-register extra protected resources also persist the approved map in their own
-grant table, as described in [the reference schema](docs/reference-schema.md).
+`resource_scopes` column. Products that register extra protected resources
+also persist the approved map in their own grant table, as described in
+[the reference schema](docs/reference-schema.md).
 
 The client metadata and auth-code exchange `create_` migrations also add
 `has_per_install_grants` and `expires_at` for Companion. An existing
 `GrantStore` stays compatible. Products enabling per-install grants implement
 `InstallationGrantStoreContract`, persist the installation and consent time
-with the grant and include those grants in erasure. The new
-`companion.grant_max_age_days` setting defaults to 180 for older config copies.
+with the grant, store its `companion_jkt` key thumbprint and include those
+grants in erasure. The `companion.grant_max_age_days` setting defaults to 180
+for older config copies.
 
 Products can reserve shipped Companion metadata during boot.
 `companion.enabled` defaults to false. A previously fetched registration for
 the same identifier moves to the shipped callback policy on authorize and its
 existing credentials are revoked. The consent client props can carry a trusted
-`operatorName` for a first-party registration.
+`operatorName` for a first-party registration. Keep each shipped callback
+HTTPS URI exact and verify the enabled definition with `mcp-oauth:check`.
 
 Older published or cached configuration copies inherit newly shipped nested
 keys. Present invalid values fail application boot with the configured key in
