@@ -25,10 +25,10 @@ Part of the qiick fleet. Binding design:
 
 ## Status
 
-`1.0.0-beta.1`, the first beta. A beta may still change the public API and the
-migrations; see [UPGRADING.md](./UPGRADING.md) and pin an exact version. Packagist
-publishing and `1.0.0` (which also needs an adopter besides externa) wait for
-the maintainer's go.
+This guide targets `1.0.0-beta.2`. The public API and migrations may still
+change during the beta. Pin an exact version and check [UPGRADING.md](./UPGRADING.md)
+before updating. Stable `1.0.0` requires an adopter besides externa and the
+maintainer's approval.
 
 ## Requirements
 
@@ -36,18 +36,24 @@ the maintainer's go.
 - illuminate/console, contracts, database, http, routing, support
   `^12.41.1 \|\| ^13.0` (never `laravel/framework`)
 - `laravel/passport ^13.12`, `laravel/mcp ^1.2`, `league/uri ^7.8`
+- `qiick/laravel-outbound ^0.2.0-beta.4 || ^1.0` for this beta
 - Optional: `inertiajs/inertia-laravel ^3.0` (default `ConsentView`)
 
 ## Install
 
 ```bash
-composer require qiick/laravel-mcp-oauth:1.0.0-beta.1
+composer require qiick/laravel-mcp-oauth:1.0.0-beta.2 'qiick/laravel-outbound:@beta'
 php artisan vendor:publish --tag=mcp-oauth-config
 php artisan vendor:publish --tag=passport-migrations
 php artisan vendor:publish --tag=mcp-oauth-migrations
 php artisan vendor:publish --tag=mcp-oauth-binding-stub
 php artisan passport:keys
 ```
+
+The Outbound argument allows a compatible beta while keeping the project's
+minimum stability. If your project already allows a compatible Outbound
+version, keep its constraint and omit that argument.
+See [Composer stability flags](https://getcomposer.org/doc/04-schema.md#package-links).
 
 The service provider is auto-discovered. Products implement the contracts
 (`AdminSwitch`, `GrantStore`, `ConsentProvider`, …), call

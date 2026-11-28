@@ -8,11 +8,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.2] - 2026-11-28
+
 ### Added
 
 - Client ID Metadata Documents can be enabled with `MCP_OAUTH_CIMD_ENABLED`.
   HTTPS URL client identifiers use Outbound's guarded transport and bounded
   cache revalidation. The default remains off.
+- Products can register protected resources under the package issuer and
+  include approved audience and scope pairs in one grant. Code exchange issues
+  a token for one audience. Refresh can select another approved audience and
+  rotates the credentials for the selected audience.
+- Companion can pre-register a public client with a reserved HTTPS identifier
+  and exact HTTPS callbacks. A product can grant access separately to each
+  consented installation, bind its consented key thumbprint and record the
+  installation identifier in its audit events. An installation grant is revoked
+  on first use at or after its absolute deadline, 180 days by default.
+- Approval and denial for the shipped Companion client use the existing
+  RFC 9207 issuer parameter. Shipped callbacks follow their exact list and
+  the instance host policy. Dynamic registration uses the product DCR
+  allowlist. `mcp-oauth:check` reports invalid definitions.
+
+### Changed
+
+- Older published configuration inherits newly introduced nested defaults.
+  Boot errors name supplied settings with invalid values. Republish any
+  older casts around `MCP_OAUTH_ENABLED` and `MCP_OAUTH_LOAD_MIGRATIONS`
+  to expose raw overrides to validation.
+- `mcp-oauth:check` uses the same Passport key readiness probe as product
+  health endpoints.
+- Release preparation runs the full source mutation inventory, including
+  declaration contracts for configuration limits and Eloquent models.
+
+### Fixed
+
+- An out-of-range numeric setting reports only the configured key and its
+  accepted interval. Reversed CIMD cache bounds report both keys.
+
+### Upgrade notes
+
+- Republish beta migration copies and review the consent, client metadata and
+  authorization-code exchange tables. Test the beta against a fresh database
+  where the existing tables do not yet contain the new columns.
+- Outbound is a runtime dependency. This beta accepts `^0.2.0-beta.4 || ^1.0`.
+  Allow its beta in the root Composer requirements when using a beta version.
+  The release candidate and stable `1.0.0` require Outbound `^1.0`.
+- Keep CIMD and Companion off until the application has configured the
+  corresponding integration. See [UPGRADING.md](UPGRADING.md) for the
+  configuration, Composer discovery and product grant store steps.
 
 ## [1.0.0-beta.1] - 2026-11-26
 
@@ -373,5 +416,6 @@ migrations (`UPGRADING.md`).
   `composer.json` `require` entry with constraint rationale, usage,
   maintainer, license, known risk and an in-package exit plan.
 
-[Unreleased]: https://github.com/qiick-io/laravel-mcp-oauth/compare/v1.0.0-beta.1...develop
+[Unreleased]: https://github.com/qiick-io/laravel-mcp-oauth/compare/v1.0.0-beta.2...develop
+[1.0.0-beta.2]: https://github.com/qiick-io/laravel-mcp-oauth/compare/v1.0.0-beta.1...v1.0.0-beta.2
 [1.0.0-beta.1]: https://github.com/qiick-io/laravel-mcp-oauth/releases/tag/v1.0.0-beta.1
