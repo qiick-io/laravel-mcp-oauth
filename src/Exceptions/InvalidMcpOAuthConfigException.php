@@ -38,10 +38,11 @@ final class InvalidMcpOAuthConfigException extends InvalidArgumentException
         );
     }
 
+    /** Keeps the configured bounds as parameters for existing callers. */
     public static function cimdCacheBoundsReversed(int $cacheMinSeconds, int $cacheMaxSeconds): self
     {
         return new self(
-            "mcp-oauth config [cimd.cache_min_seconds] {$cacheMinSeconds} must not exceed [cimd.cache_max_seconds] {$cacheMaxSeconds}.",
+            'mcp-oauth config [cimd.cache_min_seconds] must not exceed [cimd.cache_max_seconds].',
         );
     }
 

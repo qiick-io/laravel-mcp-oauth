@@ -321,11 +321,22 @@ node tests/Erasure/run.mjs
 composer test
 composer lint
 composer analyse
-bash scripts/mutate-per-class.sh   # per-class MSI ≥ 95 once targets land
+node --test scripts/mutation-inventory.test.mjs
+bash scripts/mutate-per-class.sh   # per-source mutation score ≥ 95
+node --test scripts/mutation-declarations.test.mjs
+php scripts/mutate-declarations.php
 ```
 
 [docs/security-checklist.md](./docs/security-checklist.md) maps every design scenario
 (S1–S81) to the tests that prove it, and lists what is still open.
+
+The mutation gate derives its targets from `src/`, including erasure and
+the shipped test fakes. Pest enforces 95% per source path with executable
+mutants. PHP declaration initializers with a reasoned directive are linted
+and mutated in an isolated copy. The contract tests must detect every one.
+The required CI aggregate includes both runs. See the
+[declaration mutation decision](docs/decisions/2026-11-28-declaration-mutation-gate.md).
+Release-preparation changes to the changelog run the full gate on the PR head.
 
 CI runs the PHP 8.3/8.4/8.5 × Laravel 12/13 × lowest/stable matrix, Pint,
 PHPStan max, Pest, Composer validation and audit, real HTTP tests, and qiick

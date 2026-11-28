@@ -19,10 +19,14 @@ final class OAuthConsentRecord extends Model
 {
     use HasUuids;
 
+    // PCOV has no line coverage for a declared property's initializer.
+    // @pest-mutate-ignore: FalseToTrue
     public $timestamps = false;
 
     protected $table = 'oauth_consent_records';
 
+    // PCOV has no line coverage for a declared property's initializer.
+    // @pest-mutate-ignore: RemoveArrayItem
     /**
      * @var list<string>
      */

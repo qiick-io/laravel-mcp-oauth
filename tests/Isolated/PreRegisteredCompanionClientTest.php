@@ -41,6 +41,10 @@ it('uses shipped public metadata with CIMD fetching disabled and supplies the ex
     $client = registerPinnedCompanion();
     McpOAuthRoutes::register();
 
+    $this->post('/oauth/revoke', [
+        'client_id' => PINNED_COMPANION_IDENTIFIER,
+        'token' => 'unknown-token',
+    ])->assertUnauthorized()->assertJsonPath('error', 'invalid_client');
     $issuer = app(McpOAuthServer::class)->issuer();
     $this->artisan('mcp-oauth:check')->assertSuccessful();
     $this->postJson('/oauth/register', [
@@ -90,6 +94,12 @@ it('uses shipped public metadata with CIMD fetching disabled and supplies the ex
         'refresh_token' => $tokens->json('refresh_token'),
     ])->assertUnauthorized()->assertJsonPath('error', 'invalid_client');
     expect(app(AccessTokenAuthenticator::class)->authenticate($bearer))->not->toBeInstanceOf(GrantRecord::class);
+
+    $this->post('/oauth/revoke', [
+        'client_id' => PINNED_COMPANION_IDENTIFIER,
+        'token' => $tokens->json('access_token'),
+    ])->assertOk();
+    expect(Passport::token()->newQuery()->sole()->getAttribute('revoked'))->toBeTrue();
 });
 
 it('reserves a disabled first-party identifier from outbound and DCR', function (array $companionConfig): void {
@@ -306,6 +316,8 @@ it('replaces a previously fetched registration with the shipped definition and r
 
     $pinnedClient = registerPinnedCompanion();
     expect($authenticator->authenticate($bearer))->not->toBeInstanceOf(GrantRecord::class);
+    expect(app(ClientMetadataRegistryService::class)->findForRevocation(PINNED_COMPANION_IDENTIFIER))->toBeNull();
+    $previousClient->forceFill(['grant_types' => ['authorization_code'], 'secret' => 'legacy-secret'])->save();
     $this->get($this->authorizeUrl($pinnedClient, ['redirect_uri' => AuthorizeFlowTestCase::REGISTERED_REDIRECT_URI]))
         ->assertBadRequest()->assertJsonPath('error', 'invalid_request')->assertHeaderMissing('Location');
 
@@ -329,4 +341,32 @@ it('replaces a previously fetched registration with the shipped definition and r
     foreach (['document', 'document_sha256', 'document_etag', 'document_fetched_at', 'document_expires_at', 'document_status', 'document_error'] as $field) {
         expect($pinnedMetadata->getAttribute('metadata_'.$field))->toBeNull();
     }
+});
+
+it('repairs incomplete persisted companion metadata only on authorization', function (): void {
+    config()->set('mcp-oauth.companion.enabled', true);
+    registerPinnedCompanion();
+    $registry = app(ClientMetadataRegistryService::class);
+    $client = $registry->resolve(PINNED_COMPANION_IDENTIFIER, canRegister: true);
+    $metadata = OAuthClientMetadata::query()->sole();
+    expect($metadata->getAttribute('client_id_issued_at'))->not->toBeNull();
+    $metadata->update(['has_per_install_grants' => false]);
+
+    expect($registry->resolve(PINNED_COMPANION_IDENTIFIER))->toBeNull()
+        ->and($metadata->refresh()->getAttribute('has_per_install_grants'))->toBeFalse()
+        ->and($registry->resolve(PINNED_COMPANION_IDENTIFIER, canRegister: true)?->getKey())->toBe($client?->getKey())
+        ->and($metadata->refresh()->getAttribute('has_per_install_grants'))->toBeTrue();
+});
+
+it('does not rebuild a revoked companion registration', function (): void {
+    config()->set('mcp-oauth.companion.enabled', true);
+    registerPinnedCompanion();
+    $registry = app(ClientMetadataRegistryService::class);
+    $client = $registry->resolve(PINNED_COMPANION_IDENTIFIER, canRegister: true);
+    $metadata = OAuthClientMetadata::query()->sole();
+    $metadata->update(['revoked_at' => now()]);
+
+    expect($registry->resolve(PINNED_COMPANION_IDENTIFIER, canRegister: true))->toBeNull()
+        ->and($registry->findForRevocation(PINNED_COMPANION_IDENTIFIER))->toBeNull()
+        ->and(Passport::client()->newQuery()->sole()->getKey())->toBe($client?->getKey());
 });

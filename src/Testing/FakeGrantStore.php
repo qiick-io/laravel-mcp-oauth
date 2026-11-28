@@ -44,12 +44,12 @@ final class FakeGrantStore implements InstallationGrantStoreContract
 
     public function activeFor(string $clientId, string $userIdentifier): ?GrantRecord
     {
-        $matchingGrants = array_values(array_filter(
+        $matchingGrants = array_filter(
             $this->grantsById,
             static fn (GrantRecord $grant): bool => ! $grant->revoked
                 && $grant->clientId === $clientId
                 && $grant->userIdentifier === $userIdentifier,
-        ));
+        );
 
         return $matchingGrants === [] ? null : $matchingGrants[array_key_last($matchingGrants)];
     }

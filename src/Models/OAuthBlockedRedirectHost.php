@@ -24,6 +24,8 @@ final class OAuthBlockedRedirectHost extends Model
     /** Blocks the host only; the default `host_and_subdomains` also blocks every subdomain. */
     public const string MATCH_MODE_EXACT = 'exact';
 
+    // PCOV has no line coverage for a declared property's initializer.
+    // @pest-mutate-ignore: RemoveArrayItem
     /**
      * @var list<string>
      */

@@ -109,14 +109,13 @@ jobs:
         if: ${{ !matrix.skip }}
         run: vendor/bin/pest
 
-  # Per-class mutation (design §11.4), at least 95 per class, split over nine
-  # shards (scripts/mutate-per-class.sh): on a full run the four slowest
-  # classes get a shard each and the rest share five; on a pull request only
-  # the curated classes it changed run, dealt over all nine.
-  # The matrix's mutation plan, widened to the whole curated gate when a pull
-  # request changes what judges the mutants: the tests, the runner, the Pest
-  # configuration or the locked dependencies. A test edit that still passes
-  # can leave a mutant alive, and the runner must run to prove itself.
+  # Score each executable source path at 95 or higher across twenty shards.
+  # Long-running classes keep dedicated jobs. A pull request normally selects
+  # its changed source paths.
+  # The matrix's mutation plan widens to the whole source when a pull
+  # request changes the tests, the runner, the Pest configuration or the
+  # locked dependencies. A changelog change also requires exact-head mutation
+  # results for release preparation.
   mutation-plan:
     name: Mutation plan
     needs: package-matrix
@@ -133,6 +132,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify mutation inventory
+        if: github.event_name == 'pull_request'
+        run: node --test scripts/mutation-inventory.test.mjs
+
       - name: Plan
         id: plan
         env:
@@ -143,15 +146,18 @@ jobs:
           MATRIX_CLASSES: ${{ needs.package-matrix.outputs.mutate-classes }}
         run: |
           scope="${MATRIX_SCOPE}"
-          if [ "${EVENT_NAME}" = pull_request ] && git diff --name-only "${BASE_SHA}...${HEAD_SHA}" | grep -qE '^(tests/|scripts/mutate-per-class\.sh$|phpunit\.xml(\.dist)?$|composer\.(json|lock)$)'; then
-            scope=all
+          if [ "${EVENT_NAME}" = pull_request ]; then
+            changed_files="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")"
+            if grep -qE '^(tests/|src/Testing/|scripts/(mutate-|mutation-)|\.github/workflows/ci\.yml$|phpunit\.xml(\.dist)?$|composer\.(json|lock)$|CHANGELOG\.md$)' <<< "$changed_files"; then
+              scope=all
+            fi
           fi
           echo "scope=${scope}" >> "${GITHUB_OUTPUT}"
           echo "classes=${MATRIX_CLASSES}" >> "${GITHUB_OUTPUT}"
           echo "Mutation scope: ${scope}"
 
   mutation-shards:
-    name: Mutation (shard ${{ matrix.shard }}/9)
+    name: Mutation (shard ${{ matrix.shard }}/20)
     needs: [package-matrix, mutation-plan]
     runs-on: ubuntu-latest
     # Shared shards run the suite for each class and can exceed 30 minutes.
@@ -159,7 +165,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     steps:
       - name: Checkout
         if: needs.mutation-plan.outputs.scope == 'all' || needs.mutation-plan.outputs.classes != '[]'
@@ -187,22 +193,51 @@ jobs:
           MUTATE_SCOPE: ${{ needs.mutation-plan.outputs.scope }}
           MUTATE_CLASSES: ${{ needs.mutation-plan.outputs.classes }}
           MUTATE_SHARD: ${{ matrix.shard }}
-          MUTATE_SHARDS: 9
+          MUTATE_SHARDS: 20
         run: bash scripts/mutate-per-class.sh
 
-  # One stable check name over every shard, for branch protection: it fails
-  # unless every shard succeeded (a cancelled or skipped shard fails it too).
+  mutation-declarations:
+    name: Mutation declarations
+    needs: mutation-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        if: needs.mutation-plan.outputs.scope == 'all' || needs.mutation-plan.outputs.classes != '[]'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup PHP
+        if: needs.mutation-plan.outputs.scope == 'all' || needs.mutation-plan.outputs.classes != '[]'
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.4'
+          coverage: none
+          extensions: intl, openssl, pdo_sqlite
+          tools: composer:v2
+
+      - name: Install dependencies
+        if: needs.mutation-plan.outputs.scope == 'all' || needs.mutation-plan.outputs.classes != '[]'
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Lint directives and execute declaration mutations
+        if: needs.mutation-plan.outputs.scope == 'all' || needs.mutation-plan.outputs.classes != '[]'
+        run: |
+          node --test scripts/mutation-declarations.test.mjs
+          php scripts/mutate-declarations.php
+
+  # Branch protection uses this aggregate over the runtime and declaration jobs.
   mutation:
     name: Mutation (per-class ≥95%)
-    needs: mutation-shards
+    needs: [mutation-shards, mutation-declarations]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Every shard passed
+      - name: Runtime and declaration mutations passed
         env:
           SHARDS_RESULT: ${{ needs.mutation-shards.result }}
-        run: test "$SHARDS_RESULT" = success
+          DECLARATIONS_RESULT: ${{ needs.mutation-declarations.result }}
+        run: test "$SHARDS_RESULT" = success && test "$DECLARATIONS_RESULT" = success
 
   # Real HTTP against php -S (the Pest `http` group).
   http-server:
@@ -257,13 +292,7 @@ jobs:
 
       - name: Pest (real HTTP group)
         if: needs.package-matrix.outputs.docs-only != 'true'
-        run: |
-          count="$(vendor/bin/pest --list-tests --group=http 2>/dev/null | grep -c . || true)"
-          if [ "${count}" -eq 0 ]; then
-            echo "The http Pest group is empty."
-            exit 1
-          fi
-          vendor/bin/pest --group=http
+        run: vendor/bin/pest --group=http --fail-on-empty-test-suite
 
   # The whole suite and the erasure conformance runner on each server engine
   # of the shared matrix (design §11.3): token, refresh, revocation and consent
