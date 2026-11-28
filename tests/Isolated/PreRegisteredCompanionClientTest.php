@@ -14,6 +14,7 @@ use Qiick\McpOAuth\Enums\ClientMetadataFetchStatusEnum;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
+use Qiick\McpOAuth\Services\ClientMetadataRegistryService;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 
 uses(AuthorizeFlowTestCase::class);
@@ -125,6 +126,25 @@ it('does not accept a fetched document claiming the reserved identifier', functi
         'redirect_uri' => PINNED_COMPANION_CALLBACK,
     ]))->assertBadRequest()->assertJsonPath('error', 'invalid_client')->assertHeaderMissing('Location');
     expect(OAuthClientMetadata::query()->exists())->toBeFalse();
+});
+
+it('refuses outbound re-enrollment for a stored companion whose definition was removed', function (): void {
+    $this->enableOAuth();
+    config()->set('mcp-oauth.companion.enabled', true);
+    config()->set('mcp-oauth.cimd.enabled', true);
+    $this->mock(ClientMetadataDocumentFetcherContract::class)->shouldReceive('fetch')->never();
+    $previousClient = $this->createClient([PINNED_COMPANION_CALLBACK]);
+    OAuthClientMetadata::query()->where('client_id', $previousClient->getKey())->update([
+        'registration_source' => 'companion',
+        'has_per_install_grants' => true,
+        'metadata_document_url' => PINNED_COMPANION_IDENTIFIER,
+        'metadata_document_url_sha256' => hash('sha256', PINNED_COMPANION_IDENTIFIER),
+    ]);
+    $registry = app(ClientMetadataRegistryService::class);
+
+    expect($registry->resolve(PINNED_COMPANION_IDENTIFIER, canRegister: true))->toBeNull()
+        ->and($registry->findForRevocation(PINNED_COMPANION_IDENTIFIER))->toBeNull()
+        ->and(Passport::client()->newQuery()->count())->toBe(1);
 });
 
 it('rejects incomplete metadata declarations before registering the first-party identifier', function (string $identifier, string $name, array $redirectUris, string $operator): void {
