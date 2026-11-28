@@ -121,6 +121,8 @@ final class DatabaseGrantStore implements GrantStore
         $scopes = json_decode($row->scopes, true);
         /** @var array<string, string> $resourceScopes */
         $resourceScopes = json_decode($row->resource_scopes, true, flags: JSON_THROW_ON_ERROR);
+        // A product's JSON storage may return the same pairs in a different order.
+        ksort($resourceScopes);
 
         return new GrantRecord(
             id: $row->id,

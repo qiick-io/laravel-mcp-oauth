@@ -3,19 +3,23 @@
 declare(strict_types=1);
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\AccessTokenAuthenticator;
 use Qiick\McpOAuth\Data\GrantRecord;
 use Qiick\McpOAuth\Data\ProtectedResourceDefinitionData;
+use Qiick\McpOAuth\Events\McpConsentApprovedEvent;
 use Qiick\McpOAuth\McpOAuthRoutes;
 use Qiick\McpOAuth\McpOAuthServer;
 use Qiick\McpOAuth\Models\OAuthClientMetadata;
+use Qiick\McpOAuth\Models\OAuthConsentRecord;
 use Qiick\McpOAuth\Tests\Support\AuthorizeFlowTestCase;
 
 uses(AuthorizeFlowTestCase::class);
 
 const COMPANION_RESOURCE = 'https://mcp-oauth.test/companion';
+const COMPANION_RESOURCE_NORMALIZABLE = 'HTTPS://MCP-OAUTH.TEST/companion/';
 
 function registerCompanionResource(): void
 {
@@ -105,13 +109,14 @@ it('retains the repeated resource indicators across the guest login redirect', f
     McpOAuthRoutes::register();
     $client = $this->createClient();
     OAuthClientMetadata::query()->where('client_id', $client->getKey())->update(['registration_source' => 'companion']);
-    $authorizationUrl = $this->authorizeUrl($client).'&resource='.rawurlencode(COMPANION_RESOURCE);
+    $authorizationUrl = $this->authorizeUrl($client).'&resource='.rawurlencode(COMPANION_RESOURCE_NORMALIZABLE);
 
     $this->get($authorizationUrl)->assertRedirect(route('login'))
         ->assertSessionHas('url.intended', app(McpOAuthServer::class)->issuer().$authorizationUrl);
 });
 
 it('records the repeated resource indicators the user approved instead of any posted wire permissions', function (): void {
+    Event::fake([McpConsentApprovedEvent::class]);
     $this->enableOAuth();
     registerCompanionResource();
     McpOAuthRoutes::register();
@@ -137,7 +142,28 @@ it('records the repeated resource indicators the user approved instead of any po
 
     expect($this->grantStore()->replacedDecisions[0]->resourceScopes)->toBe($expected);
     $grant = $this->grantStore()->activeFor((string) $client->getKey(), (string) $this->app['auth']->id());
-    expect($grant?->resourceScopes)->toBe($expected);
+    expect($grant?->resourceScopes)->toBe($expected)
+        ->and(OAuthConsentRecord::query()->sole()->getAttribute('resource_scopes'))->toEqual($expected);
+    Event::assertDispatched(McpConsentApprovedEvent::class, fn (McpConsentApprovedEvent $event): bool => $event->resourceScopes === $expected);
+});
+
+it('retains each displayed resource when the user denies consent', function (): void {
+    $this->enableOAuth();
+    registerCompanionResource();
+    McpOAuthRoutes::register();
+    $client = $this->createClient();
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->update(['registration_source' => 'companion']);
+    $page = $this->actingAs($this->createUser())
+        ->get($this->authorizeUrl($client).'&resource='.rawurlencode(COMPANION_RESOURCE), ['X-Inertia' => 'true'])
+        ->assertOk();
+    $this->delete('/oauth/authorize', ['auth_token' => $page->json('props.authToken')])
+        ->assertRedirectContains('error=access_denied');
+
+    $evidence = OAuthConsentRecord::query()->sole();
+    expect($evidence->getAttribute('decision'))->toBe('denied')
+        ->and($evidence->getAttribute('resource_scopes'))->toEqual([
+            AuthorizeFlowTestCase::RESOURCE => 'mcp:use', COMPANION_RESOURCE => 'companion:device',
+        ]);
 });
 
 it('refuses a pending approval when the client class can no longer obtain one of its resources', function (): void {
@@ -166,13 +192,20 @@ it('rejects unknown, repeated and array-shaped resources before consent', functi
     registerCompanionResource();
     McpOAuthRoutes::register();
 
-    $this->get($this->authorizeUrl($this->createClient()).$additionalParameter)
+    $client = $this->createClient();
+    OAuthClientMetadata::query()->where('client_id', $client->getKey())->update(['registration_source' => 'companion']);
+    $this->get($this->authorizeUrl($client).$additionalParameter)
         ->assertBadRequest()->assertJsonPath('error', 'invalid_target');
 })->with([
     'unknown' => ['&resource=https%3A%2F%2Funknown.example%2Fmcp'],
     'same audience with another spelling' => ['&resource=HTTPS%3A%2F%2FMCP-OAUTH.TEST%2Fmcp%2F'],
     'array form' => ['&resource%5B%5D=https%3A%2F%2Fmcp-oauth.test%2Fmcp'],
     'PHP field alias' => ['&resource%00=https%3A%2F%2Fmcp-oauth.test%2Fmcp'],
+    'changed path case' => ['&resource='.rawurlencode('https://mcp-oauth.test/Companion')],
+    'two trailing slashes' => ['&resource='.rawurlencode(COMPANION_RESOURCE.'//')],
+    'same additional resource with another spelling' => [
+        '&resource='.rawurlencode(COMPANION_RESOURCE).'&resource='.rawurlencode(COMPANION_RESOURCE_NORMALIZABLE),
+    ],
 ]);
 
 it('exchanges a one-shot code for exactly one audience and refreshes the other without retiring it', function (): void {
@@ -201,7 +234,7 @@ it('exchanges a one-shot code for exactly one audience and refreshes the other w
         'grant_type' => 'refresh_token',
         'client_id' => (string) $client->getKey(),
         'refresh_token' => $mcpToken->json('refresh_token'),
-        'resource' => COMPANION_RESOURCE,
+        'resource' => COMPANION_RESOURCE_NORMALIZABLE,
     ];
     $companionToken = $this->post('/oauth/token', $refreshRequest)->assertOk();
 

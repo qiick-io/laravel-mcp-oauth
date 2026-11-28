@@ -99,8 +99,17 @@ final class ApproveConsentAction
 
             $grant = $this->grantStore->replace($decision);
 
-            if ($decision->resourceScopes !== [] && $grant->resourceScopes !== $decision->resourceScopes) {
-                throw new LogicException('The GrantStore must preserve the approved resource scopes.');
+            if ($decision->resourceScopes !== []) {
+                // JSON storage can reorder object keys. Compare the pairs
+                // strictly without imposing the browser's iteration order.
+                $approvedResourceScopes = $decision->resourceScopes;
+                $storedResourceScopes = $grant->resourceScopes;
+                ksort($approvedResourceScopes);
+                ksort($storedResourceScopes);
+
+                if ($storedResourceScopes !== $approvedResourceScopes) {
+                    throw new LogicException('The GrantStore must preserve the approved resource scopes.');
+                }
             }
 
             $this->revokeEarlierCredentials($clientInfo->id, $userIdentifier);
@@ -127,6 +136,7 @@ final class ApproveConsentAction
             scopes: $decision->scopes,
             resources: $decision->resources,
             resource: $decision->resource,
+            resourceScopes: $decision->resourceScopes,
         ));
 
         $authorizationRequest->setAuthorizationApproved(true);

@@ -53,6 +53,7 @@ final class RecordConsentDecisionAction
             'redirect_uri' => $redirectUri,
             'redirect_host' => $this->redirectUriGuard->displayHostOf($redirectUri),
             'resource' => $pendingAuthorizationRequest->renderedResource,
+            'resource_scopes' => $pendingAuthorizationRequest->resourceScopes !== [] ? $pendingAuthorizationRequest->resourceScopes : null,
             // League scope entities JSON-serialise to their identifier.
             'requested_scopes' => $authorizationRequest->getScopes(),
             'granted_scopes' => $decision?->scopes,

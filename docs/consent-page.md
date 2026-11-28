@@ -93,6 +93,10 @@ What the page must show:
   of the product permissions in `options.resources`;
 - every entry of `notices`.
 
+For registered resources, the append-only record captures the entire displayed
+map in `oauth_consent_records.resource_scopes` for either decision.
+`McpConsentApprovedEvent::resourceScopes` carries the same approved pairs.
+
 ## Form
 
 Both actions post to the same URL, `/oauth/authorize` (route names

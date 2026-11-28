@@ -191,9 +191,7 @@ final class McpOAuthServer
             return false;
         }
 
-        $withoutTrailingSlash = str_ends_with($resource, '/') ? substr($resource, 0, -1) : $resource;
-
-        return $this->lowercaseSchemeAndAuthority($withoutTrailingSlash)
+        return $this->normalizeResourceForComparison($resource)
             === $this->lowercaseSchemeAndAuthority($this->resourceIdentifier());
     }
 
@@ -229,6 +227,20 @@ final class McpOAuthServer
     public function registeredResources(): array
     {
         return $this->registeredResources;
+    }
+
+    /** @internal Matches a wire resource and returns its canonical, registered spelling. */
+    public function registeredResourceFor(string $identifier): ?ProtectedResourceDefinitionData
+    {
+        $normalized = $this->normalizeResourceForComparison($identifier);
+
+        foreach ($this->registeredResources as $resource) {
+            if ($normalized === $this->lowercaseSchemeAndAuthority($resource->identifier)) {
+                return $resource;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -376,6 +388,13 @@ final class McpOAuthServer
 
         // An empty or slash-only path would make the resource the bare origin.
         return $trimmedPath !== '' ? $trimmedPath : 'mcp';
+    }
+
+    private function normalizeResourceForComparison(string $uri): string
+    {
+        $withoutTrailingSlash = str_ends_with($uri, '/') ? substr($uri, 0, -1) : $uri;
+
+        return $this->lowercaseSchemeAndAuthority($withoutTrailingSlash);
     }
 
     /**

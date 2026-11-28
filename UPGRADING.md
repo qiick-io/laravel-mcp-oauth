@@ -20,6 +20,11 @@ Outbound only for CIMD, add `qiick/laravel-outbound` to the root Composer
 uses the Outbound library factory directly. Applications using Outbound's
 webhook features should keep the provider and follow its own upgrade guide.
 
+The `create_oauth_consent_records` migration adds the nullable JSON
+`resource_scopes` column. Republish copies from an earlier beta. Products that
+register extra protected resources also persist the approved map in their own
+grant table, as described in [the reference schema](docs/reference-schema.md).
+
 ## 1.0.0-beta.1
 
 The first release. A first install follows the README (*Install*):

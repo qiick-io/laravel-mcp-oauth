@@ -66,7 +66,6 @@ final readonly class ResourceIndicatorsService
      */
     public function resolve(array $indicators, string $clientId): array
     {
-        $registered = $this->server->registeredResources();
         $clientClass = OAuthClientMetadata::query()->where('client_id', $clientId)->value('registration_source');
         $resourceScopes = [];
 
@@ -75,7 +74,7 @@ final readonly class ResourceIndicatorsService
                 $resource = $this->server->resourceIdentifier();
                 $scope = McpOAuthServer::WIRE_SCOPE;
             } else {
-                $definition = $registered[$identifier] ?? null;
+                $definition = $this->server->registeredResourceFor($identifier);
 
                 if ($definition === null || ! in_array($clientClass, $definition->allowedClientClasses, true)) {
                     return [];

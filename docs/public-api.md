@@ -117,6 +117,10 @@ the first resolution of Passport's authorization server. Each definition has
 an exact path under the issuer, one distinct wire scope and server-assigned client
 classes. The matching nested RFC 9728 route serves its metadata.
 
+An indicator compares scheme and host case-insensitively, permits one trailing
+slash and preserves path case. Responses and grant records use the canonical
+registered identifier.
+
 Products that enable an additional resource persist
 `ConsentDecision::resourceScopes` unchanged and return it in
 `GrantRecord::resourceScopes` on all reads. Legacy MCP-only grants may

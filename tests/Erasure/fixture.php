@@ -53,7 +53,7 @@ return new class implements ErasureFixture
             'oauth_consent_records' => [
                 ...array_fill_keys(['id', 'client_id', 'decision', 'all_resources', 'retention_until', 'schema_version', 'created_at'], 'other'),
                 ...array_fill_keys([
-                    'user_identifier', 'grant_id', 'redirect_uri', 'redirect_host', 'resource', 'requested_scopes',
+                    'user_identifier', 'grant_id', 'redirect_uri', 'redirect_host', 'resource', 'resource_scopes', 'requested_scopes',
                     'granted_scopes', 'role', 'resources', 'attributes', 'consent_version', 'locale', 'ip_address',
                     'user_agent', 'correlation_id', 'metadata',
                 ], 'personal'),
@@ -120,6 +120,7 @@ return new class implements ErasureFixture
             'redirect_uri' => 'https://client.example.test/callback?login_hint='.rawurlencode($email),
             'redirect_host' => "{$username}.example.test",
             'resource' => "https://example.test/{$username}",
+            'resource_scopes' => json_encode(["https://example.test/{$username}" => 'mcp:use'], JSON_THROW_ON_ERROR),
             'requested_scopes' => $personalScopes,
             'granted_scopes' => $personalScopes,
             'role' => $username,

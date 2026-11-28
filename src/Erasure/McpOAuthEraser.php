@@ -193,6 +193,7 @@ final class McpOAuthEraser
             'redirect_uri' => null,
             'redirect_host' => null,
             'resource' => null,
+            'resource_scopes' => null,
             'requested_scopes' => '[]',
             'granted_scopes' => null,
             'role' => null,

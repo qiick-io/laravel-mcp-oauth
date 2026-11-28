@@ -103,6 +103,7 @@ no `updated_at`.
 | `redirect_uri` | text | yes | null | — |
 | `redirect_host` | string | yes | null | — |
 | `resource` | string(512) | yes | null | — |
+| `resource_scopes` | json | yes | null | Complete resource-to-scope map shown at approval or denial for a registered resource |
 | `requested_scopes` | json | no | — | — |
 | `granted_scopes` | json | yes | null | — |
 | `role` | string | yes | null | — |
@@ -149,6 +150,12 @@ migrations):
 | --- | --- | --- |
 | `{grant_binding_column}` (default `api_key_id`) | `foreignId` or `foreignUuid` | Nullable, indexed, cascade on grant delete |
 | `audience` | string(512), nullable | Exact resource identifier at mint time |
+
+Products that register additional protected resources also store
+`resource_scopes` (JSON) on their grant table. The map copies the approved
+canonical resource identifiers and their wire scopes. Return it in
+`GrantRecord::resourceScopes` on every read and preserve the pairs for the
+lifetime of the grant. A grant for the default MCP resource may omit the map.
 
 ## Passport base tables
 

@@ -24,6 +24,7 @@ return new class extends Migration
             $table->text('redirect_uri')->nullable();
             $table->string('redirect_host')->nullable();
             $table->string('resource', 512)->nullable();
+            $table->json('resource_scopes')->nullable();
             $table->json('requested_scopes');
             $table->json('granted_scopes')->nullable();
             $table->string('role')->nullable();
