@@ -13,6 +13,7 @@ use Laravel\Passport\Passport;
 use League\Uri\UriString;
 use Qiick\McpOAuth\Contracts\AdminSwitch;
 use Qiick\McpOAuth\Contracts\ClientMetadataDocumentFetcherContract;
+use Qiick\McpOAuth\Data\CompanionClientDefinitionData;
 use Qiick\McpOAuth\Data\ProtectedResourceDefinitionData;
 use Qiick\McpOAuth\Exceptions\InvalidMcpOAuthConfigException;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
@@ -30,6 +31,48 @@ final class McpOAuthServer
 
     /** @var array<string, ProtectedResourceDefinitionData> Product resources registered during bootstrap */
     private array $registeredResources = [];
+
+    /** @var array<string, CompanionClientDefinitionData> First-party identifiers reserved during bootstrap */
+    private array $companionClients = [];
+
+    /** Reserves a first-party identifier without accessing storage or the network. */
+    public function registerCompanionClient(CompanionClientDefinitionData $definition): void
+    {
+        $uriGuard = new RedirectUriGuard;
+
+        if (isset($this->companionClients[$definition->identifier]) || $definition->identifier === $this->resourceIdentifier()
+            || $uriGuard->parseClientIdentifierUrl($definition->identifier) === null) {
+            throw new InvalidArgumentException('Companion client requires a unique HTTPS client identifier URL with a path.');
+        }
+
+        if (trim($definition->name) === '' || strlen($definition->name) > 255 || trim($definition->operatorName) === '') {
+            throw new InvalidArgumentException('Companion client requires a name and an operator.');
+        }
+
+        if ($definition->redirectUris === []) {
+            throw new InvalidArgumentException('Companion client requires at least one HTTPS callback URI.');
+        }
+
+        foreach ($definition->redirectUris as $redirectUri) {
+            if (strlen($redirectUri) > 1024 || $uriGuard->parseCanonical($redirectUri)->scheme !== 'https') {
+                throw new InvalidArgumentException('Companion client requires exact HTTPS callback URIs.');
+            }
+        }
+
+        $this->companionClients[$definition->identifier] = $definition;
+    }
+
+    /** @internal The reservation remains when the administrator disables Companion. */
+    public function companionClientFor(string $identifier): ?CompanionClientDefinitionData
+    {
+        return $this->companionClients[$identifier] ?? null;
+    }
+
+    /** @internal Applies only to first-party Companion identities. */
+    public function isCompanionClientEnabled(): bool
+    {
+        return filter_var($this->config->get('mcp-oauth.companion.enabled', false), FILTER_VALIDATE_BOOLEAN);
+    }
 
     /**
      * The grants the token endpoint accepts and the metadata advertises.

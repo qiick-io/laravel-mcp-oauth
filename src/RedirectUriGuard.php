@@ -245,6 +245,35 @@ final class RedirectUriGuard
     }
 
     /**
+     * A CIMD identifier has an HTTPS host and an absolute path with no query
+     * or dot segments. This only checks syntax, so it is safe during boot.
+     *
+     * @internal
+     */
+    public function parseClientIdentifierUrl(string $url): ?ParsedRedirectUriData
+    {
+        if (strlen($url) > 2048 || trim($url) !== $url || str_contains($url, '?')) {
+            return null;
+        }
+
+        try {
+            $parsed = $this->parseCanonical($url);
+        } catch (InvalidArgumentException) {
+            return null;
+        }
+
+        foreach (explode('/', $parsed->path) as $segment) {
+            if (in_array(rawurldecode($segment), ['.', '..'], true)) {
+                return null;
+            }
+        }
+
+        return $parsed->scheme === 'https' && $parsed->path !== '' && $parsed->path !== '/'
+            ? $parsed
+            : null;
+    }
+
+    /**
      * Single parse for every guard check, shared with ClientMetadataUriGuard.
      * Refuses fragment, backslash, userinfo, hostless http(s), percent-encoded
      * hosts, non-ASCII hosts and non-dotted-decimal IPv4 forms.

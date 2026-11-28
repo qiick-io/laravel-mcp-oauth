@@ -53,6 +53,15 @@ final class RegisterClientController extends OAuthRegisterController
             ], 413);
         }
 
+        $requestedIdentifier = $request->input('client_id');
+
+        if (is_string($requestedIdentifier) && app(McpOAuthServer::class)->companionClientFor($requestedIdentifier) !== null) {
+            return response()->json([
+                'error' => 'invalid_client_metadata',
+                'error_description' => 'The client identifier is reserved.',
+            ], 400);
+        }
+
         $redirectUris = $request->input('redirect_uris');
 
         if ($redirectUris !== null && (! is_array($redirectUris) || ! array_is_list($redirectUris))) {

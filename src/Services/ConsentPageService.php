@@ -93,8 +93,9 @@ final class ConsentPageService
                 'id' => $clientInfo->id,
                 'name' => $clientInfo->name,
                 'redirectHost' => $clientInfo->redirectHost,
-                'nameIsSelfAsserted' => true,
+                'nameIsSelfAsserted' => $clientInfo->nameIsSelfAsserted,
                 'isRedirectLoopback' => $clientInfo->isRedirectLoopback,
+                ...($clientInfo->operatorName === null ? [] : ['operatorName' => $clientInfo->operatorName]),
             ],
             authToken: $parameters['authToken'],
             options: $consentOptions,
@@ -129,6 +130,9 @@ final class ConsentPageService
             'registration_source', 'client_uri', 'logo_uri', 'policy_uri', 'tos_uri',
             'contacts', 'software_id', 'software_version', 'metadata_document_url',
         ]);
+        $operator = $registered['registration_source'] === 'companion' && $registered['metadata_document_url'] !== null
+            ? $this->mcpOAuthServer->companionClientFor($registered['metadata_document_url'])?->operatorName
+            : null;
 
         return new ClientInfo(
             id: $clientId,
@@ -147,6 +151,8 @@ final class ConsentPageService
             // The callback this approval returns to, not the whole registration:
             // a client with an https and a loopback callback still warns (S3).
             isRedirectLoopback: $this->redirectUriGuard->isLoopbackRedirectUri($redirectUri ?? $registeredRedirectUris[0]),
+            nameIsSelfAsserted: $operator === null,
+            operatorName: $operator,
         );
     }
 

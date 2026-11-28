@@ -145,10 +145,26 @@ final class AccessTokenAuthenticator
     {
         $metadata = OAuthClientMetadata::query()->where('client_id', $client->getKey())->first();
 
-        return $metadata !== null
-            && ($resource === null || in_array($metadata->getAttribute('registration_source'), $resource->allowedClientClasses, true))
-            && ($metadata->getAttribute('metadata_document_url') === null
-                || ($this->mcpOAuthServer->supportsClientIdMetadataDocuments() && $metadata->getAttribute('metadata_document_status') !== 'invalid'));
+        if ($metadata === null || ($resource !== null && ! in_array($metadata->getAttribute('registration_source'), $resource->allowedClientClasses, true))) {
+            return false;
+        }
+
+        $metadataUrl = $metadata->getAttribute('metadata_document_url');
+
+        if (! is_string($metadataUrl)) {
+            return $metadataUrl === null;
+        }
+
+        $companion = $this->mcpOAuthServer->companionClientFor($metadataUrl);
+
+        if ($companion !== null || $metadata->getAttribute('registration_source') === 'companion') {
+            return $companion !== null
+                && $metadata->getAttribute('registration_source') === 'companion'
+                && $this->mcpOAuthServer->isCompanionClientEnabled()
+                && $client->getAttribute('redirect_uris') === $companion->redirectUris;
+        }
+
+        return $this->mcpOAuthServer->supportsClientIdMetadataDocuments() && $metadata->getAttribute('metadata_document_status') !== 'invalid';
     }
 
     private function grantFor(Token $accessToken, string $clientId, string $userIdentifier): ?GrantRecord

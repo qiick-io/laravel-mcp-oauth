@@ -285,6 +285,31 @@ to their own Composer `extra.laravel.dont-discover` list to omit its webhook
 provider, migrations and scheduled jobs. The CIMD transport uses the library
 factory directly.
 
+### Pre-registered Companion clients
+
+The product or Companion service provider supplies the shipped identity during
+boot. Pass the claimed HTTPS callback URLs from the mobile build to
+`McpOAuthServer::registerCompanionClient()`.
+
+```php
+use Qiick\McpOAuth\Data\CompanionClientDefinitionData;
+use Qiick\McpOAuth\McpOAuthServer;
+
+app(McpOAuthServer::class)->registerCompanionClient(new CompanionClientDefinitionData(
+    identifier: 'https://companion.qiick.io/oauth/client-metadata.json',
+    name: 'qiick Companion',
+    redirectUris: ['https://companion.qiick.io/oauth/callback'],
+    operatorName: 'qiick',
+));
+```
+
+Bind an `InstallationGrantStoreContract` and set
+`MCP_OAUTH_COMPANION_ENABLED=true` to enable the client. The reservation holds
+regardless of this setting or the live CIMD switch. The server uses only the
+shipped client metadata and exact callbacks for this identity. The consent page
+identifies the operator. The authorization server advertises RFC 9207 support
+and every redirect with an authorization result includes the issuer as `iss`.
+
 ## Testing
 
 ```bash

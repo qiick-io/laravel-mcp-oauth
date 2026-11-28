@@ -32,6 +32,12 @@ The client metadata and auth-code exchange `create_` migrations also add
 with the grant and include those grants in erasure. The new
 `companion.grant_max_age_days` setting defaults to 180 for older config copies.
 
+Products can reserve shipped Companion metadata during boot.
+`companion.enabled` defaults to false. A previously fetched registration for
+the same identifier moves to the shipped callback policy on authorize and its
+existing credentials are revoked. The consent client props can carry a trusted
+`operatorName` for a first-party registration.
+
 ## 1.0.0-beta.1
 
 The first release. A first install follows the README (*Install*):

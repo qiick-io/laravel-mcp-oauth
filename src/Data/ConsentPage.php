@@ -13,7 +13,7 @@ final readonly class ConsentPage
 {
     /**
      * @param  list<array{label: string, value: string}>  $advanced  the Advanced section's rows, closed by default
-     * @param  array{id: string, name: string, redirectHost: string, nameIsSelfAsserted: true, isRedirectLoopback: bool}  $client
+     * @param  array{id: string, name: string, redirectHost: string, nameIsSelfAsserted: bool, isRedirectLoopback: bool, operatorName?: string}  $client
      * @param  array<string, string>  $resourceScopes  RFC 8707 audiences and their wire scopes to show before approval
      */
     public function __construct(

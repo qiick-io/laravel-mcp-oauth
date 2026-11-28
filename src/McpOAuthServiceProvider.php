@@ -260,6 +260,7 @@ final class McpOAuthServiceProvider extends ServiceProvider
         $this->configureRateLimiters();
         $this->validateRemainingIntegerConfig();
         InstallationGrantLifetimeService::maximumAgeDays($this->app->make(ConfigRepository::class));
+        self::booleanConfig($this->app->make(ConfigRepository::class)->get('mcp-oauth.companion.enabled', false), 'companion.enabled');
         if (self::booleanConfig($this->app->make(ConfigRepository::class)->get('mcp-oauth.cimd.enabled', false), 'cimd.enabled')) {
             $this->app->bindIf(ClientMetadataDocumentFetcherContract::class, OutboundClientMetadataDocumentFetcher::class);
         }

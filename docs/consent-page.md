@@ -39,11 +39,13 @@ interface ConsentOption {
 interface OAuthAuthorizePageProps {
     client: {
         id: string; // Passport client UUID
-        /** The client's own claim: always show it as such */
+        /** Show the name as a claim whenever nameIsSelfAsserted is true */
         name: string;
         /** The host the grant returns to (or the scheme of a private-use URI) */
         redirectHost: string;
-        nameIsSelfAsserted: true;
+        nameIsSelfAsserted: boolean;
+        /** Present for first-party Companion clients enrolled by the server */
+        operatorName?: string;
         /**
          * The callback this request returns to is loopback http (127.0.0.1,
          * localhost, [::1]): warn that the code goes to a program on this
@@ -86,9 +88,9 @@ interface OAuthAuthorizePageProps {
 
 What the page must show:
 
-- the client name, marked as the client's own claim (for example "Cursor
-  (name chosen by the app)"), and `redirectHost` next to it, prominently: the
-  host is the fact, the name is not;
+- the client name and `redirectHost` prominently alongside it. When
+  `nameIsSelfAsserted` is true, label the name as the client's own claim.
+  For a first-party client, display its `operatorName`;
 - the scopes, roles, resources and organisations, with non-grantable options
   visible but disabled;
 - each requested protocol resource in `resourceScopes`, which is independent

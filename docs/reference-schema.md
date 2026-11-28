@@ -38,7 +38,7 @@ is nullable with **no** database default (registration writes the value).
 | --- | --- | --- | --- | --- |
 | `id` | uuid | no | UUID v7 | PK |
 | `client_id` | uuid | no | — | unique |
-| `registration_source` | string(16) | no | — | index |
+| `registration_source` | string(16) | no | — | index, `dcr`, `cimd` or `companion` |
 | `spec_revision` | string(16) | yes | null | — |
 | `application_type` | string(16) | yes | null | — |
 | `client_uri`, `logo_uri`, `tos_uri`, `policy_uri` | string(2048) | yes | null | — |
@@ -53,7 +53,7 @@ is nullable with **no** database default (registration writes the value).
 | `client_secret_expires_at` | dateTime | yes | null | — |
 | `registration_access_token_hash` | char(64) | yes | null | unique |
 | `registration_access_token_expires_at` | dateTime | yes | null | — |
-| `metadata_document_url` | text | yes | null | — |
+| `metadata_document_url` | text | yes | null | Wire identifier for fetched or pre-registered clients |
 | `metadata_document_url_sha256` | char(64) | yes | null | unique |
 | `metadata_document` | json | yes | null | — |
 | `metadata_document_sha256` | char(64) | yes | null | — |

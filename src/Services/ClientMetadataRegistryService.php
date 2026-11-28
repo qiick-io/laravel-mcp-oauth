@@ -10,12 +10,12 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Str;
-use InvalidArgumentException;
 use Laravel\Passport\Client;
 use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Passport;
 use Qiick\McpOAuth\Contracts\ClientMetadataDocumentFetcherContract;
 use Qiick\McpOAuth\Data\ClientMetadataDocumentData;
+use Qiick\McpOAuth\Data\CompanionClientDefinitionData;
 use Qiick\McpOAuth\Enums\ClientMetadataFetchStatusEnum;
 use Qiick\McpOAuth\Exceptions\ClientMetadataUnavailableException;
 use Qiick\McpOAuth\Internal\BoundedPositiveInt;
@@ -54,11 +54,22 @@ final class ClientMetadataRegistryService
      */
     public function resolve(string $url, bool $canRegister = false): ?Client
     {
+        $companion = $this->server->companionClientFor($url);
+
+        if ($companion !== null) {
+            return $this->resolveCompanionClient($companion, $canRegister);
+        }
+
         if (! $this->server->supportsClientIdMetadataDocuments() || ! $this->isIdentifierAllowed($url)) {
             return null;
         }
 
         $metadata = $this->findMetadata($url);
+
+        if ($metadata?->getAttribute('registration_source') === 'companion') {
+            return null;
+        }
+
         $client = $this->findActiveClient($metadata);
 
         if (($metadata !== null && $client === null) || ($metadata === null && ! $canRegister)) {
@@ -126,35 +137,122 @@ final class ClientMetadataRegistryService
     /** A client can revoke its own tokens even during a metadata outage. */
     public function findForRevocation(string $url): ?Client
     {
+        if ($this->server->companionClientFor($url) !== null) {
+            $metadata = $this->findMetadata($url);
+
+            return $metadata?->getAttribute('registration_source') === 'companion' ? $this->findActiveClient($metadata) : null;
+        }
+
         if (! $this->server->supportsClientIdMetadataDocuments() || ! $this->isIdentifierAllowed($url)) {
             return null;
         }
 
-        return $this->findActiveClient($this->findMetadata($url));
+        $metadata = $this->findMetadata($url);
+
+        return $metadata?->getAttribute('registration_source') === 'companion' ? null : $this->findActiveClient($metadata);
+    }
+
+    private function resolveCompanionClient(CompanionClientDefinitionData $definition, bool $canRegister): ?Client
+    {
+        if (! $this->server->isCompanionClientEnabled() || ! $this->isIdentifierAllowed($definition->identifier)
+            || ! $this->hasAllowedRedirects($definition->redirectUris)) {
+            return null;
+        }
+
+        $metadata = $this->findMetadata($definition->identifier);
+        $client = $this->findActiveClient($metadata);
+
+        if ($this->matchesCompanionDefinition($metadata, $client, $definition)) {
+            return $client;
+        }
+
+        if (! $canRegister) {
+            return null;
+        }
+
+        try {
+            /** @var Client|null $resolved Laravel 12 types transaction() as mixed */
+            $resolved = Passport::client()->getConnection()->transaction(
+                fn (): ?Client => $this->persistCompanionClient($definition),
+                attempts: 3,
+            );
+
+            return $resolved;
+        } catch (UniqueConstraintViolationException $collision) {
+            $winner = $this->findMetadata($definition->identifier);
+            $client = $this->findActiveClient($winner);
+
+            if (! $this->matchesCompanionDefinition($winner, $client, $definition)) {
+                throw $collision;
+            }
+
+            return $client;
+        }
+    }
+
+    private function matchesCompanionDefinition(?OAuthClientMetadata $metadata, ?Client $client, CompanionClientDefinitionData $definition): bool
+    {
+        return $metadata?->getAttribute('registration_source') === 'companion'
+            && $metadata->getAttribute('has_per_install_grants') === true
+            && $client !== null
+            && $client->getAttribute('name') === $definition->name
+            && $client->getAttribute('redirect_uris') === $definition->redirectUris
+            && $client->getAttribute('grant_types') === McpOAuthServer::supportedGrantTypes()
+            && $client->getAttribute('secret') === null;
+    }
+
+    /** Materializes the shipped definition on Passport's connection without an outbound request. */
+    private function persistCompanionClient(CompanionClientDefinitionData $definition): ?Client
+    {
+        $metadata = $this->findMetadata($definition->identifier, shouldLock: true);
+        $client = $this->findActiveClient($metadata);
+
+        if (($metadata !== null && $client === null) || $this->matchesCompanionDefinition($metadata, $client, $definition)) {
+            return $client;
+        }
+
+        if ($client === null) {
+            $client = $this->clients->createAuthorizationCodeGrantClient($definition->name, $definition->redirectUris, confidential: false);
+        } else {
+            $this->revokeIssuedCredentials($client);
+            $client->forceFill([
+                'name' => $definition->name,
+                'redirect_uris' => $definition->redirectUris,
+                'grant_types' => McpOAuthServer::supportedGrantTypes(),
+                'secret' => null,
+            ])->save();
+        }
+
+        $metadata ??= new OAuthClientMetadata([
+            'client_id' => $client->getKey(),
+            'client_id_issued_at' => now(),
+            'metadata_document_url' => $definition->identifier,
+            'metadata_document_url_sha256' => hash('sha256', $definition->identifier),
+        ]);
+        $metadata->fill([
+            'registration_source' => 'companion',
+            'spec_revision' => $this->server->specRevision(),
+            'application_type' => 'native',
+            'token_endpoint_auth_method' => 'none',
+            'has_per_install_grants' => true,
+            'metadata_document' => null,
+            'metadata_document_sha256' => null,
+            'metadata_document_etag' => null,
+            'metadata_document_fetched_at' => null,
+            'metadata_document_expires_at' => null,
+            'metadata_document_status' => null,
+            'metadata_document_error' => null,
+        ])->save();
+
+        return $client;
     }
 
     private function isIdentifierAllowed(string $url): bool
     {
-        if (strlen($url) > 2048 || trim($url) !== $url || str_contains($url, '?') || $url === $this->server->resourceIdentifier()) {
-            return false;
-        }
+        $parsed = $this->redirectUriGuard->parseClientIdentifierUrl($url);
 
-        try {
-            $parsed = $this->redirectUriGuard->parseCanonical($url);
-        } catch (InvalidArgumentException) {
-            return false;
-        }
-
-        foreach (explode('/', $parsed->path) as $segment) {
-            if (in_array(rawurldecode($segment), ['.', '..'], true)) {
-                return false;
-            }
-        }
-
-        return $parsed->scheme === 'https'
-            && $parsed->path !== ''
-            && $parsed->path !== '/'
-            && $parsed->normalizedHost !== null
+        return $url !== $this->server->resourceIdentifier()
+            && $parsed?->normalizedHost !== null
             && ! $this->redirectUriGuard->isHostBlocked($parsed->normalizedHost);
     }
 
@@ -246,6 +344,10 @@ final class ClientMetadataRegistryService
     {
         $metadata = $this->findMetadata($url, shouldLock: true);
         $client = $this->findActiveClient($metadata);
+
+        if ($metadata?->getAttribute('registration_source') === 'companion') {
+            return null;
+        }
 
         // Never overwrite a registration or cache entry updated during the HTTP request.
         if ($metadata?->getRawOriginal() !== $beforeFetch?->getRawOriginal()) {
